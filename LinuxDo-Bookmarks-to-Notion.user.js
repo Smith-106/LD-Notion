@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.14.33
+// @version      3.14.34
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -81,7 +81,7 @@
       "use strict";
       var CONFIG2 = {
         // Keep in sync with package.json + userscript @version + build.js header.
-        SCRIPT_VERSION: "3.14.33",
+        SCRIPT_VERSION: "3.14.34",
         // 编译期 feature flag: 多端同步。默认关闭——off 时 main.js 不初始化同步引擎、
         // 零网络/零定时器/零 DOM,行为与关闭前字节级一致(F-SYNC-11)。
         MULTI_DEVICE_SYNC_ENABLED: false,
@@ -131,6 +131,8 @@
           CHAT_HISTORY: "ldb_chat_history",
           // AI Agent 调用链路追踪（ISS-012 MAINT-002，observability）
           AI_TRACE_LOG: "ldb_ai_trace_log",
+          // 业务批量操作结构化 trace（ISS-20260728-018，observability 泛化）
+          BATCH_TRACE_LOG: "ldb_batch_trace_log",
           // 导出目标配置
           EXPORT_TARGET_TYPE: "ldb_export_target_type",
           PARENT_PAGE_ID: "ldb_parent_page_id",
@@ -7101,6 +7103,128 @@ Content-Type: ${safeContentType}\r
     }
   });
 
+  // src/security/BatchTrace.js
+  var require_BatchTrace = __commonJS({
+    "src/security/BatchTrace.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2 } = require_config();
+      var { CredentialVault: CredentialVault2 } = require_auth();
+      var BatchTrace = {
+        MAX_TRACES: 30,
+        MAX_ITEMS: 200,
+        // items 摘要上限,防大批量存储膨胀(超出仅计数不逐条)
+        MAX_REASON: 200,
+        MAX_ERROR: 300,
+        _key() {
+          return CONFIG2.STORAGE_KEYS.BATCH_TRACE_LOG;
+        },
+        _load() {
+          const raw = GM_getValue(this._key(), "[]");
+          try {
+            const arr = JSON.parse(raw);
+            return Array.isArray(arr) ? arr : [];
+          } catch {
+            return [];
+          }
+        },
+        _save(traces) {
+          GM_setValue(this._key(), JSON.stringify(traces));
+        },
+        /**
+         * 创建一条新批量 trace（批量运行入口调用）。
+         * @param {object} opts — { operation, source, actor, itemTotal }
+         * @returns {object} trace 对象(尚未持久化,调 persist 落盘)
+         */
+        create({ operation, source = "unknown", actor = "system", itemTotal = 0 } = {}) {
+          const ts = (/* @__PURE__ */ new Date()).toISOString();
+          return {
+            id: `batch-${ts}-${Array.from(crypto.getRandomValues(new Uint8Array(4))).map((b) => b.toString(16).padStart(2, "0")).join("")}`,
+            timestamp: ts,
+            operation: String(operation || "unknown"),
+            source,
+            actor,
+            counts: {},
+            items: [],
+            itemTotal,
+            latencyMs: 0,
+            errors: [],
+            status: "in_progress",
+            _startedAt: Date.now()
+          };
+        },
+        /**
+         * 记录一个批内项的结果(摘要,不存大对象)。
+         * @param {object} trace
+         * @param {object} item — { key(书签ID/URL/页ID), action(create/update/archive/export), status(success/failed/denied/skipped/unchanged), reason? }
+         */
+        record(trace, item = {}) {
+          if (!trace) return;
+          const bucket = item.status || "unknown";
+          trace.counts[bucket] = (trace.counts[bucket] || 0) + 1;
+          if (trace.items.length >= this.MAX_ITEMS) return;
+          const entry = {
+            key: String(item.key ?? "").slice(0, 200),
+            action: String(item.action ?? ""),
+            status: bucket
+          };
+          if (item.reason != null) entry.reason = String(item.reason).slice(0, this.MAX_REASON);
+          trace.items.push(entry);
+        },
+        /**
+         * 记录批级错误(整批中止/异常,非单项)。
+         */
+        recordError(trace, error) {
+          if (!trace) return;
+          const msg = (error == null ? void 0 : error.message) ? String(error.message).slice(0, this.MAX_ERROR) : String(error).slice(0, this.MAX_ERROR);
+          trace.errors.push(msg);
+        },
+        /**
+         * 持久化 trace（批量运行出口调用），rotate 超限丢弃最旧。
+         * @param {object} trace — create() 返回的 trace
+         * @param {string} status — "completed" | "failed" | "aborted" | "partial"
+         * @param {object} [extraCounts] — 可选合并额外计数(如调用方自维的 created/updated 细分)
+         * @returns {object} 持久化后的 trace(去 _startedAt,补 latencyMs)
+         */
+        persist(trace, status, extraCounts = null) {
+          if (!trace) return null;
+          if (extraCounts && typeof extraCounts === "object") {
+            for (const [k, v] of Object.entries(extraCounts)) {
+              trace.counts[k] = (trace.counts[k] || 0) + (Number(v) || 0);
+            }
+          }
+          if (Array.isArray(trace.items)) {
+            for (const it of trace.items) {
+              if (it && typeof it.reason === "string") it.reason = CredentialVault2.redactText(it.reason);
+              if (it && typeof it.key === "string") it.key = CredentialVault2.redactText(it.key);
+            }
+          }
+          if (Array.isArray(trace.errors)) {
+            trace.errors = trace.errors.map((e) => CredentialVault2.redactText(e));
+          }
+          trace.status = status || "completed";
+          trace.latencyMs = trace._startedAt ? Date.now() - trace._startedAt : 0;
+          delete trace._startedAt;
+          const traces = this._load();
+          traces.push(trace);
+          while (traces.length > this.MAX_TRACES) {
+            traces.shift();
+          }
+          this._save(traces);
+          return trace;
+        },
+        /** 读取全部批量 trace（诊断/测试用）。 */
+        list() {
+          return this._load();
+        },
+        /** 清空所有批量 trace（测试/重置用）。 */
+        clear() {
+          this._save([]);
+        }
+      };
+      module.exports = { BatchTrace };
+    }
+  });
+
   // src/security/index.js
   var require_security = __commonJS({
     "src/security/index.js"(exports, module) {
@@ -7987,7 +8111,8 @@ Content-Type: ${safeContentType}\r
           return Math.max(0, CONFIG2.API.UNDO_TIMEOUT - elapsed);
         }
       };
-      module.exports = { OperationGuard: OperationGuard2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2, UndoManager: UndoManager2 };
+      var { BatchTrace } = require_BatchTrace();
+      module.exports = { OperationGuard: OperationGuard2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2, UndoManager: UndoManager2, BatchTrace };
     }
   });
 
@@ -8879,9 +9004,35 @@ Content-Type: ${safeContentType}\r
             finalResponse: "",
             latencyMs: 0,
             errors: [],
+            // ISS-20260728-020 (OBS-001): token 用量累计 —— _chatRequest onload 提取 result.usage,
+            // runAgentLoop 经 onUsage 回调逐次累计到此。capped 字段标记 provider 未返回 usage 的次数。
+            usage: { prompt: 0, completion: 0, total: 0, calls: 0, missing: 0 },
             status: "in_progress",
             _startedAt: Date.now()
           };
+        },
+        /**
+         * ISS-20260728-020 (OBS-001): 累计一次 AI 调用的 token 用量。
+         * 归一化三 provider 的 usage 字段差异:
+         *   OpenAI: { prompt_tokens, completion_tokens, total_tokens }
+         *   Claude: { input_tokens, output_tokens }
+         *   Gemini: { promptTokenCount, candidatesTokenCount, totalTokenCount }
+         * @param {object} trace — create() 返回的 trace
+         * @param {object} usage — provider 原始 usage 对象(可为 undefined)
+         */
+        recordUsage(trace, usage) {
+          if (!trace || !trace.usage) return;
+          trace.usage.calls += 1;
+          if (!usage || typeof usage !== "object") {
+            trace.usage.missing += 1;
+            return;
+          }
+          const prompt2 = usage.prompt_tokens ?? usage.input_tokens ?? usage.promptTokenCount ?? 0;
+          const completion = usage.completion_tokens ?? usage.output_tokens ?? usage.candidatesTokenCount ?? 0;
+          const total = usage.total_tokens ?? usage.totalTokenCount ?? prompt2 + completion;
+          trace.usage.prompt += Number(prompt2) || 0;
+          trace.usage.completion += Number(completion) || 0;
+          trace.usage.total += Number(total) || 0;
         },
         /**
          * 记录一次工具调用（_executeAgentToolCall 前后调用）。
@@ -13324,6 +13475,13 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           }
           const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
           let success = 0, failed = 0, skipped = 0;
+          const { BatchTrace } = require_security();
+          const batchTrace = BatchTrace.create({
+            operation: "exportBookmarks",
+            source: "bookmark-export",
+            actor: "user",
+            itemTotal: newBookmarks.length
+          });
           const CONCURRENCY = 3;
           let authAborted = false;
           const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
@@ -13331,6 +13489,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           const processOne = async (bm, itemIndex) => {
             if (authAborted) {
               skipped++;
+              BatchTrace.record(batchTrace, { key: bm.url, action: "export", status: "skipped", reason: "\u8BA4\u8BC1\u4E2D\u6B62" });
               return;
             }
             const pct = Math.round(5 + (itemIndex + 1) / newBookmarks.length * 90);
@@ -13348,6 +13507,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                   "denied",
                   { bookmarkUrl: bm.url, itemName: bm.title, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u5BFC\u51FA\u5EFA\u9875\u9700 level\u22651" }
                 );
+                BatchTrace.record(batchTrace, { key: bm.url, action: "create", status: "denied", reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u5BFC\u51FA\u5EFA\u9875\u9700 level\u22651" });
                 failed++;
                 return;
               }
@@ -13361,6 +13521,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 "success",
                 { pageId: String((page == null ? void 0 : page.id) || ""), bookmarkUrl: bm.url, itemName: bm.title, databaseId }
               );
+              BatchTrace.record(batchTrace, { key: bm.url, action: "create", status: "success" });
               success++;
             } catch (e) {
               console.warn(`[BookmarkExporter] \u5BFC\u51FA\u5931\u8D25: ${bm.url}`, e);
@@ -13369,22 +13530,32 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 "failed",
                 { bookmarkUrl: bm.url, itemName: bm.title, reason: String((e == null ? void 0 : e.message) || e) }
               );
+              BatchTrace.record(batchTrace, { key: bm.url, action: "create", status: "failed", reason: String((e == null ? void 0 : e.message) || e) });
               failed++;
               if (e && e.isAuthTerminal === true) {
                 authAborted = true;
+                BatchTrace.recordError(batchTrace, e);
               }
             }
           };
           try {
             for (let i = 0; i < newBookmarks.length; i += CONCURRENCY) {
               if (authAborted) {
-                skipped += newBookmarks.length - i;
+                const bulkSkipped = newBookmarks.length - i;
+                if (bulkSkipped > 0) {
+                  BatchTrace.record(batchTrace, { key: `bulk:${bulkSkipped}\u9879\u672A\u5C1D\u8BD5`, action: "export", status: "skipped", reason: "\u8BA4\u8BC1\u4E2D\u6B62\u6574\u6279" });
+                }
+                skipped += bulkSkipped;
                 break;
               }
               const batch = newBookmarks.slice(i, i + CONCURRENCY);
               await Promise.allSettled(batch.map((bm, j) => processOne(bm, i + j)));
               if (authAborted) {
-                skipped += newBookmarks.length - i - batch.length;
+                const bulkSkipped = newBookmarks.length - i - batch.length;
+                if (bulkSkipped > 0) {
+                  BatchTrace.record(batchTrace, { key: `bulk:${bulkSkipped}\u9879\u672A\u5C1D\u8BD5`, action: "export", status: "skipped", reason: "\u8BA4\u8BC1\u4E2D\u6B62\u6574\u6279" });
+                }
+                skipped += bulkSkipped;
                 break;
               }
               if (delay > 0 && i + CONCURRENCY < newBookmarks.length) {
@@ -13393,6 +13564,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             }
           } finally {
             BookmarkExporter2.flushExported(pendingExported);
+            BatchTrace.persist(batchTrace, authAborted ? "aborted" : failed > 0 ? "partial" : "completed");
           }
           if (authAborted) {
             return {
@@ -14582,6 +14754,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           }
         }, 3e4);
         const attemptAt = Date.now();
+        const { BatchTrace } = require_security();
+        let batchTrace = null;
         try {
           SyncState2.updateBookmarkState({
             lastAttemptAt: attemptAt,
@@ -14609,6 +14783,12 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           const nextSnapshot = {};
           const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
           const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
+          batchTrace = BatchTrace.create({
+            operation: "bookmark-auto-sync",
+            source: "bookmark-auto-sync",
+            actor: "system",
+            itemTotal: currentBookmarks.length
+          });
           let created = 0;
           let updated = 0;
           let archived = 0;
@@ -14869,6 +15049,14 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
                 denied: deniedCount
               }
             });
+            BatchTrace.persist(batchTrace, failed > 0 ? "partial" : "completed", {
+              created,
+              updated,
+              archived,
+              unchanged,
+              failed,
+              denied: deniedCount
+            });
             if (created === 0 && updated === 0 && archived === 0 && failed === 0 && deniedCount === 0) {
               BookmarkAutoImporter2.updateStatus(`\u2705 \u6D4F\u89C8\u5668\u4E66\u7B7E\u5DF2\u540C\u6B65\uFF0C\u65E0\u65B0\u589E\u53D8\u66F4 (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`);
               return { importedCount: 0, failedCount: 0, errors: [] };
@@ -14890,6 +15078,10 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           }
         } catch (error) {
           console.error("[LD-Notion] \u6D4F\u89C8\u5668\u4E66\u7B7E\u81EA\u52A8\u540C\u6B65\u51FA\u9519:", error);
+          if (batchTrace) {
+            BatchTrace.recordError(batchTrace, error);
+            BatchTrace.persist(batchTrace, "failed");
+          }
           SyncState2.updateBookmarkState({
             lastAttemptAt: attemptAt,
             lastOutcome: "error",
@@ -20062,7 +20254,10 @@ ${report}
         // onload/onerror/timeout 模板。三 provider 仅声明差异部分（url/headers/body/extractResponse/errorPrefix）。
         // timeout 默认 90000（长对话）；分类请求（requestOpenAI/Claude/Gemini）传 30000（DISCOVER P6 同类去重）。
         // 90000ms 超时是长对话请求统一值（MAINT-007 已常量化建议，此处暂留内联）。
-        _chatRequest: (url, headers, body, extractResponse, errorPrefix, timeout = 9e4) => {
+        // ISS-20260728-020 (OBS-001): onUsage 可选回调 —— 提取 result.usage token 用量,
+        // 此前 extractResponse 只取 content 丢弃 usage(observability 缺口)。调用方(runAgentLoop)
+        // 传入记录函数将 per-invocation token 累计落 AgentTrace.usage。
+        _chatRequest: (url, headers, body, extractResponse, errorPrefix, timeout = 9e4, onUsage = null) => {
           return AIService2._retryable(() => new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
               method: "POST",
@@ -20074,6 +20269,12 @@ ${report}
                 try {
                   const result = JSON.parse(response.responseText);
                   if (response.status >= 200 && response.status < 300) {
+                    if (typeof onUsage === "function") {
+                      try {
+                        onUsage(result == null ? void 0 : result.usage);
+                      } catch {
+                      }
+                    }
                     resolve(extractResponse(result));
                   } else {
                     reject(new Error(((_a = result.error) == null ? void 0 : _a.message) || `${errorPrefix}\u9519\u8BEF: ${response.status} ${Utils2.truncateText(response.responseText || "", 300)}`));
@@ -20136,7 +20337,8 @@ ${report}
         // Agent 多轮对话请求 —— v3.14.6 (S-02): 系统指令与不可信用户内容角色分离,
         // OpenAI messages[role=system] / Anthropic 顶层 system / Gemini systemInstruction;
         // 不支持通道保留原压平 + 防伪前缀
-        requestAgentChat: async (systemPrompt, messages, settings, maxTokens = 1500) => {
+        // ISS-20260728-020: onUsage 可选 —— runAgentLoop 传入,逐次 AI 调用提取 result.usage 落 trace
+        requestAgentChat: async (systemPrompt, messages, settings, maxTokens = 1500, onUsage = null) => {
           const { aiService, aiApiKey, aiModel, aiBaseUrl } = settings;
           const provider = AIService2.PROVIDERS[aiService];
           if (!provider) throw new Error(`\u672A\u77E5\u7684 AI \u670D\u52A1: ${aiService}`);
@@ -20157,7 +20359,9 @@ ${report}
                 var _a, _b, _c, _d;
                 return ((_d = (_c = (_b = (_a = result.choices) == null ? void 0 : _a[0]) == null ? void 0 : _b.message) == null ? void 0 : _c.content) == null ? void 0 : _d.trim()) || "";
               },
-              "OpenAI"
+              "OpenAI",
+              9e4,
+              onUsage
             );
           }
           if (aiService === "claude") {
@@ -20171,7 +20375,9 @@ ${report}
                 var _a, _b, _c;
                 return ((_c = (_b = (_a = result.content) == null ? void 0 : _a[0]) == null ? void 0 : _b.text) == null ? void 0 : _c.trim()) || "";
               },
-              "Claude"
+              "Claude",
+              9e4,
+              onUsage
             );
           }
           if (aiService === "gemini") {
@@ -20186,7 +20392,9 @@ ${report}
                 var _a, _b, _c, _d, _e, _f;
                 return ((_f = (_e = (_d = (_c = (_b = (_a = result.candidates) == null ? void 0 : _a[0]) == null ? void 0 : _b.content) == null ? void 0 : _c.parts) == null ? void 0 : _d[0]) == null ? void 0 : _e.text) == null ? void 0 : _f.trim()) || "";
               },
-              "Gemini"
+              "Gemini",
+              9e4,
+              onUsage
             );
           }
           let prompt2 = `[\u7CFB\u7EDF\u6307\u4EE4]
@@ -33330,7 +33538,8 @@ ${AI().isolateContent(content)}
                 systemPrompt,
                 messages,
                 settings,
-                1500
+                1500,
+                (usage) => AgentTrace.recordUsage(trace, usage)
               );
             } catch (error) {
               AgentTrace.recordError(trace, error);

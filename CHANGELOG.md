@@ -1,3 +1,14 @@
+## [3.14.34] - 2026-09-19
+
+### feat (observability 泛化 —— AI 与业务路径观测补齐)
+
+- **AI token 用量埋点**(ISS-20260728-020/OBS-001)：`_chatRequest`/`requestAgentChat` 新增可选 `onUsage` 回调，2xx 时提取 `result.usage`（此前 `extractResponse` 只取 content 丢弃 usage）；`AgentTrace.create` 初始化 `usage{prompt,completion,total,calls,missing}`，`recordUsage` 归一化 OpenAI/Claude/Gemini 三 provider 字段差异，`runAgentLoop` 逐次累计落 `trace.usage`
+- **业务批量操作结构化 trace**(ISS-20260728-018/OBS-002)：新增 `src/security/BatchTrace.js`（泛化 AgentTrace 模式到非 AI 路径，GM JSON FIFO rotate MAX_TRACES=30，聚合计数+per-item 摘要+耗时+脱敏）；接入 `BookmarkExporter.exportBookmarks`(actor=user)与 `BookmarkAutoImporter.run`(actor=system，成功/异常双路径 persist)，与逐项 OperationLog 互补
+
+### test
+
+- 测试负集第二批 `tests/negative-set-ai-submodules-r2.test.js`(35 用例)+ `tests/batch-trace.test.js`(18)+ `tests/ai-trace.test.js` recordUsage(+8)：ai/utils 纯函数、ui/style-manager、ai/tools 输入校验与委托契约（发现 AGENT_TOOLS 归一化 assistant_result）、ui/events* 拆分后委托、ai/handlers 确定性早退。测试基线 1773 → 1834
+
 ## [3.14.33] - 2026-09-18
 
 ### refactor (M3 大文件拆分 milestone 波次4-10 —— 4/4 全部达标)
