@@ -1,3 +1,10 @@
+## [3.14.35] - 2026-09-19
+
+### test + chore
+
+- 深度行为测试补齐 `tests/handlers-deep.test.js`(30)+ `tests/tools-deep.test.js`(11)+ `tests/events-deep.test.js`(6)——ISS-20260914-003 测试负集全部落地，测试基线 1834 → 1881
+- maestro 清理：kg sync(869 nodes/2504 edges)、本地 session 产物/缓存/scratch 清理、docs VitePress 产物清理；远程 tracked 无冗余(.gitignore 完备覆盖 dist/扩展/缓存)
+
 ## [3.14.34] - 2026-09-19
 
 ### feat (observability 泛化 —— AI 与业务路径观测补齐)
@@ -7,7 +14,8 @@
 
 ### test
 
-- 测试负集第二批 `tests/negative-set-ai-submodules-r2.test.js`(35 用例)+ `tests/batch-trace.test.js`(18)+ `tests/ai-trace.test.js` recordUsage(+8)：ai/utils 纯函数、ui/style-manager、ai/tools 输入校验与委托契约（发现 AGENT_TOOLS 归一化 assistant_result）、ui/events* 拆分后委托、ai/handlers 确定性早退。测试基线 1773 → 1834
+- 测试负集第二批 `tests/negative-set-ai-submodules-r2.test.js`(35 用例)+ `tests/batch-trace.test.js`(18)+ `tests/ai-trace.test.js` recordUsage(+8)：ai/utils 纯函数、ui/style-manager、ai/tools 输入校验与委托契约（发现 AGENT_TOOLS 归一化 assistant_result）、ui/events* 拆分后委托、ai/handlers 确定性早退
+- 深度行为测试 `tests/handlers-deep.test.js`(30)+ `tests/tools-deep.test.js`(11)+ `tests/events-deep.test.js`(6)：query/batch/pageCrud handlers 正向/边界/异常、write-tools 写入编排与 Markdown 失败回退、ui/events* DOM 级绑定(Proxy refs 兜底)。stub 机制: NotionAPI vi.spyOn+deps getter 单例 spyOn+OperationGuard.setLevel 写 GM mock——ISS-20260914-003 测试负集全部落地。测试基线 1773 → 1881
 
 ## [3.14.33] - 2026-09-18
 
