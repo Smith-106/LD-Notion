@@ -5,7 +5,7 @@
 // ===========================================
 const CONFIG = {
     // Keep in sync with package.json + userscript @version + build.js header.
-    SCRIPT_VERSION: "3.14.35",
+    SCRIPT_VERSION: "3.15.0",
 
     // 编译期 feature flag: 多端同步。默认关闭——off 时 main.js 不初始化同步引擎、
     // 零网络/零定时器/零 DOM,行为与关闭前字节级一致(F-SYNC-11)。
@@ -98,10 +98,6 @@ const CONFIG = {
         GITHUB_AUTO_IMPORT_INTERVAL: "ldb_github_auto_import_interval",
         BOOKMARK_AUTO_IMPORT_ENABLED: "ldb_bookmark_auto_import_enabled",
         BOOKMARK_AUTO_IMPORT_INTERVAL: "ldb_bookmark_auto_import_interval",
-        RSS_FEED_URLS: "ldb_rss_feed_urls",
-        RSS_AUTO_IMPORT_ENABLED: "ldb_rss_auto_import_enabled",
-        RSS_AUTO_IMPORT_INTERVAL: "ldb_rss_auto_import_interval",
-        RSS_IMPORT_DEDUP_MODE: "ldb_rss_import_dedup_mode",
         BOOKMARK_SOURCE: "ldb_bookmark_source",
         LINUXDO_IMPORT_DEDUP_MODE: "ldb_linuxdo_import_dedup_mode",
         BOOKMARK_IMPORT_DEDUP_MODE: "ldb_bookmark_import_dedup_mode",
@@ -127,7 +123,6 @@ const CONFIG = {
         SYNC_INTERVAL_LINUXDO: "ldb_sync_interval_linuxdo",
         SYNC_INTERVAL_GITHUB: "ldb_sync_interval_github",
         SYNC_INTERVAL_BOOKMARKS: "ldb_sync_interval_bookmarks",
-        SYNC_INTERVAL_RSS: "ldb_sync_interval_rss",
         // Obsidian 导出
         OBS_API_URL: "ldb_obs_api_url",
         OBS_API_KEY: "ldb_obs_api_key",
@@ -186,10 +181,6 @@ const CONFIG = {
         githubAutoImportInterval: 5,
         bookmarkAutoImportEnabled: false,
         bookmarkAutoImportInterval: 5,
-        rssFeedUrls: "",
-        rssAutoImportEnabled: false,
-        rssAutoImportInterval: 5,
-        rssImportDedupMode: "strict",
         bookmarkSource: "linuxdo",
         linuxdoImportDedupMode: "strict",
         bookmarkImportDedupMode: "strict",
@@ -221,7 +212,6 @@ const CONFIG = {
         syncIntervalLinuxdo: 30,
         syncIntervalGithub: 60,
         syncIntervalBookmarks: 120,
-        syncIntervalRss: 60,
         // Obsidian 导出默认值
         obsApiUrl: "https://127.0.0.1:27124",
         obsApiKey: "",

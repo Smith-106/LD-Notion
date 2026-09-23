@@ -1,0 +1,6 @@
+{
+ "OPT_CREDENTIALS": "include",
+ "HAS_resolveTopicId": true,
+ "MSG401": "actionable",
+ "NORETRY404": "true"
+}

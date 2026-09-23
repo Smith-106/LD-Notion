@@ -4357,9 +4357,6 @@ function createWorkspaceVisualizationFixture(harness) {
         harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL] = 10;
         harness.store[harness.CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED] = true;
         harness.store[harness.CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_INTERVAL] = 30;
-        harness.store[harness.CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED] = true;
-        harness.store[harness.CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_INTERVAL] = 15;
-        harness.store[harness.CONFIG.STORAGE_KEYS.RSS_FEED_URLS] = 'https://example.com/feed.xml';
         harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_IMPORT_TYPES] = JSON.stringify(['stars', 'gists']);
 
         harness.SyncState.updateLinuxDoState({
@@ -4396,13 +4393,6 @@ function createWorkspaceVisualizationFixture(harness) {
             lastStats: { created: 1, updated: 1, archived: 0, unchanged: 0, failed: 1 },
             snapshot: { 'bm-1': { pageId: 'page-1' } }
         });
-        harness.SyncState.updateRssState({
-            lastSuccessAt: 250,
-            lastAttemptAt: 240,
-            lastOutcome: 'success',
-            lastStats: { feeds: 1, scanned: 3, created: 1, updated: 1, unchanged: 1, failed: 0 },
-            snapshot: { 'item-1': { pageId: 'page-rss-1' } }
-        });
 
         harness.UI.workspaceVisualSnapshot = {
             databases,
@@ -4425,9 +4415,9 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.strictEqual(collabPackage.workspace.duplicateCandidates[0].label, 'Repo A');
         assert.ok(collabPackage.insight.summary.includes('Repo A'), collabPackage.insight.summary);
         assert.ok(collabPackage.insight.markdown.includes('# 工作区洞察报告'), collabPackage.insight.markdown);
-        assert.strictEqual(collabPackage.syncCenter.enabledCount, 4);
+        assert.strictEqual(collabPackage.syncCenter.enabledCount, 3);
         assert.strictEqual(collabPackage.syncCenter.issueCount, 2);
-        assert.ok(collabPackage.syncCenter.sourceRows.some((row) => row.key === 'rss'));
+        assert.ok(!collabPackage.syncCenter.sourceRows.some((row) => row.key === 'rss'));
     });
 
     await runTest('UI.downloadWorkspaceCollaborationPackage: downloads structured collaboration package', async () => {
@@ -6243,188 +6233,11 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.strictEqual(gistsState.lastStats.failed, 0);
     });
 
-    await runTest('RSSAutoImporter.parseFeedXml: parses rss feed items', async () => {
-        const harness = createHarness();
-        const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0">
-  <channel>
-    <title>Example Feed</title>
-    <item>
-      <title>New Article</title>
-      <link>https://example.com/new</link>
-      <guid>item-1</guid>
-      <pubDate>Wed, 05 Jun 2026 10:00:00 GMT</pubDate>
-      <description><![CDATA[<p>Hello <strong>world</strong></p>]]></description>
-      <category>AI</category>
-    </item>
-    <item>
-      <title>Older Article</title>
-      <link>https://example.com/old</link>
-      <guid>item-2</guid>
-      <pubDate>Tue, 04 Jun 2026 10:00:00 GMT</pubDate>
-      <description>Tips &amp; tricks</description>
-    </item>
-  </channel>
-</rss>`;
 
-        const parsed = harness.RSSAutoImporter.parseFeedXml(xml, 'https://example.com/feed.xml');
 
-        assert.strictEqual(parsed.feedTitle, 'Example Feed');
-        assert.strictEqual(parsed.items.length, 2);
-        assert.strictEqual(parsed.items[0].title, 'New Article');
-        assert.strictEqual(parsed.items[0].url, 'https://example.com/new');
-        assert.strictEqual(parsed.items[0].feedUrl, 'https://example.com/feed.xml');
-        assert.strictEqual(parsed.items[0].summary, 'Hello world');
-        assert.deepStrictEqual(parsed.items[0].tags, ['AI']);
-        assert.strictEqual(parsed.items[1].title, 'Older Article');
-        assert.strictEqual(parsed.items[1].summary, 'Tips & tricks');
-    });
 
-    await runTest('RSSAutoImporter.run: writes rss sync state on partial success', async () => {
-        const harness = createHarness();
-        const createdPayloads = [];
-        const updatedPayloads = [];
 
-        harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID] = 'db-rss';
-        harness.store[harness.CONFIG.STORAGE_KEYS.RSS_FEED_URLS] = 'https://example.com/feed.xml';
-        harness.store[harness.CONFIG.STORAGE_KEYS.REQUEST_DELAY] = 0;
-        harness.NotionOAuth.getAccessToken = () => 'manual_api_key';
-        harness.RSSAutoImporter.minimumRunGapMs = 0;
-        harness.RSSAutoImporter.lastRunAt = 0;
-        harness.RSSAutoImporter.isRunning = false;
-        harness.Exporter.isExporting = false;
-        harness.UI.renderSyncCenterSummary = () => {};
-
-        harness.SyncState.updateRssState({
-            snapshot: {
-                'item-2': {
-                    itemKey: 'item-2',
-                    id: 'item-2',
-                    title: 'Updated RSS',
-                    url: 'https://example.com/updated',
-                    summary: 'old summary',
-                    feedTitle: 'Example Feed',
-                    feedUrl: 'https://example.com/feed.xml',
-                    publishedAt: '2026-06-03T10:00:00.000Z',
-                    pageId: 'page-2'
-                },
-                'item-3': {
-                    itemKey: 'item-3',
-                    id: 'item-3',
-                    title: 'Broken RSS',
-                    url: 'https://example.com/broken',
-                    summary: 'old broken summary',
-                    feedTitle: 'Example Feed',
-                    feedUrl: 'https://example.com/feed.xml',
-                    publishedAt: '2026-06-02T10:00:00.000Z',
-                    pageId: 'page-3'
-                }
-            }
-        });
-
-        harness.BookmarkExporter.setupDatabaseProperties = async (databaseId, apiKey) => {
-            assert.strictEqual(databaseId, 'db-rss');
-            assert.strictEqual(apiKey, 'manual_api_key');
-            return { success: true };
-        };
-        harness.RSSAutoImporter.loadCurrentItems = async () => ({
-            feedCount: 1,
-            items: [
-                {
-                    itemKey: 'item-1',
-                    id: 'item-1',
-                    title: 'New RSS',
-                    url: 'https://example.com/new',
-                    summary: 'new summary',
-                    tags: ['AI'],
-                    feedTitle: 'Example Feed',
-                    feedUrl: 'https://example.com/feed.xml',
-                    publishedAt: '2026-06-04T10:00:00Z'
-                },
-                {
-                    itemKey: 'item-2',
-                    id: 'item-2',
-                    title: 'Updated RSS',
-                    url: 'https://example.com/updated',
-                    summary: 'fresh summary',
-                    tags: ['Update'],
-                    feedTitle: 'Example Feed',
-                    feedUrl: 'https://example.com/feed.xml',
-                    publishedAt: '2026-06-03T10:00:00Z'
-                },
-                {
-                    itemKey: 'item-3',
-                    id: 'item-3',
-                    title: 'Broken RSS',
-                    url: 'https://example.com/broken',
-                    summary: 'broken summary',
-                    tags: [],
-                    feedTitle: 'Example Feed',
-                    feedUrl: 'https://example.com/feed.xml',
-                    publishedAt: '2026-06-02T10:00:00Z'
-                }
-            ]
-        });
-        harness.RSSAutoImporter.fetchTrackedPages = async () => ([
-            {
-                pageId: 'page-2',
-                url: 'https://example.com/updated',
-                title: 'Updated RSS',
-                summary: 'old summary',
-                publishedAt: '2026-06-03T10:00:00.000Z'
-            },
-            {
-                pageId: 'page-3',
-                url: 'https://example.com/broken',
-                title: 'Broken RSS',
-                summary: 'old broken summary',
-                publishedAt: '2026-06-02T10:00:00.000Z'
-            }
-        ]);
-        harness.NotionAPI.request = async (method, endpoint, payload, apiKey) => {
-            createdPayloads.push({ method, endpoint, payload, apiKey });
-            return { id: 'page-1' };
-        };
-        harness.NotionAPI.updatePage = async (pageId, properties, apiKey) => {
-            updatedPayloads.push({ pageId, properties, apiKey });
-            if (pageId === 'page-3') {
-                throw new Error('rss update failed');
-            }
-            return { ok: true };
-        };
-
-        await harness.RSSAutoImporter.run();
-
-        const rssState = harness.SyncState.getRssState();
-        assert.strictEqual(createdPayloads.length, 1);
-        assert.strictEqual(createdPayloads[0].method, 'POST');
-        assert.strictEqual(createdPayloads[0].endpoint, '/pages');
-        assert.strictEqual(createdPayloads[0].payload.parent.database_id, 'db-rss');
-        assert.strictEqual(createdPayloads[0].payload.properties.分类.rich_text[0].text.content, '其他');
-        assert.deepStrictEqual(
-            createdPayloads[0].payload.properties.标签.multi_select.map((item) => item.name),
-            ['Example Feed', 'AI']
-        );
-        assert.strictEqual(updatedPayloads.length, 2);
-        assert.strictEqual(updatedPayloads[0].pageId, 'page-2');
-        assert.strictEqual(updatedPayloads[0].apiKey, 'manual_api_key');
-        assert.strictEqual(updatedPayloads[0].properties.分类.rich_text[0].text.content, '其他');
-        assert.ok(rssState.lastAttemptAt > 0);
-        assert.ok(rssState.lastSuccessAt > 0);
-        assert.strictEqual(rssState.lastOutcome, 'partial');
-        assert.strictEqual(rssState.lastStats.feeds, 1);
-        assert.strictEqual(rssState.lastStats.scanned, 3);
-        assert.strictEqual(rssState.lastStats.created, 1);
-        assert.strictEqual(rssState.lastStats.updated, 1);
-        assert.strictEqual(rssState.lastStats.failed, 1);
-        assert.deepStrictEqual(Object.keys(rssState.snapshot).sort(), ['item-1', 'item-2', 'item-3']);
-        assert.strictEqual(rssState.snapshot['item-1'].pageId, 'page-1');
-        assert.strictEqual(rssState.snapshot['item-2'].pageId, 'page-2');
-        assert.strictEqual(rssState.snapshot['item-3'].pageId, 'page-3');
-        assert.strictEqual(harness.RSSAutoImporter.isRunning, false);
-    });
-
-    await runTest('UI.buildUnifiedSyncModel: aggregates linuxdo, github, bookmark and rss sync states', async () => {
+    await runTest('UI.buildUnifiedSyncModel: aggregates linuxdo, github and bookmark sync states', async () => {
         const harness = createHarness();
 
         harness.store[harness.CONFIG.STORAGE_KEYS.AUTO_IMPORT_ENABLED] = true;
@@ -6433,9 +6246,6 @@ function createWorkspaceVisualizationFixture(harness) {
         harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL] = 10;
         harness.store[harness.CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED] = true;
         harness.store[harness.CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_INTERVAL] = 30;
-        harness.store[harness.CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED] = true;
-        harness.store[harness.CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_INTERVAL] = 15;
-        harness.store[harness.CONFIG.STORAGE_KEYS.RSS_FEED_URLS] = 'https://example.com/feed.xml';
         harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_IMPORT_TYPES] = JSON.stringify(['stars', 'gists']);
 
         harness.SyncState.updateLinuxDoState({
@@ -6474,33 +6284,23 @@ function createWorkspaceVisualizationFixture(harness) {
             lastStats: { created: 1, updated: 1, archived: 0, unchanged: 0, failed: 1 },
             snapshot: { 'bm-1': { pageId: 'page-1' } }
         });
-        harness.SyncState.updateRssState({
-            watermark: { time: '2026-06-04T12:00:00Z', ids: ['item-1'] },
-            lastSuccessAt: 250,
-            lastAttemptAt: 240,
-            lastOutcome: 'success',
-            lastStats: { feeds: 1, scanned: 3, created: 1, updated: 1, unchanged: 1, failed: 0 },
-            snapshot: { 'item-1': { pageId: 'page-rss-1' } }
-        });
 
         const model = harness.UI.buildUnifiedSyncModel();
         const rowsByKey = Object.fromEntries(model.sourceRows.map((row) => [row.key, row]));
 
-        assert.strictEqual(model.sourceRows.length, 4);
-        assert.strictEqual(model.enabledCount, 4);
+        assert.strictEqual(model.sourceRows.length, 3);
+        assert.strictEqual(model.enabledCount, 3);
         assert.strictEqual(model.runningCount, 0);
         assert.strictEqual(model.issueCount, 2);
         assert.strictEqual(model.latestSuccessSource, rowsByKey.bookmarks.label);
         assert.strictEqual(rowsByKey.linuxdo.outcome, 'success');
         assert.strictEqual(rowsByKey.github.outcome, 'partial');
         assert.strictEqual(rowsByKey.bookmarks.outcome, 'error');
-        assert.strictEqual(rowsByKey.rss.outcome, 'success');
+        assert.ok(!('rss' in rowsByKey));
         assert.ok(rowsByKey.github.watermarkLabel.includes('Stars'), rowsByKey.github.watermarkLabel);
         assert.ok(rowsByKey.github.watermarkLabel.includes('Gists'), rowsByKey.github.watermarkLabel);
         assert.strictEqual(rowsByKey.bookmarks.lastError, 'bridge lost');
         assert.strictEqual(rowsByKey.bookmarks.enabled, true);
-        assert.strictEqual(rowsByKey.rss.enabled, true);
-        assert.ok(rowsByKey.rss.statsLabel.includes('Feed 1'), rowsByKey.rss.statsLabel);
     });
 
     await runTest('UI.renderSyncCenterSummary: renders unified sync cards', async () => {
@@ -6516,9 +6316,6 @@ function createWorkspaceVisualizationFixture(harness) {
         harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL] = 10;
         harness.store[harness.CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED] = true;
         harness.store[harness.CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_INTERVAL] = 30;
-        harness.store[harness.CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED] = true;
-        harness.store[harness.CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_INTERVAL] = 15;
-        harness.store[harness.CONFIG.STORAGE_KEYS.RSS_FEED_URLS] = 'https://example.com/feed.xml';
         harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_IMPORT_TYPES] = JSON.stringify(['stars', 'gists']);
 
         harness.SyncState.updateLinuxDoState({
@@ -6555,19 +6352,12 @@ function createWorkspaceVisualizationFixture(harness) {
             lastStats: { created: 1, updated: 1, archived: 0, unchanged: 0, failed: 1 },
             snapshot: { 'bm-1': { pageId: 'page-1' } }
         });
-        harness.SyncState.updateRssState({
-            lastSuccessAt: 250,
-            lastAttemptAt: 240,
-            lastOutcome: 'success',
-            lastStats: { feeds: 1, scanned: 3, created: 1, updated: 1, unchanged: 1, failed: 0 },
-            snapshot: { 'item-1': { pageId: 'page-rss-1' } }
-        });
 
         harness.UI.renderSyncCenterSummary();
 
         assert.ok(summaryContainer.innerHTML.includes('Linux.do'), summaryContainer.innerHTML);
         assert.ok(summaryContainer.innerHTML.includes('GitHub'), summaryContainer.innerHTML);
-        assert.ok(summaryContainer.innerHTML.includes('RSS'), summaryContainer.innerHTML);
+        assert.ok(!summaryContainer.innerHTML.includes('RSS'), summaryContainer.innerHTML);
         assert.ok(summaryContainer.innerHTML.includes('Stars'), summaryContainer.innerHTML);
         assert.ok(summaryContainer.innerHTML.includes('bridge lost'), summaryContainer.innerHTML);
         assert.ok(!summaryContainer.innerHTML.includes('[object Object]'), summaryContainer.innerHTML);

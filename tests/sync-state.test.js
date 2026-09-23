@@ -446,27 +446,27 @@ describe("SyncStateV2 — _migrateV1toV2", () => {
         expect(v2.sources.bookmarks).toBeUndefined();
     });
 
-    it("maps rss to sources.rss with snapshot preserved", () => {
+    it("v3.15 RSS 移除: 历史 rss 状态不再迁移(存量由 _load 剪枝)", () => {
         const v1 = {
             rss: { watermark: null, lastOutcome: "running", snapshot: { cursor: "abc" } },
         };
         const v2 = SyncStateV2._migrateV1toV2(v1);
-        expect(v2.sources.rss.snapshot).toEqual({ cursor: "abc" });
+        expect(v2.sources.rss).toBeUndefined();
     });
 
     it("fills default values for missing source types", () => {
         const v2 = SyncStateV2._migrateV1toV2({});
         // All keys from _defaults() should exist
-        for (const key of ["linuxdo", "github-stars", "github-repos", "github-forks", "github-gists", "github-meta", "bookmark", "rss", "zhihu", "generic"]) {
+        for (const key of ["linuxdo", "github-stars", "github-repos", "github-forks", "github-gists", "github-meta", "bookmark", "zhihu", "generic"]) {
             expect(v2.sources[key]).toBeDefined();
             expect(v2.sources[key].lastOutcome).toBe("idle");
         }
     });
 
-    it("includes snapshot defaults for bookmark and rss but not others", () => {
+    it("includes snapshot defaults for bookmark only (v3.15 RSS 移除)", () => {
         const v2 = SyncStateV2._migrateV1toV2({});
         expect(v2.sources.bookmark).toHaveProperty("snapshot");
-        expect(v2.sources.rss).toHaveProperty("snapshot");
+        expect(v2.sources.rss).toBeUndefined();
         expect(v2.sources.linuxdo).not.toHaveProperty("snapshot");
         expect(v2.sources["github-stars"]).not.toHaveProperty("snapshot");
     });
@@ -523,9 +523,9 @@ describe("SyncStateV2 — epoch 反冲保护 (F-SYNC-02/H-5)", () => {
     });
 
     it("updateSourceState 后 epoch 保持不变", () => {
-        SyncStateV2.updateSourceState("rss", { epoch: 5, lastOutcome: "success" });
-        SyncStateV2.updateSourceState("rss", { lastSuccessAt: 123 });
-        expect(SyncStateV2.getSourceState("rss").epoch).toBe(5);
+        SyncStateV2.updateSourceState("bookmark", { epoch: 5, lastOutcome: "success" });
+        SyncStateV2.updateSourceState("bookmark", { lastSuccessAt: 123 });
+        expect(SyncStateV2.getSourceState("bookmark").epoch).toBe(5);
     });
 
     it("V1 迁移后 epoch 默认为 0", () => {

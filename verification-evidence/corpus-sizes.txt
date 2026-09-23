@@ -1,0 +1,28 @@
+  25555 D:/BaiduNetdiskDownload/系统和软件生命周期管理相关标准/系统和软件生命周期管理相关标准_md/其他/Scrum Guide 2020.md
+  31566 D:/BaiduNetdiskDownload/系统和软件生命周期管理相关标准/系统和软件生命周期管理相关标准_md/ISO 12207-15288 生命周期过程/ISO IEC IEEE 15288 2023.md
+  35246 D:/BaiduNetdiskDownload/系统和软件生命周期管理相关标准/系统和软件生命周期管理相关标准_md/ISO 25000 SQuaRE质量模型/ISO IEC 25059 2023.md
+  49671 D:/BaiduNetdiskDownload/系统和软件生命周期管理相关标准/系统和软件生命周期管理相关标准_md/ISO 27000 信息安全管理/ISO IEC 27001 2022.md
+  50093 D:/BaiduNetdiskDownload/系统和软件生命周期管理相关标准/系统和软件生命周期管理相关标准_md/ISO 33000 过程评估/ISO IEC 33001 2015.md
+  63165 D:/BaiduNetdiskDownload/系统和软件生命周期管理相关标准/系统和软件生命周期管理相关标准_md/ISO 25000 SQuaRE质量模型/ISO IEC 25010 2023.md
+  63403 D:/BaiduNetdiskDownload/系统和软件生命周期管理相关标准/系统和软件生命周期管理相关标准_md/ISO 25000 SQuaRE质量模型/ISO IEC 25002 2024.md
+  81039 D:/BaiduNetdiskDownload/系统和软件生命周期管理相关标准/系统和软件生命周期管理相关标准_md/ISO 25000 SQuaRE质量模型/ISO IEC 25040 2024.md
+  89445 D:/BaiduNetdiskDownload/系统和软件生命周期管理相关标准/系统和软件生命周期管理相关标准_md/ISO 25000 SQuaRE质量模型/ISO IEC 25019 2023.md
+  91071 D:/BaiduNetdiskDownload/系统和软件生命周期管理相关标准/系统和软件生命周期管理相关标准_md/ISO 12207-15288 生命周期过程/ISO IEC IEEE 24774 2021.md
+ 106624 D:/BaiduNetdiskDownload/系统和软件生命周期管理相关标准/系统和软件生命周期管理相关标准_md/项目管理/ISO IEC IEEE 16326 2019.md
+ 108980 D:/BaiduNetdiskDownload/系统和软件生命周期管理相关标准/系统和软件生命周期管理相关标准_md/ISO 25000 SQuaRE质量模型/ISO IEC 25030 2019.md
+ 110830 D:/BaiduNetdiskDownload/系统和软件生命周期管理相关标准/系统和软件生命周期管理相关标准_md/ISO 24748 生命周期管理指南/ISO IEC IEEE 24748-7 2026.md
+ 123396 D:/BaiduNetdiskDownload/系统和软件生命周期管理相关标准/系统和软件生命周期管理相关标准_md/ISO 24748 生命周期管理指南/ISO IEC IEEE 24748-5 2017.md
+ 154336 D:/BaiduNetdiskDownload/系统和软件生命周期管理相关标准/系统和软件生命周期管理相关标准_md/ISO 24748 生命周期管理指南/ISO IEC IEEE 24748-6 2023.md
+ 172017 D:/BaiduNetdiskDownload/系统和软件生命周期管理相关标准/系统和软件生命周期管理相关标准_md/需求工程与文档/ISO IEC IEEE 26531 2023.md
+ 173791 D:/BaiduNetdiskDownload/系统和软件生命周期管理相关标准/系统和软件生命周期管理相关标准_md/ISO 24748 生命周期管理指南/ISO IEC IEEE 24748-4 2026.md
+ 180143 D:/BaiduNetdiskDownload/系统和软件生命周期管理相关标准/系统和软件生命周期管理相关标准_md/ISO 12207-15288 生命周期过程/ISO IEC IEEE 21840 2019.md
+ 198054 D:/BaiduNetdiskDownload/系统和软件生命周期管理相关标准/系统和软件生命周期管理相关标准_md/架构描述/ISO IEC IEEE 42010 2023.md
+ 220050 D:/BaiduNetdiskDownload/系统和软件生命周期管理相关标准/系统和软件生命周期管理相关标准_md/ISO 12207-15288 生命周期过程/ISO IEC IEEE 15289 2019.md
+ 227919 D:/BaiduNetdiskDownload/系统和软件生命周期管理相关标准/系统和软件生命周期管理相关标准_md/ISO 24748 生命周期管理指南/ISO IEC IEEE 24748-1 2024.md
+ 231204 D:/BaiduNetdiskDownload/系统和软件生命周期管理相关标准/系统和软件生命周期管理相关标准_md/ISO 24748 生命周期管理指南/ISO IEC IEEE 24748-3 2020.md
+ 236755 D:/BaiduNetdiskDownload/系统和软件生命周期管理相关标准/系统和软件生命周期管理相关标准_md/ISO 24748 生命周期管理指南/ISO IEC IEEE 24748-2 2024.md
+ 239977 D:/BaiduNetdiskDownload/系统和软件生命周期管理相关标准/系统和软件生命周期管理相关标准_md/需求工程与文档/ISO IEC IEEE 26511 2018.md
+ 278631 D:/BaiduNetdiskDownload/系统和软件生命周期管理相关标准/系统和软件生命周期管理相关标准_md/需求工程与文档/ISO IEC IEEE 29148 2018.md
+ 434730 D:/BaiduNetdiskDownload/系统和软件生命周期管理相关标准/系统和软件生命周期管理相关标准_md/ISO 24748 生命周期管理指南/ISO IEC IEEE 24748-8 2019.md
+ 504564 D:/BaiduNetdiskDownload/系统和软件生命周期管理相关标准/系统和软件生命周期管理相关标准_md/ISO 12207-15288 生命周期过程/ISO IEC IEEE 12207 2026.md
+4282255 total

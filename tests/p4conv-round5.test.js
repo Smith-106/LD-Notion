@@ -258,11 +258,11 @@ describe("P4 收敛(c05/c03): 输出净化与端点/模型校验", () => {
 });
 
 describe("P4 收敛(c06/c08/c09): 源码级契约锁定", () => {
-    it("RSS needsUpdate 与写入侧同口径", () => {
-        // P4 收敛(c07 续): 写入侧 safeUrl 为空时不发「链接」字段 —— 仅在本次有可写链接时才比对
-        const src = read("src/bridge/RSSAutoImporter.js");
-        expect(src).toContain("const safeUrl = RSSAutoImporter._safeUrl(item.url);");
-        expect(src).toContain('if (safeUrl && String(pageMeta.url || "") !== safeUrl) return true;');
+    it("Bookmark needsUpdate 与写入侧同口径", () => {
+        // v3.15 RSS 移除: 原 RSS _safeUrl 同口径语义由 Bookmark 等价承担
+        const src = read("src/bridge/BookmarkAutoImporter.js");
+        expect(src).toContain('if (pageMeta.url !== String(bookmark.url || "").trim()) return true;');
+        expect(read("src/bridge/BookmarkExporter.js")).toContain("? bookmark.url : null");
     });
 
     it("BookmarkExporter strict 批内去重", () => {

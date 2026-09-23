@@ -1,0 +1,6 @@
+total 22980
+drwxr-xr-x 1 niko 197121      0 Sep 24 00:46 .
+drwxr-xr-x 1 niko 197121      0 Sep 24 02:44 ..
+-rw-r--r-- 1 niko 197121 445069 Sep 24 01:03 notion-versioning.html
+-rw-r--r-- 1 niko 197121  30297 Sep 24 01:05 obsidian-readme.md
+-rw-r--r-- 1 niko 197121    933 Sep 24 01:05 obsidian-rest.html

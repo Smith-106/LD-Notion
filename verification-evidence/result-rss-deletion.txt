@@ -1,0 +1,4 @@
+ls: cannot access 'src/bridge/RSSAutoImporter.js': No such file or directory
+ls: cannot access 'src/adapter/RSSAdapter.js': No such file or directory
+ls: cannot access 'tests/rss-importer.test.js': No such file or directory
+ls: cannot access 'tests/quality-rss-fullflow.test.js': No such file or directory

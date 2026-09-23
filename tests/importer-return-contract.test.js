@@ -1,10 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
-// odyssey-debug 20260913: 三导入器 errors 契约对齐(debug-notes-017) + LinuxDo 用户名
+// odyssey-debug 20260913: 两导入器 errors 契约对齐(debug-notes-017) + LinuxDo 用户名
 // API 第 5 探测(/session/current.json, cookie 认证与 DOM 无关) + UpdateChecker 语义审计回归
 const { AutoImporter, UpdateChecker } = require("../src/import");
 const { BookmarkAutoImporter, BookmarkBridge } = require("../src/bridge");
-const { RSSAutoImporter } = require("../src/bridge");
 const { NotionOAuth } = require("../src/auth");
 const { Storage, SyncState } = require("../src/storage");
 const { SyncLock } = require("../src/sync-lock");
@@ -36,7 +35,6 @@ describe("odyssey-debug 20260913: 导入器 errors 契约 + LinuxDo 用户名 AP
         AutoImporter.isRunning = false;
         AutoImporter.lastRunAt = 0;
         BookmarkAutoImporter.isRunning = false;
-        RSSAutoImporter.isRunning = false;
     });
 
     afterEach(() => {
@@ -94,11 +92,15 @@ describe("odyssey-debug 20260913: 导入器 errors 契约 + LinuxDo 用户名 AP
         expect(result.errors).toEqual(["请先安装并启用书签桥接扩展"]);
     });
 
-    it("T5: RSS 配置守卫(apiKey/dbId 缺失)经 errors 上抛", async () => {
+    it("T5: Bookmark 自动导入配置守卫(apiKey/dbId 缺失)经 errors 上抛", async () => {
+        BookmarkBridge.isExtensionAvailable = () => true;
         NotionOAuth.getAccessToken = () => "tok";
-        Storage.get = (key, d) => d;
+        // 桥接扩展可用 + 数据库目标, 仅缺 apiKey/dbId → 命中配置守卫
+        Storage.get = (key, d) => (
+            key === CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE ? "database" : d
+        );
 
-        const result = await RSSAutoImporter.run();
+        const result = await BookmarkAutoImporter.run();
         expect(result).toBeDefined();
         expect(result.importedCount).toBe(0);
         expect(result.errors).toEqual(["请先配置 Notion API Key 和数据库 ID"]);

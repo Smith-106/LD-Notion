@@ -23,15 +23,21 @@ const LinuxDoAdapter = Object.assign(Object.create(SourceAdapter), {
     },
 
     normalize(raw) {
-        const topicId = raw.topic_id || raw.bookmarkable_id || raw.id || "";
+        const topicId = LinuxDoAPI.resolveTopicId
+            ? LinuxDoAPI.resolveTopicId(raw)
+            : String(raw.topic_id || raw.bookmarkable_id || raw.id || "");
         return {
             source: "linuxdo",
             id: String(topicId),
-            title: raw.name || raw.title || "",
-            content: "",
-            url: topicId ? `https://linux.do/t/${topicId}` : "",
+            title: raw.title || raw.fancy_title || raw.name || "",
+            content: raw.excerpt || "",
+            url: raw.bookmarkable_url
+                ? String(raw.bookmarkable_url)
+                : (topicId ? `https://linux.do/t/${topicId}` : ""),
             author: raw.username || "",
-            tags: [],
+            tags: Array.isArray(raw.tags)
+                ? raw.tags.map((t) => (typeof t === "string" ? t : t?.name || "")).filter(Boolean)
+                : [],
             createdAt: raw.created_at || raw.bookmarked_at || raw.updated_at || "",
             raw,
         };

@@ -148,7 +148,7 @@ const GenericExporter = {
     },
 
     // 链接属性安全校验 —— 仅 http(s) 公网(拒内网/169.254/非 http 协议)
-    // 与 BookmarkExporter(hy3 LOW)/RSSAutoImporter(XN-03) 对称: 三 exporter 写入侧统一防线
+    // 与 BookmarkExporter(hy3 LOW) 对称: exporter 写入侧统一防线
     _safeUrl: (url) => {
         const raw = String(url || "").trim();
         if (!raw) return null;
@@ -792,7 +792,10 @@ const Exporter = {
 
     // 导出单个帖子
     exportTopic: async (bookmark, settings, onProgress) => {
-        const topicId = bookmark.topic_id || bookmark.bookmarkable_id;
+        const topicId = LinuxDoAPI.resolveTopicId(bookmark);
+        if (!topicId) {
+            throw new Error(`无法解析话题 ID(收藏项缺少 topic_id/bookmarkable_url): ${bookmark?.title || bookmark?.name || bookmark?.fancy_title || "未知标题"}`);
+        }
 
         onProgress?.({ stage: "fetch", message: "获取帖子数据..." });
 
@@ -874,13 +877,24 @@ const Exporter = {
     isAuthTerminalError: (error) => !!(error && error.isAuthTerminal === true),
 
     // 认证中止时的剩余项收集:与取消路径同构,但保留原因说明供 UI 报告展示
+    // 经 resolveTopicId 统一话题 ID 口径(Post 收藏 bookmarkable_id 为 postId 不可直用)。
     _collectSkippedFrom: (bookmarks, remaining) => remaining.map((i) => {
         const b = bookmarks[i];
+        const topicId = LinuxDoAPI.resolveTopicId(b);
         return {
-            topicId: b.topic_id || b.bookmarkable_id,
-            title: b.title || b.name || `帖子 ${b.topic_id || b.bookmarkable_id}`,
+            topicId,
+            title: b.title || b.fancy_title || b.name || `帖子 ${topicId}`,
         };
     }),
+
+    // 报告/跳过项统一话题 ID 口径 + 新版 serializer 标题回退(fancy_title)。
+    _bookmarkReportOf: (b) => {
+        const topicId = LinuxDoAPI.resolveTopicId(b);
+        return {
+            topicId,
+            title: b.title || b.fancy_title || b.name || `帖子 ${topicId}`,
+        };
+    },
 
     exportBookmarks: async (bookmarks, settings, onProgress, startIndex = 0) => {
         // v3.14.6 (CC-12): 重入守卫 —— 双击/UI+AI 并发时仅一方执行, 其余返回 skipped 全量映射
@@ -888,14 +902,11 @@ const Exporter = {
             return {
                 success: [],
                 failed: [],
-                skipped: bookmarks.slice(startIndex).map((b) => ({
-                    topicId: b.topic_id || b.bookmarkable_id,
-                    title: b.title || b.name || `帖子 ${b.topic_id || b.bookmarkable_id}`,
-                })),
+                skipped: bookmarks.slice(startIndex).map((b) => Exporter._bookmarkReportOf(b)),
                 message: "已有导出进行中，已跳过本次请求",
             };
         }
-        // v3.14.18 (D2/CC-04 补全): 跨 tab 租约 —— 与自动同步(Bookmark/RSS AutoImporter)共用
+        // v3.14.18 (D2/CC-04 补全): 跨 tab 租约 —— 与自动同步(Bookmark AutoImporter)共用
         // AUTO_SYNC_LEASE 全局互斥键: 另一 tab 的手动导出/自动同步持有时本轮全量 skipped;
         // TTL 兜底防崩溃锁泄漏。此前仅同 tab isExporting(CC-12), 跨 tab 双写 Notion 防线缺口。
         // qwen P1 共识: reset 必须在取租约之前 —— 取租约 await 期间用户点取消, 原顺序
@@ -913,10 +924,7 @@ const Exporter = {
             return {
                 success: [],
                 failed: [],
-                skipped: bookmarks.slice(startIndex).map((b) => ({
-                    topicId: b.topic_id || b.bookmarkable_id,
-                    title: b.title || b.name || `帖子 ${b.topic_id || b.bookmarkable_id}`,
-                })),
+                skipped: bookmarks.slice(startIndex).map((b) => Exporter._bookmarkReportOf(b)),
                 message: "其他标签页正在导出/同步，已跳过本次请求",
             };
         }
@@ -974,8 +982,8 @@ const Exporter = {
                 if (i === undefined) return;
 
                 const bookmark = bookmarks[i];
-                const topicId = bookmark.topic_id || bookmark.bookmarkable_id;
-                const title = bookmark.title || bookmark.name || `帖子 ${topicId}`;
+                const topicId = LinuxDoAPI.resolveTopicId(bookmark);
+                const title = bookmark.title || bookmark.fancy_title || bookmark.name || `帖子 ${topicId}`;
                 const taskNum = i - startIndex + 1;
 
                 try {

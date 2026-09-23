@@ -125,6 +125,12 @@ const BookmarkList = {
         if (bookmark?.source === "github") {
             return `gh:${bookmark.sourceType}:${bookmark.itemKey}`;
         }
+        // 经 extract 层 resolveTopicId 统一口径(Post 收藏 bookmarkable_id 为 postId)。
+        // lazy require 防循环依赖(security 不得 require ui 顶层, 此处反向 ui→extract 安全)。
+        try {
+            const { LinuxDoAPI } = require("../extract");
+            if (LinuxDoAPI?.resolveTopicId) return LinuxDoAPI.resolveTopicId(bookmark);
+        } catch { /* 回退旧口径 */ }
         return String(bookmark?.topic_id || bookmark?.bookmarkable_id || "");
     },
 
@@ -168,7 +174,11 @@ const BookmarkList = {
         if (bookmark.source === "github") {
             return UI().normalizeWorkspaceInsightUrl(bookmark?.raw?.html_url || "");
         }
-        const topicId = String(bookmark?.topic_id || bookmark?.bookmarkable_id || "");
+        // 优先用服务端下发的 bookmarkable_url(含 slug 规范链接),回退无 slug 构造。
+        if (bookmark?.bookmarkable_url) {
+            return UI().normalizeWorkspaceInsightUrl(bookmark.bookmarkable_url);
+        }
+        const topicId = UI().getBookmarkKey(bookmark);
         if (!topicId) return "";
         return UI().normalizeWorkspaceInsightUrl(`https://linux.do/t/${topicId}`);
     },
@@ -286,7 +296,7 @@ const BookmarkList = {
 
     buildBookmarkItemHtml: (bookmark, githubMode = false) => {
         const bookmarkKey = UI().getBookmarkKey(bookmark);
-        const title = bookmark.title || bookmark.name || `帖子 ${bookmarkKey}`;
+        const title = bookmark.title || bookmark.fancy_title || bookmark.name || `帖子 ${bookmarkKey}`;
         const escapedTitle = Utils.escapeHtml(title);
         const escapedTruncatedTitle = Utils.escapeHtml(Utils.truncateText(title, 35));
         const isExported = UI().isBookmarkKeyExported(bookmarkKey);

@@ -40,7 +40,6 @@ const REQUIRED_CONSTS = [
     "GitHubAutoImporter",
     "BookmarkBridge",
     "BookmarkAutoImporter",
-    "RSSAutoImporter",
     "AIClassifier",
     "ZhihuAPI",
     "GenericExtractor",

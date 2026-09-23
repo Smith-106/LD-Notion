@@ -58,7 +58,6 @@ const SyncStateV2 = {
                 "github-gists": this._makeSourceDefault(),
                 "github-meta": this._makeSourceDefault(),
                 bookmark: this._makeSourceDefault(true),
-                rss: this._makeSourceDefault(true),
                 zhihu: this._makeSourceDefault(),
                 generic: this._makeSourceDefault(),
             },
@@ -115,7 +114,7 @@ const SyncStateV2 = {
 
     /**
      * 从 V1 迁移到 V2 扁平结构
-     * V1: { linuxdo: {...}, github: { meta, stars, repos, forks, gists }, bookmarks, rss }
+     * V1: { linuxdo: {...}, github: { meta, stars, repos, forks, gists }, bookmarks }
      * V2: { version: 2, sources: { linuxdo, github-stars, github-repos, ... } }
      */
     _migrateV1toV2(v1State) {
@@ -141,10 +140,7 @@ const SyncStateV2 = {
             sources.bookmark = this.normalizeSyncRecord(v1State.bookmarks, { keepSnapshot: true });
         }
 
-        // rss
-        if (v1State.rss) {
-            sources.rss = this.normalizeSyncRecord(v1State.rss, { keepSnapshot: true });
-        }
+        // (v3.15 RSS 源已移除: 历史 rss 状态不再迁移, 存量由 _load 剪枝)
 
         return { version: this.VERSION, sources };
     },
@@ -164,11 +160,11 @@ const SyncStateV2 = {
         if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) parsed = {};
 
         // 检测并迁移 V1 结构
-        // 2/3 共识(dsf+qwen): 旧条件要求 parsed.linuxdo 存在 —— 仅同步过 bookmark/rss/
+        // 2/3 共识(dsf+qwen): 旧条件要求 parsed.linuxdo 存在 —— 仅同步过 bookmark/
         // github 的 V1 状态(无 version、无 linuxdo)被跳过迁移, watermark/snapshot 被默认值
         // 覆盖 → 增量基线丢失、全量重扫与重复投递。改为识别完整 V1 形态。
         const hasV1Shape = !parsed.version
-            && (parsed.linuxdo || parsed.github || parsed.bookmarks || parsed.rss);
+            && (parsed.linuxdo || parsed.github || parsed.bookmarks);
         if (parsed.version < this.VERSION || hasV1Shape) {
             parsed = this._migrateV1toV2(parsed);
         }
@@ -179,14 +175,19 @@ const SyncStateV2 = {
             delete parsed.sources.bookmarks;
         }
 
+        // v3.15 RSS 移除: 存量 rss 状态剪枝(防旧水位残留)
+        if (parsed.sources && parsed.sources.rss) {
+            delete parsed.sources.rss;
+        }
+
         // 确保 sources 存在且每个 key 都有默认值
         if (!parsed.sources) parsed.sources = {};
         for (const key of Object.keys(defaults.sources)) {
             if (!parsed.sources[key]) {
-                parsed.sources[key] = this._makeSourceDefault(key === "bookmark" || key === "rss");
+                parsed.sources[key] = this._makeSourceDefault(key === "bookmark");
             } else {
                 parsed.sources[key] = this.normalizeSyncRecord(parsed.sources[key], {
-                    keepSnapshot: key === "bookmark" || key === "rss",
+                    keepSnapshot: key === "bookmark",
                 });
             }
         }
@@ -257,7 +258,7 @@ const SyncStateV2 = {
     getSourceState(sourceType) {
         const state = this._load();
         return this._clone(state.sources[sourceType] || this._makeSourceDefault(
-            sourceType === "bookmark" || sourceType === "rss"
+            sourceType === "bookmark"
         ));
     },
 
@@ -269,7 +270,7 @@ const SyncStateV2 = {
      */
     updateSourceState(sourceType, patch = {}) {
         const state = this._load();
-        const withSnapshot = sourceType === "bookmark" || sourceType === "rss";
+        const withSnapshot = sourceType === "bookmark";
         // dsf P2 共识: 过滤值为 undefined 的键 —— {...patch} 中显式 snapshot: undefined
         // 会覆盖已有快照, 随后 normalize 将其重置为空对象(静默丢数据)。
         const cleanPatch = {};
@@ -301,7 +302,7 @@ const SyncStateV2 = {
      */
     resetSourceState(sourceType) {
         const state = this._load();
-        const withSnapshot = sourceType === "bookmark" || sourceType === "rss";
+        const withSnapshot = sourceType === "bookmark";
         const previous = state.sources[sourceType] || {};
         state.sources[sourceType] = this._makeSourceDefault(withSnapshot);
         state.sources[sourceType].epoch = (Number(previous.epoch) || 0) + 1;

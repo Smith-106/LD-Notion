@@ -4,7 +4,6 @@ import { SourceAdapter } from "../src/adapter/SourceAdapter.js";
 import { LinuxDoAdapter } from "../src/adapter/LinuxDoAdapter.js";
 import { createGitHubAdapter } from "../src/adapter/GitHubAdapter.js";
 import { BookmarkAdapter } from "../src/adapter/BookmarkAdapter.js";
-import { RSSAdapter } from "../src/adapter/RSSAdapter.js";
 import { ZhihuAdapter } from "../src/adapter/ZhihuAdapter.js";
 import { GenericAdapter } from "../src/adapter/GenericAdapter.js";
 
@@ -26,7 +25,6 @@ describe("SourceAdapter contract", () => {
         { name: "github-stars", adapter: createGitHubAdapter("stars") },
         { name: "github-repos", adapter: createGitHubAdapter("repos") },
         { name: "bookmark", adapter: BookmarkAdapter },
-        { name: "rss", adapter: RSSAdapter },
         { name: "zhihu", adapter: ZhihuAdapter },
         { name: "generic", adapter: GenericAdapter },
     ];

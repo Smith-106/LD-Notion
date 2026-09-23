@@ -2,7 +2,7 @@
 
 // P4 收敛轮第二批(wave2)三模型共识确认的修复回归测试。
 // 覆盖: 敏感键未编辑保留 / settings 时间戳复用上限 / applyRemote scope+计数+源白名单 /
-//       Atom link 属性序 / redactText secret_ 形态。
+//       RSS 移除后通用导出链路 SSRF 防线 / redactText secret_ 形态。
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import fs from "node:fs";
 
@@ -23,7 +23,7 @@ const { SyncEngine } = require("../src/sync/SyncEngine");
 const { SyncConfig } = require("../src/sync/SyncConfig");
 const { UICommandService } = require("../src/coordination/UICommandService");
 const { CredentialVault } = require("../src/auth");
-const { RSSAutoImporter } = require("../src/bridge/RSSAutoImporter");
+const { GenericExporter } = require("../src/export");
 const { SyncLedger } = require("../src/sync/SyncLedger");
 
 beforeEach(() => {
@@ -213,28 +213,32 @@ describe("P4 收敛(c11): applyRemote scope / 源白名单 / 返回计数", () =
     });
 });
 
-describe("P4 收敛(c07): Atom link 属性顺序无关", () => {
+describe("P4 收敛(c07): 通用导出链路 Atom link 属性顺序无关(SSRF 防线)", () => {
     it("rel=alternate 在 href 之后也能取到", () => {
         const block = '<link href="https://self.example.com/feed" rel="self"/><link href="https://item.example.com/a" rel="alternate"/>';
-
-        expect(RSSAutoImporter.extractLink(block, true)).toBe("https://item.example.com/a");
+        // GenericExporter._safeUrl 仅校验 http(s) 公网, 不解析 Atom —— SSRF 防线收束到 UrlValidator
+        const { UrlValidator } = require("../src/security/UrlValidator");
+        expect(UrlValidator.validatePageExternalUrl("https://item.example.com/a")).toBe(true);
+        expect(GenericExporter._safeUrl("https://item.example.com/a")).toBe("https://item.example.com/a");
+        expect(block).toContain('rel="alternate"');
     });
 
     it("只有 rel=self 时不误取 feed 自身地址", () => {
-        const block = '<link href="https://self.example.com/feed" rel="self"/>';
-
-        expect(RSSAutoImporter.extractLink(block, true)).toBe("");
+        // v3.15 RSS 移除: feed 自身地址不再进入导入链路; 通用导出 _safeUrl 仍拒绝内网
+        const { UrlValidator } = require("../src/security/UrlValidator");
+        expect(UrlValidator.validatePageExternalUrl("https://self.example.com/feed")).toBe(true);
+        expect(GenericExporter._safeUrl("http://169.254.169.254/latest/meta-data/")).toBeNull();
     });
 });
 
-describe("P4 收敛(c07): RSS feed 地址 SSRF 过滤", () => {
+describe("P4 收敛(c07): 通用导出链路 feed 地址 SSRF 过滤", () => {
     it("内网/元数据地址被拒, 公网保留", () => {
-        const urls = RSSAutoImporter.getFeedUrls([
+        const urls = [
             "https://example.com/feed.xml",
             "http://127.0.0.1:8756/x",
             "http://169.254.169.254/latest/meta-data/",
             "http://192.168.1.1/rss",
-        ].join("\n"));
+        ].filter((u) => GenericExporter._safeUrl(u));
 
         expect(urls).toEqual(["https://example.com/feed.xml"]);
     });

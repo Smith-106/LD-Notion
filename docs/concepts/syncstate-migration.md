@@ -20,7 +20,9 @@ V1: { linuxdo: {...}, github: { meta, stars, repos, forks, gists }, bookmarks: {
 V2 将所有来源类型展平为独立 key：
 
 ```text
-V2: { version: 2, sources: { linuxdo: {...}, github-stars: {...}, github-repos: {...}, github-forks: {...}, github-gists: {...}, github-meta: {...}, bookmark: {...}, rss: {...}, zhihu: {...}, generic: {...} } }
+V2: { version: 2, sources: { linuxdo: {...}, github-stars: {...}, github-repos: {...}, github-forks: {...}, github-gists: {...}, github-meta: {...}, bookmark: {...}, zhihu: {...}, generic: {...} } }
+
+> 注（v3.15.0）：`rss` 源已移除（存量由 `_load` 自动剪枝）；历史版本结构曾含 `rss: {...}`。
 ```
 
 每个来源类型独立管理自己的 `lastSyncTime`、`lastSyncCount`、`lastError` 等字段。

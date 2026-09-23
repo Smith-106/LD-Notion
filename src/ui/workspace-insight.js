@@ -8,7 +8,7 @@ const { NotionAPI } = require("../api");
 const { ConfirmationDialog } = require("../security");
 const { WorkspaceService } = require("../extract");
 const { AutoImporter, GitHubAutoImporter, GitHubAPI } = require("../import");
-const { BookmarkAutoImporter, RSSAutoImporter } = require("../bridge");
+const { BookmarkAutoImporter } = require("../bridge");
 const { AIAssistant, AIService, ChatUI, getAISettings } = require("../ai");
 const { AISchema } = require("../ai/schema");
 
@@ -551,10 +551,6 @@ const WorkspaceInsight = {
             if (!stats.created && !stats.updated && !stats.archived && !stats.failed && !stats.unchanged) return "暂无统计";
             return `新增 ${stats.created || 0}，更新 ${stats.updated || 0}，归档 ${stats.archived || 0}，无变更 ${stats.unchanged || 0}${stats.failed ? `，失败 ${stats.failed}` : ""}`;
         }
-        if (sourceKey === "rss") {
-            if (!stats.feeds && !stats.scanned && !stats.created && !stats.updated && !stats.failed && !stats.unchanged) return "暂无统计";
-            return `Feed ${stats.feeds || 0}，扫描 ${stats.scanned || 0}，新增 ${stats.created || 0}，更新 ${stats.updated || 0}，无变更 ${stats.unchanged || 0}${stats.failed ? `，失败 ${stats.failed}` : ""}`;
-        }
         return "暂无统计";
     },
 
@@ -576,8 +572,6 @@ const WorkspaceInsight = {
             state: SyncState.getGitHubState(type),
         }));
         const bookmarkState = SyncState.getBookmarkState();
-        const rssState = SyncState.getRssState();
-        const rssFeedCount = RSSAutoImporter.getFeedUrls().length;
 
         const sourceRows = [
             {
@@ -623,20 +617,6 @@ const WorkspaceInsight = {
                 statsLabel: UI().buildSyncStatsText("bookmarks", bookmarkState.lastStats),
                 scheduleLabel: `跟踪 ${Object.keys(bookmarkState.snapshot || {}).length} 个已知书签映射`,
                 detailLabel: "增量基线来自书签时间 + 当前快照映射",
-            },
-            {
-                key: "rss",
-                label: "RSS",
-                enabled: !!Storage.get(CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, CONFIG.DEFAULTS.rssAutoImportEnabled),
-                intervalMinutes: parseInt(Storage.get(CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_INTERVAL, CONFIG.DEFAULTS.rssAutoImportInterval), 10) || 0,
-                outcome: rssState.lastOutcome,
-                lastSuccessAt: rssState.lastSuccessAt || 0,
-                lastAttemptAt: rssState.lastAttemptAt || 0,
-                lastError: rssState.lastError || "",
-                watermarkLabel: UI().formatSyncWatermarkLabel(rssState.watermark),
-                statsLabel: UI().buildSyncStatsText("rss", rssState.lastStats),
-                scheduleLabel: rssFeedCount > 0 ? `监控 ${rssFeedCount} 个 Feed` : "未配置 Feed URL",
-                detailLabel: "增量基线来自 Feed 发布时间 + 当前快照映射",
             },
         ].map((row) => {
             const outcomeMeta = UI().getSyncOutcomeMeta(row.outcome);
@@ -782,9 +762,6 @@ const WorkspaceInsight = {
         }
         if (Storage.get(CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED, CONFIG.DEFAULTS.bookmarkAutoImportEnabled)) {
             tasks.push({ label: "浏览器书签", run: () => BookmarkAutoImporter.run() });
-        }
-        if (Storage.get(CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, CONFIG.DEFAULTS.rssAutoImportEnabled)) {
-            tasks.push({ label: "RSS", run: () => RSSAutoImporter.run() });
         }
 
         if (tasks.length === 0) {

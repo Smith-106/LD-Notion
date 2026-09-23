@@ -1,0 +1,9 @@
+[PASS] build.js
+[PASS] node --check dist\LinuxDo-Bookmarks-to-Notion.user.js
+[PASS] node --check LinuxDo-Bookmarks-to-Notion.user.js
+[PASS] marker LD-NOTION-BUILD:USER_SCRIPT_BODY_START
+[PASS] marker LD-NOTION-BUILD:BOOKMARK_BRIDGE_START
+[PASS] sync/ 已按编译期开关剪枝 (no SyncSerializer decl)
+[PASS] root ≡ dist (sha256 c9882bad6961…)
+
+✅ verify:build 全部通过

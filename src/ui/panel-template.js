@@ -91,42 +91,11 @@ function renderPanel(personaName) {
                                 </div>
                             </div>
                             <div id="ldb-bookmark-auto-import-status" style="font-size: var(--ldb-ui-font-size-sm); color: var(--ldb-ui-muted); margin-bottom: var(--ldb-ui-spacing-md);"></div>
-                            <div class="ldb-setting-row ldb-mb-8">
-                                <label style="display: flex; align-items: center; gap: var(--ldb-ui-spacing-sm); cursor: pointer;">
-                                    <input type="checkbox" id="ldb-rss-auto-import-enabled">
-                                    <span>启用 RSS 自动同步</span>
-                                </label>
-                            </div>
-                            <div id="ldb-rss-auto-import-options" style="display: none; margin-bottom: var(--ldb-ui-spacing-md);">
-                                <div class="ldb-setting-row" style="margin-bottom: var(--ldb-ui-spacing-md);">
-                                    <label for="ldb-rss-feed-urls" style="display: block; margin-bottom: var(--ldb-ui-spacing-sm);">RSS Feed URL</label>
-                                    <textarea id="ldb-rss-feed-urls" class="ldb-input" rows="3" placeholder="每行一个 RSS / Atom 地址，或用逗号分隔"></textarea>
-                                </div>
-                                <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
-                                    <label for="ldb-rss-auto-import-interval" style="white-space: nowrap;">RSS 同步间隔</label>
-                                    <select id="ldb-rss-auto-import-interval" class="ldb-input ldb-flex-1">
-                                        <option value="0">仅页面加载时</option>
-                                        <option value="3">每 3 分钟</option>
-                                        <option value="5" selected>每 5 分钟</option>
-                                        <option value="10">每 10 分钟</option>
-                                        <option value="30">每 30 分钟</option>
-                                    </select>
-                                </div>
-                                <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
-                                    <label for="ldb-rss-dedup-mode" style="white-space: nowrap;">RSS 导入去重</label>
-                                    <select id="ldb-rss-dedup-mode" class="ldb-input ldb-flex-1">
-                                        <option value="strict">按链接去重</option>
-                                        <option value="allow_duplicates">按 Feed + ID 保留重复</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div id="ldb-rss-auto-import-status" style="font-size: var(--ldb-ui-font-size-sm); color: var(--ldb-ui-muted); margin-bottom: var(--ldb-ui-spacing-md);"></div>
                             <!-- F-UI-05:各来源「立即导入」按钮(不依赖 AI 指令,直接触发完整同步) -->
                             <div class="ldb-input-group ldb-mt-12">
                                 <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-import-now-linuxdo">立即导入 Linux.do</button>
                                 <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-import-now-github">立即导入 GitHub</button>
                                 <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-import-now-bookmark">立即导入书签</button>
-                                <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-import-now-rss">立即导入 RSS</button>
                             </div>
                             <div class="ldb-tip">立即导入会执行完整同步（拉取 + 写入 Notion + 推进水位），与自动同步路径一致。</div>
                             <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">

@@ -22,15 +22,13 @@ const resetState = () => {
 beforeEach(resetState);
 
 describe("P2 共识: SyncState V1 迁移", () => {
-    it("无 version/无 linuxdo 的 V1 状态也必须迁移(watermark 不丢)", () => {
+    it("无 version/无 linuxdo 的 V1 状态也必须迁移(watermark 不丢; v3.15 RSS 不再迁移)", () => {
         const watermark = { time: "2026-01-01T00:00:00.000Z", ids: ["11", "22"] };
         GM_setValue(KEY, JSON.stringify({
             bookmarks: { watermark, lastSuccessAt: 1700000000000, lastOutcome: "success" },
-            rss: { watermark: { time: "2026-02-02T00:00:00.000Z", ids: [] } },
         }));
         const bookmarkState = SyncStateV2.getSourceState("bookmark");
         expect(bookmarkState.watermark).toEqual(watermark);
-        expect(SyncStateV2.getSourceState("rss").watermark.time).toBe("2026-02-02T00:00:00.000Z");
     });
 });
 

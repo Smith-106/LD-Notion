@@ -9,7 +9,7 @@ const { SyncConstants } = require("./constants");
 const { SyncCrypto } = require("./SyncCrypto");
 const { SyncStateV2 } = require("../storage/SyncState");
 
-// 白名单 — 显式逐键枚举(96 键穷举分区, sec-dsv3 共识)。
+// 白名单 — 显式逐键枚举(92 键穷举分区, sec-dsv3 共识; v3.15 移除 4 个 RSS 键)。
 // scope: "shared" 两模式都同步; "personal" 仅 personal 模式(shared 剔除)。
 const WHITELIST = Object.freeze({
     // 设置类(LWW)
@@ -18,7 +18,6 @@ const WHITELIST = Object.freeze({
         ldb_sync_interval_linuxdo: { scope: "shared", kind: "number" },
         ldb_sync_interval_github: { scope: "shared", kind: "number" },
         ldb_sync_interval_bookmarks: { scope: "shared", kind: "number" },
-        ldb_sync_interval_rss: { scope: "shared", kind: "number" },
         ldb_cross_source_mode: { scope: "shared", kind: "string" },
         ldb_auto_import_enabled: { scope: "shared", kind: "boolean" },
         ldb_auto_import_interval: { scope: "shared", kind: "number" },
@@ -26,9 +25,6 @@ const WHITELIST = Object.freeze({
         ldb_github_auto_import_interval: { scope: "shared", kind: "number" },
         ldb_bookmark_auto_import_enabled: { scope: "shared", kind: "boolean" },
         ldb_bookmark_auto_import_interval: { scope: "shared", kind: "number" },
-        ldb_rss_auto_import_enabled: { scope: "shared", kind: "boolean" },
-        ldb_rss_auto_import_interval: { scope: "shared", kind: "number" },
-        ldb_rss_import_dedup_mode: { scope: "shared", kind: "string" },
         ldb_linuxdo_import_dedup_mode: { scope: "shared", kind: "string" },
         ldb_bookmark_import_dedup_mode: { scope: "shared", kind: "string" },
         ldb_export_status_source: { scope: "shared", kind: "string" },
@@ -54,7 +50,7 @@ const WHITELIST = Object.freeze({
         ldb_ai_target_db: { scope: "shared", kind: "string", confirmLevel: 2 },
     },
 
-    // 去重集合(sourceType → 是否 URL 类键需哈希化)。RSS_FEED_URLS 等入硬黑名单(M-2)。
+    // 去重集合(sourceType → 是否 URL 类键需哈希化)。
     dedupSources: Object.freeze({
         linuxdo: { urlKeyed: false },       // linuxdo:{id}
         "github-stars": { urlKeyed: false },
@@ -62,7 +58,6 @@ const WHITELIST = Object.freeze({
         "github-forks": { urlKeyed: false },
         "github-gists": { urlKeyed: false },
         bookmark: { urlKeyed: true },       // bookmark:{url} → 哈希
-        rss: { urlKeyed: true },            // rss:{guid||link} → 哈希
         zhihu: { urlKeyed: true },
         generic: { urlKeyed: true },        // generic:{url} → 哈希
     }),
@@ -70,7 +65,7 @@ const WHITELIST = Object.freeze({
     // watermark 源白名单(与 SyncStateV2._defaults 对齐)
     watermarkSources: Object.freeze([
         "linuxdo", "github-stars", "github-repos", "github-forks", "github-gists",
-        "bookmark", "rss", "zhihu", "generic",
+        "bookmark", "zhihu", "generic",
     ]),
 });
 
@@ -149,7 +144,7 @@ const BLACKLIST = Object.freeze([
     "ldb_sync_last_pull_at",
     "ldb_sync_last_outcome",
     "ldb_sync_passphrase_set",
-    // RSS feed URL(可能携带私有凭证, M-2 硬黑)
+    // (v3.15 RSS 移除: ldb_rss_feed_urls 历史值不再同步, 存量仍被硬黑名单拦截)
     "ldb_rss_feed_urls",
     // GitHub 身份/路径语义
     "ldb_github_username",
@@ -380,7 +375,7 @@ const SyncSerializer = {
         return { ok: true };
     },
 
-    // 契约辅助: 96 键穷举分区断言(W/B 恰好落一侧, 未知键默认拒绝)
+    // 契约辅助: 白名单/黑名单穷举分区断言(W/B 恰好落一侧, 未知键默认拒绝)
     assertKeyPartition(keys) {
         const violations = [];
         for (const key of keys) {

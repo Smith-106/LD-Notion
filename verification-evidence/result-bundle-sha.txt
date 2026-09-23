@@ -1,0 +1,2 @@
+c9882bad69618f250239797b0f8111175ea3b6fefac476a23a13b92cfc0bebb2 *LinuxDo-Bookmarks-to-Notion.user.js
+c9882bad69618f250239797b0f8111175ea3b6fefac476a23a13b92cfc0bebb2 *dist/LinuxDo-Bookmarks-to-Notion.user.js

@@ -13,14 +13,13 @@ const { CredentialVault } = require("../src/auth");
 const { AISchema } = require("../src/ai/schema");
 const { BlockConverter } = require("../src/ai/BlockConverter");
 const { DOMToNotion } = require("../src/api/DOMToNotion");
-const { RSSAutoImporter } = require("../src/bridge/RSSAutoImporter");
-const { RSSAdapter } = require("../src/adapter/RSSAdapter");
+const { BookmarkAutoImporter } = require("../src/bridge/BookmarkAutoImporter");
+const { BookmarkAdapter } = require("../src/adapter/BookmarkAdapter");
 
 // 必须与 DedupStore.keyFor 一致(ldb_exported_topics:{source})。
 // 旧键 ldb_dedup_* 从未被生产读写 → rebase 用例假绿(写错键、读错键)。
 const STORE_KEYS = Object.freeze({
     bookmark: DedupStore.keyFor("bookmark"),
-    rss: DedupStore.keyFor("rss"),
 });
 
 describe("P1-CC-06: DedupStore beginBatch 幂等 + endBatch rebase", () => {
@@ -105,16 +104,17 @@ describe("P1-DC-002: SyncSerializer 全源新鲜度投影裁剪", () => {
     });
 });
 
-describe("P1-DC-007: RSSAdapter 键派生对齐", () => {
-    it("normalize id 取 raw.id 优先, getDedupKey 与落账键空间一致", () => {
-        const item = RSSAdapter.normalize({ id: "item-1", guid: "guid-1", link: "https://x.com/1" });
+describe("P1-DC-007: BookmarkAdapter 键派生对齐", () => {
+    it("normalize 取 raw.id/url, getDedupKey 与落账键空间一致", () => {
+        const item = BookmarkAdapter.normalize({ id: "item-1", title: "t", url: "https://x.com/1" });
         expect(item.id).toBe("item-1");
-        expect(RSSAdapter.getDedupKey(item)).toBe("rss:item-1");
+        expect(item.source).toBe("bookmark");
+        expect(BookmarkAdapter.getDedupKey(item)).toBe("bookmark:item-1");
     });
 
-    it("无 id 时回退 guid/link", () => {
-        expect(RSSAdapter.normalize({ guid: "g", link: "l" }).id).toBe("g");
-        expect(RSSAdapter.normalize({ link: "l" }).id).toBe("l");
+    it("空 id 时用 url 兜底防空键碰撞", () => {
+        const item = BookmarkAdapter.normalize({ url: "https://x.com/l" });
+        expect(BookmarkAdapter.getDedupKey(item)).toBe("bookmark:https://x.com/l");
     });
 });
 
@@ -186,11 +186,12 @@ describe("P1-S-08b: AgentTrace.persist 落盘脱敏接线", () => {
     });
 });
 
-describe("P1-XN-03: RSSAutoImporter.buildProperties 链接安全校验", () => {
-    it("内网/169.254 链接属性跳过, 公网写入", () => {
-        const bad = RSSAutoImporter.buildProperties({ url: "http://169.254.169.254/latest", title: "t", summary: "" });
-        expect(bad["链接"]).toBeUndefined();
-        const good = RSSAutoImporter.buildProperties({ url: "https://example.com/rss-item", title: "t", summary: "" });
+describe("P1-XN-03: BookmarkExporter.buildProperties 链接安全校验", () => {
+    it("非 http(s) 链接置空, 公网写入", async () => {
+        const { BookmarkExporter } = require("../src/bridge/BookmarkExporter");
+        const bad = BookmarkExporter.buildProperties({ url: "javascript:alert(1)", title: "t" });
+        expect(bad["链接"].url).toBeNull();
+        const good = BookmarkExporter.buildProperties({ url: "https://example.com/rss-item", title: "t", summary: "" });
         expect(good["链接"].url).toBe("https://example.com/rss-item");
     });
 });

@@ -6,7 +6,7 @@ const { emit } = require("../coordination/event-bus");
 
 // 去重条目存活时间：90 天。超过此时间的条目在批量/单点写回时自动淘汰，
 // 防止 GM storage 中单键 JSON 无界增长导致 sync 延迟线性增加（PERF-001）。
-// v3.14.3 修复：时间 TTL 只用于 URL 键源（bookmark/rss/zhihu/generic，无界）；
+// v3.14.3 修复：时间 TTL 只用于 URL 键源（bookmark/zhihu/generic，无界）；
 // id 键源（linuxdo/github-*，导出账本，天然有界）改容量上限淘汰，
 // 避免 90 天后已导出记录被静默遗忘、UI 误判“待导出”。
 const DEDUP_TTL_MS = 90 * 24 * 60 * 60 * 1000;
@@ -17,7 +17,7 @@ const DEDUP_CAPACITY_LIMIT = 10000;
 // 哈希键双条目(双写), 保证同步 pull 应用后的哈希键可被原文键查询命中
 // (全盘审计交叉回归修复: 双设备去重失效 + 淘汰不落盘)。
 // 与 src/sync/SyncSerializer.js WHITELIST.dedupSources 的 urlKeyed 元数据一致。
-const URL_KEYED_SOURCES = Object.freeze(["bookmark", "rss", "zhihu", "generic"]);
+const URL_KEYED_SOURCES = Object.freeze(["bookmark", "zhihu", "generic"]);
 const HASH_PREFIX = "h:";
 
 /**

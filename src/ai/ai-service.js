@@ -188,7 +188,7 @@ const AIService = {
 
     // OpenAI 对话请求
     // AI 请求重试包装（M1 reliability）：瞬时网络抖动/超时/5xx/429 重试 2 次（1s/2s 指数退避），
-    // 401/400 等不可重试错误直接 reject。对比 NotionAPI 429 重试、RSS fetchFeedWithRetry。
+    // 401/400 等不可重试错误直接 reject。对比 NotionAPI 429 重试。
     _retryable: async (requestFn, retries = 2) => {
         let lastError;
         for (let attempt = 0; attempt <= retries; attempt++) {

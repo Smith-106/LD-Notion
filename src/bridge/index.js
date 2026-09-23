@@ -3,7 +3,6 @@
 const { InstallHelper } = require("../api");
 const { BookmarkExporter } = require("./BookmarkExporter");
 const { BookmarkAutoImporter } = require("./BookmarkAutoImporter");
-const { RSSAutoImporter } = require("./RSSAutoImporter");
 const { BookmarkOrganizer } = require("./BookmarkOrganizer");
 
 const __LD_NOTION_BUILD_BOOKMARK_BRIDGE_START__ = "[LD-NOTION-BUILD:BOOKMARK_BRIDGE_START]";
@@ -84,4 +83,4 @@ const BookmarkBridge = {
 };
 const __LD_NOTION_BUILD_BOOKMARK_BRIDGE_END__ = "[LD-NOTION-BUILD:BOOKMARK_BRIDGE_END]";
 
-module.exports = { BookmarkBridge, BookmarkExporter, BookmarkAutoImporter, RSSAutoImporter, BookmarkOrganizer };
+module.exports = { BookmarkBridge, BookmarkExporter, BookmarkAutoImporter, BookmarkOrganizer };

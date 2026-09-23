@@ -285,7 +285,11 @@ const bindExport = (ctx) => {
                         if (Exporter.isCancelled) break;
 
                         const bookmark = selected[i];
-                        const topicId = bookmark.topic_id || bookmark.bookmarkable_id;
+                        const topicId = LinuxDoAPI.resolveTopicId(bookmark);
+                        if (!topicId) {
+                            results.failed.push({ topicId: "", title: bookmark.title || bookmark.fancy_title || bookmark.name || "未知标题", error: "无法解析话题 ID" });
+                            continue;
+                        }
                         UI.showProgress(i + 1, selected.length, "导出帖子到 Obsidian...");
 
                         try {
@@ -470,7 +474,7 @@ const bindExport = (ctx) => {
                                 for (let k = i + 1; k < selected.length; k++) {
                                     const skippedBm = selected[k];
                                     results.skipped.push({
-                                        title: skippedBm.title || skippedBm.name || `帖子 ${skippedBm.topic_id || ""}`,
+                                        title: skippedBm.title || skippedBm.fancy_title || skippedBm.name || `帖子 ${LinuxDoAPI.resolveTopicId(skippedBm)}`,
                                     });
                                 }
                                 break;

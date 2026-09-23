@@ -15,7 +15,7 @@ const { OperationGuard, OperationLog, ConfirmationDialog, UndoManager } = requir
 const { ZhihuAPI, GenericExtractor, WorkspaceService } = require("./extract");
 const { GenericExporter, LinuxDoAPI, Exporter } = require("./export");
 const { AutoImporter, UpdateChecker, GitHubAutoImporter, GitHubAPI, GitHubExporter } = require("./import");
-const { BookmarkBridge, BookmarkExporter, BookmarkAutoImporter, RSSAutoImporter } = require("./bridge");
+const { BookmarkBridge, BookmarkExporter, BookmarkAutoImporter } = require("./bridge");
 const { StyleManager, DesignSystem, PanelResize, NotionSiteUI, UI_CSS, UIEvents, UI, GenericUI } = require("./ui");
 const { UICommandService } = require("./coordination");
 // 多端同步(F-SYNC-11): 编译期 flag 默认 off → require 惰性(打包体积零新增? 否,
@@ -122,17 +122,14 @@ function main() {
                 Utils.runWhenBrowserIdle(() => AutoImporter.init());
             }
             Utils.runWhenBrowserIdle(() => BookmarkAutoImporter.init());
-            Utils.runWhenBrowserIdle(() => RSSAutoImporter.init());
         } else if (currentSite === SiteDetector.SITES.NOTION) {
             NotionSiteUI.init();
             Utils.runWhenBrowserIdle(() => BookmarkAutoImporter.init());
-            Utils.runWhenBrowserIdle(() => RSSAutoImporter.init());
         } else if (currentSite === SiteDetector.SITES.GITHUB) {
             UI.init();
             Utils.runWhenBrowserIdle(() => UpdateChecker.init());
             Utils.runWhenBrowserIdle(() => GitHubAutoImporter.init());
             Utils.runWhenBrowserIdle(() => BookmarkAutoImporter.init());
-            Utils.runWhenBrowserIdle(() => RSSAutoImporter.init());
         } else if (currentSite === SiteDetector.SITES.ZHIHU) {
             GenericUI.init();
         } else if (currentSite === SiteDetector.SITES.GENERIC) {

@@ -50,9 +50,9 @@ describe("P2 共识: 去重账本变更通知", () => {
         const handler = (e) => hits.push(e);
         on("storage:state-committed", handler);
         try {
-            DedupStore.beginBatch("rss");
-            DedupStore.markSeen("rss", "rss:1");
-            DedupStore.endBatch("rss");
+            DedupStore.beginBatch("bookmark");
+            DedupStore.markSeen("bookmark", "bookmark:1");
+            DedupStore.endBatch("bookmark");
         } finally {
             off("storage:state-committed", handler);
         }

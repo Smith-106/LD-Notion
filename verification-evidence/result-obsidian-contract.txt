@@ -1,0 +1,8 @@
+10:    _safeVaultPath: (path) => String(path || "")
+18:        if (!UrlValidator.validateObsidianUrl(apiUrl)) {
+27:                    url: `${apiUrl}/vault/`,
+28:                    headers: { Authorization: `Bearer ${apiKey}` },
+44:        if (!UrlValidator.validateObsidianUrl(apiUrl)) {
+47:        const safePath = ObsidianAPI._safeVaultPath(path);
+54:                    url: `${apiUrl}/vault/${safePath}`,
+56:                        Authorization: `Bearer ${apiKey}`,

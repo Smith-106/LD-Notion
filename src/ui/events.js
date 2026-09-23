@@ -12,7 +12,7 @@ const { ZhihuAPI, GenericExtractor, WorkspaceService } = require("../extract");
 const { UICommandService } = require("../coordination/UICommandService");
 const { Exporter, LinuxDoAPI, GenericExporter } = require("../export");
 const { AutoImporter, UpdateChecker, GitHubAutoImporter, GitHubAPI, GitHubExporter } = require("../import");
-const { BookmarkBridge, BookmarkAutoImporter, RSSAutoImporter, BookmarkExporter, BookmarkOrganizer } = require("../bridge");
+const { BookmarkBridge, BookmarkAutoImporter, BookmarkExporter, BookmarkOrganizer } = require("../bridge");
 const { AIService, ChatUI, AIClassifier, AgentTrace, ChatState } = require("../ai");
 const { DesignSystem } = require("./design-system");
 const { PanelResize } = require("./panel-resize");
@@ -603,71 +603,11 @@ const UIEvents = {
             }
         };
 
-        refs.rssFeedUrlsInput.onchange = (e) => {
-            Storage.set(CONFIG.STORAGE_KEYS.RSS_FEED_URLS, e.target.value.trim());
-        };
-
-        refs.rssAutoImportEnabled.onchange = (e) => {
-            const enabled = !!e.target.checked;
-            Storage.set(CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, enabled);
-            refs.rssAutoImportOptions.style.display = enabled ? "block" : "none";
-
-            if (enabled) {
-                const apiKey = NotionOAuth.getAccessToken(refs.apiKeyInput.value.trim());
-                const exportTargetType = refs.exportTargetPageRadio.checked ? "page" : "database";
-                if (!apiKey) {
-                    RSSAutoImporter.updateStatus("❌ 请先配置 Notion API Key");
-                    // F-UI-10:配置不完整时回写开关,避免假启用
-                    e.target.checked = false;
-                    Storage.set(CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, false);
-                    refs.rssAutoImportOptions.style.display = "none";
-                    return;
-                }
-                if (exportTargetType !== "database") {
-                    RSSAutoImporter.updateStatus("❌ RSS 自动同步仅支持导出到 Notion 数据库");
-                    e.target.checked = false;
-                    Storage.set(CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, false);
-                    refs.rssAutoImportOptions.style.display = "none";
-                    return;
-                }
-                if (!refs.databaseIdInput.value.trim()) {
-                    RSSAutoImporter.updateStatus("❌ 请先配置 Notion 数据库 ID");
-                    e.target.checked = false;
-                    Storage.set(CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, false);
-                    refs.rssAutoImportOptions.style.display = "none";
-                    return;
-                }
-                if (RSSAutoImporter.getFeedUrls(refs.rssFeedUrlsInput.value).length === 0) {
-                    RSSAutoImporter.updateStatus("❌ 请先配置至少一个 RSS Feed URL");
-                    e.target.checked = false;
-                    Storage.set(CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, false);
-                    refs.rssAutoImportOptions.style.display = "none";
-                    return;
-                }
-
-                const interval = parseInt(refs.rssAutoImportInterval.value, 10) || 0;
-                Storage.set(CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_INTERVAL, interval);
-                RSSAutoImporter.run();
-                if (interval > 0) RSSAutoImporter.startPolling(interval);
-            } else {
-                RSSAutoImporter.stopPolling();
-                RSSAutoImporter.updateStatus("");
-            }
-        };
-
-        refs.rssAutoImportInterval.onchange = (e) => {
-            const interval = parseInt(e.target.value, 10) || 0;
-            Storage.set(CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_INTERVAL, interval);
-            RSSAutoImporter.stopPolling();
-            if (interval > 0 && Storage.get(CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, false)) {
-                RSSAutoImporter.startPolling(interval);
-            }
-        };
-
-        refs.rssDedupModeSelect.onchange = (e) => {
-            const mode = e.target.value === "allow_duplicates" ? "allow_duplicates" : "strict";
-            Storage.set(CONFIG.STORAGE_KEYS.RSS_IMPORT_DEDUP_MODE, mode);
-        };
+        // v3.15 RSS 功能已移除: 相关 refs 已从面板删除; 守卫式保留防旧缓存面板崩溃
+        if (refs.rssFeedUrlsInput) refs.rssFeedUrlsInput.onchange = () => {};
+        if (refs.rssAutoImportEnabled) refs.rssAutoImportEnabled.onchange = () => {};
+        if (refs.rssAutoImportInterval) refs.rssAutoImportInterval.onchange = () => {};
+        if (refs.rssDedupModeSelect) refs.rssDedupModeSelect.onchange = () => {};
 
         // F-UI-05:各来源「立即导入」按钮(完整同步:拉取 + 写 Notion + 推进水位)
         const bindImportNow = (btn, label, runner) => {
@@ -698,7 +638,6 @@ const UIEvents = {
         bindImportNow(refs.importNowLinuxdoBtn, "Linux.do 导入", () => AutoImporter.run());
         bindImportNow(refs.importNowGithubBtn, "GitHub 导入", () => GitHubAutoImporter.run());
         bindImportNow(refs.importNowBookmarkBtn, "书签导入", () => BookmarkAutoImporter.run());
-        bindImportNow(refs.importNowRssBtn, "RSS 导入", () => RSSAutoImporter.run());
 
         refs.linuxdoDedupModeSelect.onchange = (e) => {
             const mode = e.target.value === "allow_duplicates" ? "allow_duplicates" : "strict";

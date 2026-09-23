@@ -210,11 +210,13 @@ describe("P4 收敛(c04-c08): 三模型复审第二批", () => {
         expect(src).toContain("const handleRaw = post.username && post.username !== (post.name || post.username) ?");
     });
 
-    it("RSS needsUpdate 与写入侧同口径(用 _safeUrl 比较)", () => {
-        // P4 收敛(c07 续): 写入侧 safeUrl 为空时不发「链接」字段 —— 仅在本次有可写链接时才比对
-        const src = read("src/bridge/RSSAutoImporter.js");
-        expect(src).toContain("const safeUrl = RSSAutoImporter._safeUrl(item.url);");
-        expect(src).toContain('if (safeUrl && String(pageMeta.url || "") !== safeUrl) return true;');
+    it("Bookmark needsUpdate 与写入侧同口径(URL 比对)", () => {
+        // v3.15 RSS 移除: 原 RSS _safeUrl 同口径语义由 Bookmark 等价承担 —— 写入侧非 http(s)
+        // 不发「链接」字段, 需更新判定以本次链接漂移为准
+        const src = read("src/bridge/BookmarkAutoImporter.js");
+        expect(src).toContain('if (pageMeta.url !== String(bookmark.url || "").trim()) return true;');
+        const exp = read("src/bridge/BookmarkExporter.js");
+        expect(exp).toContain("? bookmark.url : null");
     });
 
     it("strict 去重含本批内重复 URL", () => {

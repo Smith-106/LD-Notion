@@ -26,7 +26,7 @@ const coreCode = extractUserscriptIifeBody(userScriptContent).replace(/\n\s*main
 const FACTORY_NAMES = [
     'require_AdapterRegistry', 'require_BookmarkAutoImporter', 'require_BookmarkExporter',
     'require_DedupStore', 'require_GitHubAPI', 'require_GitHubAutoImporter',
-    'require_GitHubExporter', 'require_RSSAutoImporter', 'require_SourceAdapter',
+    'require_GitHubExporter', 'require_SourceAdapter',
     'require_SyncCoordinator', 'require_SyncScheduler', 'require_SyncState',
     'require_UpdateChecker', 'require_UrlValidator', 'require_ai', 'require_api',
     'require_auth', 'require_bridge', 'require_config', 'require_design_system',

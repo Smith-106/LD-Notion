@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.14.35
+// @version      3.15.0
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -81,7 +81,7 @@
       "use strict";
       var CONFIG2 = {
         // Keep in sync with package.json + userscript @version + build.js header.
-        SCRIPT_VERSION: "3.14.35",
+        SCRIPT_VERSION: "3.15.0",
         // 编译期 feature flag: 多端同步。默认关闭——off 时 main.js 不初始化同步引擎、
         // 零网络/零定时器/零 DOM,行为与关闭前字节级一致(F-SYNC-11)。
         MULTI_DEVICE_SYNC_ENABLED: false,
@@ -172,10 +172,6 @@
           GITHUB_AUTO_IMPORT_INTERVAL: "ldb_github_auto_import_interval",
           BOOKMARK_AUTO_IMPORT_ENABLED: "ldb_bookmark_auto_import_enabled",
           BOOKMARK_AUTO_IMPORT_INTERVAL: "ldb_bookmark_auto_import_interval",
-          RSS_FEED_URLS: "ldb_rss_feed_urls",
-          RSS_AUTO_IMPORT_ENABLED: "ldb_rss_auto_import_enabled",
-          RSS_AUTO_IMPORT_INTERVAL: "ldb_rss_auto_import_interval",
-          RSS_IMPORT_DEDUP_MODE: "ldb_rss_import_dedup_mode",
           BOOKMARK_SOURCE: "ldb_bookmark_source",
           LINUXDO_IMPORT_DEDUP_MODE: "ldb_linuxdo_import_dedup_mode",
           BOOKMARK_IMPORT_DEDUP_MODE: "ldb_bookmark_import_dedup_mode",
@@ -201,7 +197,6 @@
           SYNC_INTERVAL_LINUXDO: "ldb_sync_interval_linuxdo",
           SYNC_INTERVAL_GITHUB: "ldb_sync_interval_github",
           SYNC_INTERVAL_BOOKMARKS: "ldb_sync_interval_bookmarks",
-          SYNC_INTERVAL_RSS: "ldb_sync_interval_rss",
           // Obsidian 导出
           OBS_API_URL: "ldb_obs_api_url",
           OBS_API_KEY: "ldb_obs_api_key",
@@ -269,10 +264,6 @@
           githubAutoImportInterval: 5,
           bookmarkAutoImportEnabled: false,
           bookmarkAutoImportInterval: 5,
-          rssFeedUrls: "",
-          rssAutoImportEnabled: false,
-          rssAutoImportInterval: 5,
-          rssImportDedupMode: "strict",
           bookmarkSource: "linuxdo",
           linuxdoImportDedupMode: "strict",
           bookmarkImportDedupMode: "strict",
@@ -307,7 +298,6 @@
           syncIntervalLinuxdo: 30,
           syncIntervalGithub: 60,
           syncIntervalBookmarks: 120,
-          syncIntervalRss: 60,
           // Obsidian 导出默认值
           obsApiUrl: "https://127.0.0.1:27124",
           obsApiKey: "",
@@ -674,7 +664,6 @@
               "github-gists": this._makeSourceDefault(),
               "github-meta": this._makeSourceDefault(),
               bookmark: this._makeSourceDefault(true),
-              rss: this._makeSourceDefault(true),
               zhihu: this._makeSourceDefault(),
               generic: this._makeSourceDefault()
             }
@@ -717,7 +706,7 @@
         },
         /**
          * 从 V1 迁移到 V2 扁平结构
-         * V1: { linuxdo: {...}, github: { meta, stars, repos, forks, gists }, bookmarks, rss }
+         * V1: { linuxdo: {...}, github: { meta, stars, repos, forks, gists }, bookmarks }
          * V2: { version: 2, sources: { linuxdo, github-stars, github-repos, ... } }
          */
         _migrateV1toV2(v1State) {
@@ -736,9 +725,6 @@
           if (v1State.bookmarks) {
             sources.bookmark = this.normalizeSyncRecord(v1State.bookmarks, { keepSnapshot: true });
           }
-          if (v1State.rss) {
-            sources.rss = this.normalizeSyncRecord(v1State.rss, { keepSnapshot: true });
-          }
           return { version: this.VERSION, sources };
         },
         _load() {
@@ -751,7 +737,7 @@
             parsed = {};
           }
           if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) parsed = {};
-          const hasV1Shape = !parsed.version && (parsed.linuxdo || parsed.github || parsed.bookmarks || parsed.rss);
+          const hasV1Shape = !parsed.version && (parsed.linuxdo || parsed.github || parsed.bookmarks);
           if (parsed.version < this.VERSION || hasV1Shape) {
             parsed = this._migrateV1toV2(parsed);
           }
@@ -759,13 +745,16 @@
             parsed.sources.bookmark = parsed.sources.bookmarks;
             delete parsed.sources.bookmarks;
           }
+          if (parsed.sources && parsed.sources.rss) {
+            delete parsed.sources.rss;
+          }
           if (!parsed.sources) parsed.sources = {};
           for (const key of Object.keys(defaults.sources)) {
             if (!parsed.sources[key]) {
-              parsed.sources[key] = this._makeSourceDefault(key === "bookmark" || key === "rss");
+              parsed.sources[key] = this._makeSourceDefault(key === "bookmark");
             } else {
               parsed.sources[key] = this.normalizeSyncRecord(parsed.sources[key], {
-                keepSnapshot: key === "bookmark" || key === "rss"
+                keepSnapshot: key === "bookmark"
               });
             }
           }
@@ -826,7 +815,7 @@
         getSourceState(sourceType) {
           const state = this._load();
           return this._clone(state.sources[sourceType] || this._makeSourceDefault(
-            sourceType === "bookmark" || sourceType === "rss"
+            sourceType === "bookmark"
           ));
         },
         /**
@@ -838,7 +827,7 @@
         updateSourceState(sourceType, patch = {}) {
           var _a;
           const state = this._load();
-          const withSnapshot = sourceType === "bookmark" || sourceType === "rss";
+          const withSnapshot = sourceType === "bookmark";
           const cleanPatch = {};
           for (const [k, v] of Object.entries(patch)) {
             if (v !== void 0) cleanPatch[k] = v;
@@ -864,7 +853,7 @@
          */
         resetSourceState(sourceType) {
           const state = this._load();
-          const withSnapshot = sourceType === "bookmark" || sourceType === "rss";
+          const withSnapshot = sourceType === "bookmark";
           const previous = state.sources[sourceType] || {};
           state.sources[sourceType] = this._makeSourceDefault(withSnapshot);
           state.sources[sourceType].epoch = (Number(previous.epoch) || 0) + 1;
@@ -1159,7 +1148,7 @@
       var { emit } = require_event_bus();
       var DEDUP_TTL_MS = 90 * 24 * 60 * 60 * 1e3;
       var DEDUP_CAPACITY_LIMIT = 1e4;
-      var URL_KEYED_SOURCES = Object.freeze(["bookmark", "rss", "zhihu", "generic"]);
+      var URL_KEYED_SOURCES = Object.freeze(["bookmark", "zhihu", "generic"]);
       var HASH_PREFIX = "h:";
       var DedupStore = {
         DEDUP_TTL_MS,
@@ -1497,7 +1486,7 @@
             GM_addValueChangeListener(CONFIG2.STORAGE_KEYS.EXPORTED_TOPICS, () => {
               Storage2._exportedTopicsCache = null;
             });
-            for (const sourceType of ["linuxdo", "bookmark", "rss", "github-stars", "github-repos", "github-forks", "github-gists", "zhihu", "generic"]) {
+            for (const sourceType of ["linuxdo", "bookmark", "github-stars", "github-repos", "github-forks", "github-gists", "zhihu", "generic"]) {
               GM_addValueChangeListener(
                 `${CONFIG2.STORAGE_KEYS.EXPORTED_TOPICS}:${sourceType}`,
                 () => {
@@ -1606,6 +1595,8 @@
         updateGitHubMeta: (patch) => SyncStateV2.updateSourceState("github-meta", patch),
         getBookmarkState: () => SyncStateV2.getSourceState("bookmark"),
         updateBookmarkState: (patch) => SyncStateV2.updateSourceState("bookmark", patch),
+        // v3.15 RSS 功能已移除: 仅保留兼容壳供旧测试/旧数据静默降级(通用 get/set 透传,
+        // 不再有预置 rss 源, _load 会剪枝存量; 同步白名单亦不再含 rss, 不会参与多端同步)
         getRssState: () => SyncStateV2.getSourceState("rss"),
         updateRssState: (patch) => SyncStateV2.updateSourceState("rss", patch),
         // F-04 修复：重置指定源增量基线（下次同步退化为全量）
@@ -8125,15 +8116,32 @@ Content-Type: ${safeContentType}\r
       var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
       var LinuxDoAPI2 = {
         _getUsername: () => {
-          var _a;
+          var _a, _b, _c, _d;
           const path = window.location.pathname;
           const match = path.match(/\/u\/([^/]+)/);
-          if (match) return match[1];
+          if (match) return decodeURIComponent(match[1]);
           const meta = document.querySelector('meta[name="discourse-username"]');
-          if (meta == null ? void 0 : meta.content) return meta.content;
+          if (meta == null ? void 0 : meta.content) return meta.content.trim();
+          const userLink = document.querySelector('.current-user a[href^="/u/"]') || document.querySelector('.d-header-icons .current-user a[href^="/u/"]') || document.querySelector('.header-dropdown-toggle.current-user[href^="/u/"]');
+          if (userLink) {
+            const href = userLink.getAttribute("href") || "";
+            const hrefMatch = href.match(/\/u\/([^/?#]+)/);
+            if (hrefMatch && /^[A-Za-z0-9_.-]+$/.test(decodeURIComponent(hrefMatch[1]))) {
+              return decodeURIComponent(hrefMatch[1]);
+            }
+            const card = (userLink.getAttribute("data-user-card") || "").trim();
+            if (card) return card;
+          }
+          try {
+            const discourseUser = (_c = (_b = (_a = window.Discourse) == null ? void 0 : _a.User) == null ? void 0 : _b.current) == null ? void 0 : _c.call(_b);
+            const name = ((discourseUser == null ? void 0 : discourseUser.username) || "").trim();
+            if (name) return name;
+          } catch (e) {
+            console.warn("[LD-Notion] Discourse \u7528\u6237\u540D\u63A2\u6D4B\u5931\u8D25:", e);
+          }
           const userMenu = document.querySelector(".user-menu .username, .user-menu .d-label");
           if (userMenu) {
-            const text = (_a = userMenu.textContent) == null ? void 0 : _a.trim();
+            const text = (_d = userMenu.textContent) == null ? void 0 : _d.trim();
             if (text) return text;
           }
           const avatar = document.querySelector("img.avatar");
@@ -8146,9 +8154,14 @@ Content-Type: ${safeContentType}\r
         getRequestOpts: () => {
           var _a;
           const csrf = (_a = document.querySelector('meta[name="csrf-token"]')) == null ? void 0 : _a.content;
-          const headers = { "x-requested-with": "XMLHttpRequest" };
-          if (csrf) headers["x-csrf-token"] = csrf;
-          return { headers };
+          const headers = {
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "X-Requested-With": "XMLHttpRequest",
+            "Discourse-Present": "true",
+            "Discourse-Logged-In": "true"
+          };
+          if (csrf) headers["X-CSRF-Token"] = csrf;
+          return { headers, credentials: "include" };
         },
         fetchJson: async (url, retries = 2) => {
           let lastErr = null;
@@ -8171,13 +8184,40 @@ Content-Type: ${safeContentType}\r
           }
           throw lastErr || new Error("fetchJson failed");
         },
-        // 获取收藏列表
+        // 获取收藏列表(新版 Discourse serializer 字段: id/title/fancy_title/topic_id/
+        // bookmarkable_id/bookmarkable_type/bookmarkable_url/excerpt/bumped_at/slug).
+        // Post 收藏时 bookmarkable_id=postId 而 topic_id=话题 ID —— 下游 exportTopic 必须用
+        // resolveTopicId 取话题 ID(否则 /t/{postId}.json 404 → 单帖导出失败)。
         fetchBookmarks: async (username, page = 0) => {
-          const url = `${window.location.origin}/u/${username}/bookmarks.json?page=${page}`;
+          const url = `${window.location.origin}/u/${encodeURIComponent(username)}/bookmarks.json?page=${page}`;
           const data = await LinuxDoAPI2.fetchJson(url);
           return data;
         },
-        getBookmarkId: (bookmark) => String((bookmark == null ? void 0 : bookmark.topic_id) || (bookmark == null ? void 0 : bookmark.bookmarkable_id) || ""),
+        // 从 bookmark 项解析话题 ID: topic_id 优先(Post/Topic 收藏均有) → bookmarkable_url
+        // 尾段数字(/t/slug/123 或 /t/123/45 取话题段) → Topic 收藏的 bookmarkable_id。
+        // Post 收藏 bookmarkable_id 为 postId, 不可直接作为话题 ID(旧实现误用致 404)。
+        resolveTopicId: (bookmark) => {
+          const direct = bookmark == null ? void 0 : bookmark.topic_id;
+          if (direct !== void 0 && direct !== null && String(direct) !== "") return String(direct);
+          const rawUrl = (bookmark == null ? void 0 : bookmark.bookmarkable_url) || (bookmark == null ? void 0 : bookmark.url) || "";
+          if (rawUrl) {
+            try {
+              const path = new URL(String(rawUrl), window.location.origin).pathname;
+              const segs = path.split("/").filter(Boolean);
+              const tIndex = segs.indexOf("t");
+              if (tIndex >= 0) {
+                const numeric = segs.slice(tIndex + 1).find((seg) => /^\d+$/.test(seg));
+                if (numeric) return numeric;
+              }
+            } catch {
+            }
+          }
+          if (String((bookmark == null ? void 0 : bookmark.bookmarkable_type) || "").toLowerCase() === "topic" && (bookmark == null ? void 0 : bookmark.bookmarkable_id)) {
+            return String(bookmark.bookmarkable_id);
+          }
+          return String((bookmark == null ? void 0 : bookmark.bookmarkable_id) || (bookmark == null ? void 0 : bookmark.id) || "");
+        },
+        getBookmarkId: (bookmark) => LinuxDoAPI2.resolveTopicId(bookmark),
         getBookmarkSyncTime: (bookmark) => (bookmark == null ? void 0 : bookmark.created_at) || (bookmark == null ? void 0 : bookmark.bookmarked_at) || (bookmark == null ? void 0 : bookmark.updated_at) || "",
         // 获取所有收藏
         fetchAllBookmarks: async (username, onProgress) => {
@@ -8234,13 +8274,23 @@ Content-Type: ${safeContentType}\r
           const url = `${window.location.origin}/t/${topicId}.json`;
           return await LinuxDoAPI2.fetchJson(url);
         },
-        // 获取帖子所有楼层
+        // 获取帖子所有楼层(含 403 登录态诊断: 未登录/cookie 缺失时 Discourse 返回 403,
+        // 原实现仅抛 HTTP 403, 用户看到"导出失败"无从下手; 此处给出可行动提示)。
         fetchAllPosts: async (topicId, onProgress) => {
           var _a, _b, _c, _d, _e, _f, _g, _h;
           const opts = LinuxDoAPI2.getRequestOpts();
-          const idData = await LinuxDoAPI2.fetchJson(
-            `${window.location.origin}/t/${topicId}/post_ids.json?post_number=0&limit=99999`
-          );
+          const failHint = "\u53EF\u80FD\u672A\u767B\u5F55\u6216\u767B\u5F55\u6001\u5931\u6548: \u8BF7\u786E\u8BA4\u5DF2\u5728 linux.do \u767B\u5F55\u540E\u91CD\u8BD5";
+          let idData;
+          try {
+            idData = await LinuxDoAPI2.fetchJson(
+              `${window.location.origin}/t/${topicId}/post_ids.json?post_number=0&limit=99999`
+            );
+          } catch (e) {
+            if (/\bHTTP\s+40[13]\b/.test(String((e == null ? void 0 : e.message) || e))) {
+              throw new Error(`\u83B7\u53D6\u5E16\u5B50\u5217\u8868\u5931\u8D25(${e.message}), ${failHint}`);
+            }
+            throw e;
+          }
           let postIds = idData.post_ids || [];
           const mainData = await LinuxDoAPI2.fetchJson(`${window.location.origin}/t/${topicId}.json`);
           const mainFirstPost = (_b = (_a = mainData.post_stream) == null ? void 0 : _a.posts) == null ? void 0 : _b[0];
@@ -13716,15 +13766,15 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           return rawItems.map((item) => this.normalize(item));
         },
         normalize(raw) {
-          const topicId = raw.topic_id || raw.bookmarkable_id || raw.id || "";
+          const topicId = LinuxDoAPI2.resolveTopicId ? LinuxDoAPI2.resolveTopicId(raw) : String(raw.topic_id || raw.bookmarkable_id || raw.id || "");
           return {
             source: "linuxdo",
             id: String(topicId),
-            title: raw.name || raw.title || "",
-            content: "",
-            url: topicId ? `https://linux.do/t/${topicId}` : "",
+            title: raw.title || raw.fancy_title || raw.name || "",
+            content: raw.excerpt || "",
+            url: raw.bookmarkable_url ? String(raw.bookmarkable_url) : topicId ? `https://linux.do/t/${topicId}` : "",
             author: raw.username || "",
-            tags: [],
+            tags: Array.isArray(raw.tags) ? raw.tags.map((t) => typeof t === "string" ? t : (t == null ? void 0 : t.name) || "").filter(Boolean) : [],
             createdAt: raw.created_at || raw.bookmarked_at || raw.updated_at || "",
             raw
           };
@@ -13885,81 +13935,6 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
     }
   });
 
-  // src/adapter/RSSAdapter.js
-  var require_RSSAdapter = __commonJS({
-    "src/adapter/RSSAdapter.js"(exports, module) {
-      "use strict";
-      var { SourceAdapter } = require_SourceAdapter();
-      var RSSAdapter = Object.assign(Object.create(SourceAdapter), {
-        sourceType: "rss",
-        // 注入的 lazy bridge accessor；adapter/index.js 注册时设置。
-        _bridgeAccessor: null,
-        // 运行时解析 bridge 模块（RSSAutoImporter）。
-        _getBridge() {
-          if (this._bridgeAccessor) return this._bridgeAccessor() || {};
-          return require_bridge();
-        },
-        async fetchIncremental(watermark) {
-          return this._fetchItems(watermark);
-        },
-        async fetchAll() {
-          return this._fetchItems(null);
-        },
-        normalize(raw) {
-          return {
-            source: "rss",
-            // v3.14.6 (DC-007): 实际拉取路径产物带 id/url → 键派生单源化,
-            // 与落账键 `rss:${item.id}` 对齐(此前恒 'rss:' 致适配器级去重失效)
-            id: raw.id || raw.guid || raw.link || "",
-            title: raw.title || "",
-            content: raw.content || raw.summary || "",
-            // parseFeedXml/normalizeItem 用 url; 原始 feed 项可能仅有 link
-            url: raw.url || raw.link || "",
-            feedUrl: raw.feedUrl || "",
-            author: raw.creator || raw.author || "",
-            tags: raw.categories || [],
-            // RSSAutoImporter.normalizeItem 输出 publishedAt(ISO), 适配器原读 pubDate/isoDate 恒空 →
-            // watermark 过滤死 + 每次全量拉取(全盘审计 find 14 修复)
-            createdAt: raw.pubDate || raw.isoDate || raw.publishedAt || "",
-            raw
-          };
-        },
-        getDedupKey(item) {
-          const { RSSAutoImporter: RSSAutoImporter2 } = this._getBridge();
-          if (typeof (RSSAutoImporter2 == null ? void 0 : RSSAutoImporter2.buildDedupStoreKey) === "function") {
-            return RSSAutoImporter2.buildDedupStoreKey(item);
-          }
-          return `rss:${(item == null ? void 0 : item.id) || ""}`;
-        },
-        async _fetchItems(watermark) {
-          var _a;
-          const { RSSAutoImporter: RSSAutoImporter2 } = this._getBridge();
-          if (!RSSAutoImporter2 || typeof RSSAutoImporter2.getFeedUrls !== "function") return [];
-          const feedUrls = RSSAutoImporter2.getFeedUrls();
-          const allItems = [];
-          const results = await Promise.allSettled(
-            feedUrls.map((feedUrl) => RSSAutoImporter2.fetchFeed(feedUrl))
-          );
-          for (const result of results) {
-            if (result.status === "fulfilled" && Array.isArray((_a = result.value) == null ? void 0 : _a.items)) {
-              allItems.push(...result.value.items);
-            }
-          }
-          const normalized = allItems.map((item) => this.normalize(item));
-          if (watermark && watermark.time) {
-            return normalized.filter((item) => {
-              const itemTime = item.createdAt;
-              if (!itemTime) return true;
-              return itemTime > watermark.time;
-            });
-          }
-          return normalized;
-        }
-      });
-      module.exports = { RSSAdapter };
-    }
-  });
-
   // src/adapter/ZhihuAdapter.js
   var require_ZhihuAdapter = __commonJS({
     "src/adapter/ZhihuAdapter.js"(exports, module) {
@@ -14060,19 +14035,16 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
       var { LinuxDoAdapter } = require_LinuxDoAdapter();
       var { createGitHubAdapter } = require_GitHubAdapter();
       var { BookmarkAdapter } = require_BookmarkAdapter();
-      var { RSSAdapter } = require_RSSAdapter();
       var { ZhihuAdapter } = require_ZhihuAdapter();
       var { GenericAdapter } = require_GenericAdapter();
       var lazyBridge = () => require_bridge();
       Object.assign(BookmarkAdapter, { _bridgeAccessor: lazyBridge });
-      Object.assign(RSSAdapter, { _bridgeAccessor: lazyBridge });
       AdapterRegistry.register(LinuxDoAdapter);
       AdapterRegistry.register(createGitHubAdapter("stars"));
       AdapterRegistry.register(createGitHubAdapter("repos"));
       AdapterRegistry.register(createGitHubAdapter("forks"));
       AdapterRegistry.register(createGitHubAdapter("gists"));
       AdapterRegistry.register(BookmarkAdapter);
-      AdapterRegistry.register(RSSAdapter);
       AdapterRegistry.register(ZhihuAdapter);
       AdapterRegistry.register(GenericAdapter);
       module.exports = { SourceAdapter, AdapterRegistry };
@@ -14208,8 +14180,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         "github-repos": CONFIG2.STORAGE_KEYS.SYNC_INTERVAL_GITHUB,
         "github-forks": CONFIG2.STORAGE_KEYS.SYNC_INTERVAL_GITHUB,
         "github-gists": CONFIG2.STORAGE_KEYS.SYNC_INTERVAL_GITHUB,
-        bookmark: CONFIG2.STORAGE_KEYS.SYNC_INTERVAL_BOOKMARKS,
-        rss: CONFIG2.STORAGE_KEYS.SYNC_INTERVAL_RSS
+        bookmark: CONFIG2.STORAGE_KEYS.SYNC_INTERVAL_BOOKMARKS
       };
       var SOURCE_INTERVAL_DEFAULTS = {
         linuxdo: CONFIG2.DEFAULTS.syncIntervalLinuxdo,
@@ -14217,8 +14188,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         "github-repos": CONFIG2.DEFAULTS.syncIntervalGithub,
         "github-forks": CONFIG2.DEFAULTS.syncIntervalGithub,
         "github-gists": CONFIG2.DEFAULTS.syncIntervalGithub,
-        bookmark: CONFIG2.DEFAULTS.syncIntervalBookmarks,
-        rss: CONFIG2.DEFAULTS.syncIntervalRss
+        bookmark: CONFIG2.DEFAULTS.syncIntervalBookmarks
       };
       var SOURCE_ENABLED_KEYS = {
         linuxdo: CONFIG2.STORAGE_KEYS.AUTO_IMPORT_ENABLED,
@@ -14226,8 +14196,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         "github-repos": CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED,
         "github-forks": CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED,
         "github-gists": CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED,
-        bookmark: CONFIG2.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED,
-        rss: CONFIG2.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED
+        bookmark: CONFIG2.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED
       };
       var RETRY_DELAYS = [5 * 60 * 1e3, 15 * 60 * 1e3, 60 * 60 * 1e3];
       var MAX_RETRIES = RETRY_DELAYS.length + 2;
@@ -14237,8 +14206,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         "github-repos": () => require_import().GitHubAutoImporter.run(),
         "github-forks": () => require_import().GitHubAutoImporter.run(),
         "github-gists": () => require_import().GitHubAutoImporter.run(),
-        bookmark: () => require_bridge().BookmarkAutoImporter.run(),
-        rss: () => require_bridge().RSSAutoImporter.run()
+        bookmark: () => require_bridge().BookmarkAutoImporter.run()
       };
       var SyncScheduler = {
         _timers: /* @__PURE__ */ new Map(),
@@ -15110,869 +15078,6 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
     }
   });
 
-  // src/bridge/RSSAutoImporter.js
-  var require_RSSAutoImporter = __commonJS({
-    "src/bridge/RSSAutoImporter.js"(exports, module) {
-      "use strict";
-      var { CONFIG: CONFIG2 } = require_config();
-      var { Utils: Utils2 } = require_utils();
-      var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
-      var { NotionOAuth: NotionOAuth2 } = require_auth();
-      var { NotionAPI: NotionAPI2 } = require_api();
-      var { SyncLock } = require_sync_lock();
-      var { SyncCoordinator } = require_SyncCoordinator();
-      var { BookmarkExporter: BookmarkExporter2 } = require_BookmarkExporter();
-      var { BookmarkAutoImporter: BookmarkAutoImporter2 } = require_BookmarkAutoImporter();
-      var { emit } = require_event_bus();
-      var RSSAutoImporter2 = {
-        isRunning: false,
-        timerId: null,
-        initTimerId: null,
-        deferredWhileHidden: false,
-        visibilityListenerBound: false,
-        lastRunAt: 0,
-        minimumRunGapMs: 60 * 1e3,
-        updateStatus: (text) => {
-          const el = document.querySelector("#ldb-rss-auto-import-status");
-          if (el) el.textContent = text;
-        },
-        buildSettings: () => ({
-          apiKey: NotionOAuth2.getAccessToken(),
-          databaseId: Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_DATABASE_ID, ""),
-          exportTargetType: Storage2.get(CONFIG2.STORAGE_KEYS.EXPORT_TARGET_TYPE, CONFIG2.DEFAULTS.exportTargetType),
-          aiApiKey: Storage2.get(CONFIG2.STORAGE_KEYS.AI_API_KEY, ""),
-          aiService: Storage2.get(CONFIG2.STORAGE_KEYS.AI_SERVICE, CONFIG2.DEFAULTS.aiService),
-          aiModel: Storage2.get(CONFIG2.STORAGE_KEYS.AI_MODEL, ""),
-          aiBaseUrl: Storage2.get(CONFIG2.STORAGE_KEYS.AI_BASE_URL, ""),
-          categories: Utils2.parseAICategories(
-            Storage2.get(CONFIG2.STORAGE_KEYS.AI_CATEGORIES, CONFIG2.DEFAULTS.aiCategories)
-          )
-        }),
-        getFeedUrls: (raw = Storage2.get(CONFIG2.STORAGE_KEYS.RSS_FEED_URLS, CONFIG2.DEFAULTS.rssFeedUrls)) => {
-          const urls = String(raw || "").split(/[\n,，;；]/).map((item) => item.trim()).filter(Boolean).filter((item) => /^https?:\/\//i.test(item));
-          const { UrlValidator } = require_UrlValidator();
-          const safe = urls.filter((item) => {
-            const ok = UrlValidator.validatePageExternalUrl(item);
-            if (!ok) console.warn("[LD-Notion] RSS feed \u5730\u5740\u88AB\u62D2(\u975E\u516C\u7F51 http(s)):", item);
-            return ok;
-          });
-          return Array.from(new Set(safe));
-        },
-        getDedupMode: () => {
-          const mode = Storage2.get(CONFIG2.STORAGE_KEYS.RSS_IMPORT_DEDUP_MODE, CONFIG2.DEFAULTS.rssImportDedupMode);
-          return mode === "allow_duplicates" ? "allow_duplicates" : "strict";
-        },
-        canStart: () => {
-          if (!Storage2.get(CONFIG2.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, false)) return false;
-          const settings = RSSAutoImporter2.buildSettings();
-          return settings.exportTargetType === "database" && !!(settings.apiKey && settings.databaseId) && RSSAutoImporter2.getFeedUrls().length > 0;
-        },
-        ensureVisibilityListener: () => {
-          if (RSSAutoImporter2.visibilityListenerBound) return;
-          document.addEventListener("visibilitychange", () => {
-            if (!document.hidden && RSSAutoImporter2.deferredWhileHidden) {
-              RSSAutoImporter2.deferredWhileHidden = false;
-              Utils2.runWhenBrowserIdle(() => {
-                if (!Storage2.get(CONFIG2.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, false)) return;
-                RSSAutoImporter2.run();
-              });
-            }
-          });
-          RSSAutoImporter2.visibilityListenerBound = true;
-        },
-        stopPolling: () => {
-          if (RSSAutoImporter2.initTimerId) {
-            clearTimeout(RSSAutoImporter2.initTimerId);
-            RSSAutoImporter2.initTimerId = null;
-          }
-          RSSAutoImporter2.deferredWhileHidden = false;
-          const { SyncScheduler } = require_SyncScheduler();
-          SyncScheduler.stop("rss");
-        },
-        startPolling: (intervalMinutes) => {
-          const { SyncScheduler } = require_SyncScheduler();
-          SyncScheduler.start("rss", intervalMinutes);
-        },
-        escapeRegExp: (text) => String(text || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
-        decodeXmlEntities: (text) => String(text || "").replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'").replace(/&amp;/gi, "&"),
-        stripHtml: (text, maxLen = 1200) => BookmarkExporter2.normalizeText(
-          RSSAutoImporter2.decodeXmlEntities(String(text || "").replace(/<[^>]+>/g, " ")),
-          maxLen
-        ),
-        extractTagText: (block, names = []) => {
-          const source = String(block || "");
-          for (const name of names || []) {
-            const escaped = RSSAutoImporter2.escapeRegExp(name);
-            const match = source.match(new RegExp(`<${escaped}\\b[^>]*>([\\s\\S]*?)<\\/${escaped}>`, "i"));
-            if (match == null ? void 0 : match[1]) {
-              return RSSAutoImporter2.decodeXmlEntities(match[1]).trim();
-            }
-          }
-          return "";
-        },
-        extractTagTexts: (block, names = []) => {
-          const source = String(block || "");
-          const values = [];
-          for (const name of names || []) {
-            const escaped = RSSAutoImporter2.escapeRegExp(name);
-            const regex = new RegExp(`<${escaped}\\b[^>]*>([\\s\\S]*?)<\\/${escaped}>`, "gi");
-            let match = null;
-            while (match = regex.exec(source)) {
-              const value = RSSAutoImporter2.decodeXmlEntities(match[1]).trim();
-              if (value) values.push(value);
-            }
-          }
-          return values;
-        },
-        extractAtomCategoryTerms: (block) => {
-          const values = [];
-          const regex = /<category\b[^>]*term=["']([^"']+)["'][^>]*\/?>/gi;
-          let match = null;
-          while (match = regex.exec(String(block || ""))) {
-            const value = RSSAutoImporter2.decodeXmlEntities(match[1]).trim();
-            if (value) values.push(value);
-          }
-          return values;
-        },
-        extractLink: (block, isAtom = false) => {
-          var _a, _b, _c;
-          const source = String(block || "");
-          if (isAtom) {
-            const linkTags = source.match(/<link\b[^>]*\/?>/gi) || [];
-            let firstHref = "";
-            for (const tag of linkTags) {
-              const href = (_a = tag.match(/href=["']([^"']+)["']/i)) == null ? void 0 : _a[1];
-              if (!href) continue;
-              const rel = (_c = (_b = tag.match(/rel=["']([^"']*)["']/i)) == null ? void 0 : _b[1]) == null ? void 0 : _c.toLowerCase();
-              if (rel === "alternate") return RSSAutoImporter2.decodeXmlEntities(href).trim();
-              if (!rel && !firstHref) firstHref = href;
-            }
-            if (firstHref) return RSSAutoImporter2.decodeXmlEntities(firstHref).trim();
-          }
-          return RSSAutoImporter2.extractTagText(source, ["link"]);
-        },
-        normalizeItem: (item = {}) => {
-          const title = BookmarkExporter2.normalizeText(item.title || item.url || "\u672A\u547D\u540D RSS \u6761\u76EE", 280) || "\u672A\u547D\u540D RSS \u6761\u76EE";
-          const url = String(item.url || "").trim();
-          const feedTitle = BookmarkExporter2.normalizeText(item.feedTitle || "", 160);
-          const summary = BookmarkExporter2.normalizeText(item.summary || "", 1900);
-          const tags = Array.isArray(item.tags) ? Array.from(new Set(item.tags.map((tag) => BookmarkExporter2.normalizeText(tag, 100)).filter(Boolean))) : [];
-          const id = BookmarkExporter2.normalizeText(
-            String(item.id || url || `${feedTitle || "feed"}::${title}`),
-            300
-          ) || url || `${feedTitle || "feed"}::${title}`;
-          return {
-            id,
-            title,
-            url,
-            summary,
-            tags,
-            feedTitle,
-            feedUrl: String(item.feedUrl || "").trim(),
-            publishedAt: SyncState2.normalizeTime(item.publishedAt || "")
-          };
-        },
-        buildItemKey: (item, dedupMode = RSSAutoImporter2.getDedupMode()) => {
-          const normalized = RSSAutoImporter2.normalizeItem(item);
-          if (dedupMode === "allow_duplicates") {
-            return `${normalized.feedUrl || "feed"}::${normalized.id}`;
-          }
-          return String(normalized.url || normalized.id || "").trim();
-        },
-        // DedupStore / SyncCoordinator 过滤键(与 RSSAdapter.getDedupKey 同构)。
-        // allow_duplicates: rss:{feedUrl}::{id}; strict: rss:{id}。
-        // 与 snapshot 用的 buildItemKey(URL 或 feed::id 无 rss: 前缀)刻意分轨。
-        buildDedupStoreKey: (item, dedupMode = RSSAutoImporter2.getDedupMode()) => {
-          var _a, _b;
-          const id = String((item == null ? void 0 : item.id) || ((_a = item == null ? void 0 : item.raw) == null ? void 0 : _a.id) || (item == null ? void 0 : item.guid) || (item == null ? void 0 : item.link) || "").trim();
-          if (dedupMode === "allow_duplicates") {
-            const feedUrl = String((item == null ? void 0 : item.feedUrl) || ((_b = item == null ? void 0 : item.raw) == null ? void 0 : _b.feedUrl) || "feed").trim() || "feed";
-            return `rss:${feedUrl}::${id}`;
-          }
-          return `rss:${id}`;
-        },
-        parseFeedXml: (xml, feedUrl = "") => {
-          const source = String(xml || "").trim();
-          if (!source) return { feedTitle: "", items: [] };
-          const isAtom = /<feed[\s>]/i.test(source) && !/<rss[\s>]/i.test(source);
-          const header = isAtom ? source.split(/<entry\b/i)[0] : (() => {
-            const channelMatch = source.match(/<channel\b[^>]*>([\s\S]*?)(?:<item\b|<\/channel>)/i);
-            return (channelMatch == null ? void 0 : channelMatch[1]) || source.split(/<item\b/i)[0];
-          })();
-          const feedTitle = RSSAutoImporter2.stripHtml(
-            RSSAutoImporter2.extractTagText(header, ["title"]),
-            160
-          );
-          const entryRegex = isAtom ? /<entry\b[^>]*>([\s\S]*?)<\/entry>/gi : /<item\b[^>]*>([\s\S]*?)<\/item>/gi;
-          const items = [];
-          let match = null;
-          while (match = entryRegex.exec(source)) {
-            const block = match[1];
-            const title = RSSAutoImporter2.stripHtml(
-              RSSAutoImporter2.extractTagText(block, ["title"]),
-              280
-            );
-            const url = RSSAutoImporter2.extractLink(block, isAtom);
-            const itemId = RSSAutoImporter2.extractTagText(
-              block,
-              isAtom ? ["id"] : ["guid"]
-            ) || url || title;
-            const publishedAt = RSSAutoImporter2.extractTagText(
-              block,
-              isAtom ? ["published", "updated"] : ["pubDate", "dc:date", "published", "updated"]
-            );
-            const summary = RSSAutoImporter2.stripHtml(
-              RSSAutoImporter2.extractTagText(
-                block,
-                isAtom ? ["summary", "content"] : ["description", "content:encoded"]
-              ),
-              1900
-            );
-            const tags = [
-              ...RSSAutoImporter2.extractTagTexts(block, ["category"]),
-              ...isAtom ? RSSAutoImporter2.extractAtomCategoryTerms(block) : []
-            ];
-            const normalized = RSSAutoImporter2.normalizeItem({
-              id: itemId,
-              title,
-              url,
-              summary,
-              tags,
-              feedTitle,
-              feedUrl,
-              publishedAt
-            });
-            if (!normalized.url || !normalized.id) continue;
-            items.push(normalized);
-          }
-          items.sort((a, b) => {
-            const aTime = Date.parse(a.publishedAt || "") || 0;
-            const bTime = Date.parse(b.publishedAt || "") || 0;
-            if (bTime !== aTime) return bTime - aTime;
-            return String(a.id).localeCompare(String(b.id));
-          });
-          return { feedTitle, items };
-        },
-        fetchFeed: (feedUrl) => {
-          return new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-              method: "GET",
-              url: feedUrl,
-              timeout: 15e3,
-              headers: {
-                "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.8"
-              },
-              onload: (response) => {
-                if (response.status < 200 || response.status >= 300) {
-                  reject(new Error(`HTTP ${response.status}`));
-                  return;
-                }
-                try {
-                  resolve(RSSAutoImporter2.parseFeedXml(response.responseText || "", feedUrl));
-                } catch (error) {
-                  reject(error);
-                }
-              },
-              ontimeout: () => reject(new Error("RSS \u62C9\u53D6\u8D85\u65F6")),
-              onerror: () => reject(new Error("RSS \u62C9\u53D6\u5931\u8D25"))
-            });
-          });
-        },
-        // 带重试的 fetchFeed：RSS feed 公网稳定性差，单次抖动不应阻断整次同步。
-        // 最多重试 2 次（共 3 次尝试），指数退避 1s/2s。
-        fetchFeedWithRetry: async (feedUrl, retries = 2) => {
-          let lastError;
-          for (let attempt = 0; attempt <= retries; attempt++) {
-            try {
-              return await RSSAutoImporter2.fetchFeed(feedUrl);
-            } catch (error) {
-              lastError = error;
-              const msg = String(error && error.message || error || "");
-              if (/\bHTTP\s+40[013]\b/.test(msg)) throw error;
-              if (attempt < retries) {
-                await Utils2.sleep(1e3 * Math.pow(2, attempt));
-              }
-            }
-          }
-          throw lastError;
-        },
-        fetchTrackedPages: async (databaseId, apiKey) => {
-          const filter = {
-            and: [
-              { property: "\u6765\u6E90", rich_text: { equals: "RSS" } },
-              { property: "\u6765\u6E90\u7C7B\u578B", rich_text: { equals: "Feed" } }
-            ]
-          };
-          const pages = [];
-          let cursor = null;
-          try {
-            do {
-              const response = await NotionAPI2.queryDatabase(databaseId, filter, null, cursor, apiKey);
-              pages.push(...(response == null ? void 0 : response.results) || []);
-              cursor = (response == null ? void 0 : response.has_more) ? response.next_cursor : null;
-            } while (cursor);
-          } catch (error) {
-            if (/could not find property|validation/i.test(String((error == null ? void 0 : error.message) || ""))) return [];
-            throw error;
-          }
-          return pages.map((page) => ({
-            pageId: String((page == null ? void 0 : page.id) || "").trim(),
-            url: BookmarkAutoImporter2.getPageUrl(page, "\u94FE\u63A5"),
-            title: Utils2.getPageTitle(page, "").trim(),
-            summary: BookmarkAutoImporter2.getPageRichText(page, "\u63CF\u8FF0"),
-            publishedAt: BookmarkAutoImporter2.getPageDate(page, "\u6536\u85CF\u65F6\u95F4"),
-            archived: !!(page == null ? void 0 : page.archived)
-          })).filter((page) => page.pageId && !page.archived);
-        },
-        buildPageIndex: (pages = []) => {
-          const byUrl = /* @__PURE__ */ new Map();
-          const byPageId = /* @__PURE__ */ new Map();
-          const byTitle = /* @__PURE__ */ new Map();
-          for (const page of pages || []) {
-            if (page.pageId) byPageId.set(page.pageId, page);
-            if (page.url && !byUrl.has(page.url)) byUrl.set(page.url, page);
-            if (page.title && !byTitle.has(page.title)) byTitle.set(page.title, page);
-          }
-          return { byUrl, byPageId, byTitle };
-        },
-        buildSnapshotEntry: (item, pageId = "") => {
-          const normalized = RSSAutoImporter2.normalizeItem(item);
-          return {
-            ...normalized,
-            pageId: String(pageId || "").trim(),
-            itemKey: RSSAutoImporter2.buildItemKey(normalized)
-          };
-        },
-        // 自动同步写入审计（C1 审计完整性，CWE-862）。与 BookmarkAutoImporter._auditAutoSync 同模式：
-        // canExecute 非阻塞闸门 + OperationLog 成功/失败审计，批量场景不弹 dialog。
-        // actor/source 经 context 注入（与 BookmarkAutoImporter._auditAutoSync 参数化保持一致，
-        // ISS-20260724-011）；未传时保持 RSS 自动同步默认值，向后兼容。
-        _auditAutoSync: (operation, status, context = {}) => {
-          try {
-            const { OperationLog: OperationLog2 } = require_security();
-            OperationLog2.add({
-              audit_event: OperationLog2.inferAuditEvent(operation, status),
-              actor: context.actor || "system",
-              source: context.source || "rss-auto-sync",
-              operationName: operation,
-              status,
-              context
-            });
-          } catch (e) {
-            console.warn("[LD-Notion] RSS \u81EA\u52A8\u540C\u6B65\u5BA1\u8BA1\u5199\u5165\u5931\u8D25:", e);
-          }
-        },
-        // v3.14.6 (XN-03): 链接属性安全校验 —— 仅 http(s) 公网(拒内网/169.254/非 http 协议)
-        _safeUrl: (url) => {
-          if (!url) return "";
-          const { UrlValidator } = require_UrlValidator();
-          return UrlValidator.validatePageExternalUrl(String(url).trim()) ? String(url).trim().slice(0, 2e3) : "";
-        },
-        buildProperties: (item) => {
-          const normalized = RSSAutoImporter2.normalizeItem(item);
-          const inferredCategory = BookmarkExporter2.normalizeText((item == null ? void 0 : item.inferredCategory) || "", 300);
-          const tags = Array.from(/* @__PURE__ */ new Set([
-            ...normalized.feedTitle ? [normalized.feedTitle] : [],
-            ...Array.isArray(normalized.tags) ? normalized.tags : []
-          ]));
-          const safeUrl = RSSAutoImporter2._safeUrl(normalized.url);
-          const properties = {
-            "\u6807\u9898": {
-              title: [{ text: { content: normalized.title } }]
-            },
-            "\u6765\u6E90": {
-              rich_text: [{ text: { content: "RSS" } }]
-            },
-            "\u6765\u6E90\u7C7B\u578B": {
-              rich_text: [{ text: { content: "Feed" } }]
-            }
-          };
-          if (safeUrl) {
-            properties["\u94FE\u63A5"] = { url: safeUrl };
-          }
-          if (normalized.summary) {
-            properties["\u63CF\u8FF0"] = {
-              rich_text: [{ text: { content: normalized.summary } }]
-            };
-          }
-          if (normalized.publishedAt) {
-            properties["\u6536\u85CF\u65F6\u95F4"] = { date: { start: normalized.publishedAt } };
-          }
-          if (inferredCategory) {
-            properties["\u5206\u7C7B"] = {
-              rich_text: [{ text: { content: inferredCategory } }]
-            };
-          }
-          if (tags.length > 0) {
-            properties["\u6807\u7B7E"] = {
-              multi_select: tags.map((tag) => BookmarkExporter2.normalizeText(tag, 100)).filter(Boolean).slice(0, 8).map((name) => ({ name }))
-            };
-          }
-          return properties;
-        },
-        enrichItem: async (item, settings, context = {}) => {
-          const normalized = RSSAutoImporter2.normalizeItem(item);
-          const enriched = {
-            ...normalized,
-            inferredCategory: BookmarkExporter2.inferCategoryHeuristic(
-              { title: normalized.title, url: normalized.url, folderPath: normalized.feedTitle },
-              { title: normalized.title, summary: normalized.summary },
-              (settings == null ? void 0 : settings.categories) || []
-            )
-          };
-          const canUseAI = !!((settings == null ? void 0 : settings.aiApiKey) && (settings == null ? void 0 : settings.aiService) && Array.isArray(settings == null ? void 0 : settings.categories) && settings.categories.length > 0);
-          const aiMaxItems = Number.isFinite(context.aiMaxItems) ? context.aiMaxItems : 20;
-          if (canUseAI && (context.aiUsedCount || 0) < aiMaxItems) {
-            context.aiUsedCount = (context.aiUsedCount || 0) + 1;
-            try {
-              const aiCategory = await BookmarkExporter2.generateAICategory(
-                { title: normalized.title, url: normalized.url },
-                { title: normalized.title, summary: normalized.summary },
-                settings
-              );
-              if (aiCategory) {
-                const whitelisted = ((settings == null ? void 0 : settings.categories) || []).some(
-                  (c) => String(c).trim().toLowerCase() === String(aiCategory).trim().toLowerCase()
-                );
-                if (whitelisted) {
-                  enriched.inferredCategory = aiCategory;
-                } else {
-                  console.warn(`[LD-Notion] RSS AI \u5206\u7C7B\u4E0D\u5728\u767D\u540D\u5355\uFF0C\u4F7F\u7528\u542F\u53D1\u5F0F fallback: ${aiCategory}`);
-                }
-              }
-            } catch (e) {
-              console.warn("[LD-Notion] RSS AI \u5206\u7C7B\u5931\u8D25\uFF0C\u4F7F\u7528\u542F\u53D1\u5F0F fallback:", e);
-              context.aiFailureCount = (context.aiFailureCount || 0) + 1;
-            }
-          }
-          return enriched;
-        },
-        needsUpdate: (item, snapshotEntry, pageMeta) => {
-          if (!pageMeta) return true;
-          if (!snapshotEntry) return false;
-          const safeUrl = RSSAutoImporter2._safeUrl(item.url);
-          if (safeUrl && String(pageMeta.url || "") !== safeUrl) return true;
-          if (String(pageMeta.title || "") !== String(item.title || "")) return true;
-          if (String(pageMeta.summary || "") !== String(item.summary || "")) return true;
-          return SyncState2.normalizeTime(pageMeta.publishedAt) !== SyncState2.normalizeTime(item.publishedAt);
-        },
-        loadCurrentItems: async () => {
-          const feedUrls = RSSAutoImporter2.getFeedUrls();
-          const dedupMode = RSSAutoImporter2.getDedupMode();
-          const itemsByKey = /* @__PURE__ */ new Map();
-          let failedCount = 0;
-          for (const feedUrl of feedUrls) {
-            let parsed;
-            try {
-              parsed = await RSSAutoImporter2.fetchFeedWithRetry(feedUrl);
-            } catch (error) {
-              failedCount++;
-              console.error(`[LD-Notion] RSS feed \u62C9\u53D6\u5931\u8D25\uFF08\u5DF2\u91CD\u8BD5\uFF09\uFF0C\u8DF3\u8FC7: ${feedUrl}`, error);
-              continue;
-            }
-            for (const rawItem of parsed.items || []) {
-              const normalized = RSSAutoImporter2.normalizeItem({
-                ...rawItem,
-                feedTitle: rawItem.feedTitle || parsed.feedTitle || "",
-                feedUrl
-              });
-              const itemKey = RSSAutoImporter2.buildItemKey(normalized, dedupMode);
-              const existing = itemsByKey.get(itemKey);
-              if (!existing) {
-                itemsByKey.set(itemKey, { ...normalized, itemKey });
-                continue;
-              }
-              const nextTime = Date.parse(normalized.publishedAt || "") || 0;
-              const currentTime = Date.parse(existing.publishedAt || "") || 0;
-              if (nextTime >= currentTime) {
-                itemsByKey.set(itemKey, {
-                  ...existing,
-                  ...normalized,
-                  tags: Array.from(/* @__PURE__ */ new Set([...existing.tags || [], ...normalized.tags || []])),
-                  itemKey
-                });
-              }
-            }
-          }
-          return {
-            feedCount: feedUrls.length,
-            failedCount,
-            items: Array.from(itemsByKey.values()).sort((a, b) => {
-              const aTime = Date.parse(a.publishedAt || "") || 0;
-              const bTime = Date.parse(b.publishedAt || "") || 0;
-              if (bTime !== aTime) return bTime - aTime;
-              return String(a.id).localeCompare(String(b.id));
-            })
-          };
-        },
-        // 初始化同步上下文：增量同步 + 数据库配置 + 索引构建（MNT-002 提取自 run）
-        _initSyncContext: async (settings, attemptAt) => {
-          SyncState2.updateRssState({
-            lastAttemptAt: attemptAt,
-            lastOutcome: "running",
-            lastError: "",
-            lastStats: {}
-          });
-          RSSAutoImporter2.updateStatus("\u6B63\u5728\u540C\u6B65 RSS Feed...");
-          const syncResult = await SyncCoordinator.sync("rss", { commitWatermark: false });
-          if (syncResult.error) {
-            throw new Error(syncResult.error);
-          }
-          const setupResult = await BookmarkExporter2.setupDatabaseProperties(settings.databaseId, settings.apiKey);
-          if (!setupResult.success) {
-            const setupError = new Error(`\u6570\u636E\u5E93\u914D\u7F6E\u5931\u8D25: ${setupResult.error}`);
-            if (setupResult.isAuthTerminal === true) {
-              setupError.isAuthTerminal = true;
-              setupError.authCode = setupResult.authCode || "unauthorized";
-            }
-            throw setupError;
-          }
-          const previousState = SyncState2.getRssState();
-          const previousSnapshot = (previousState == null ? void 0 : previousState.snapshot) && typeof previousState.snapshot === "object" ? previousState.snapshot : {};
-          let currentItems = syncResult.newItems || [];
-          if (currentItems.length > 0) {
-            const dedupMode = RSSAutoImporter2.getDedupMode();
-            currentItems = currentItems.map((item) => ({
-              ...item,
-              itemKey: item.itemKey || RSSAutoImporter2.buildItemKey(item, dedupMode)
-            }));
-          }
-          let feedCount = RSSAutoImporter2.getFeedUrls().length;
-          let hasFullItemSet = false;
-          let feedFailedCount = 0;
-          if (currentItems.length === 0) {
-            const fallback = await RSSAutoImporter2.loadCurrentItems();
-            currentItems = fallback.items || [];
-            feedCount = fallback.feedCount || feedCount;
-            feedFailedCount = Number(fallback.failedCount) || 0;
-            hasFullItemSet = true;
-          }
-          const trackedPages = await RSSAutoImporter2.fetchTrackedPages(settings.databaseId, settings.apiKey);
-          const index = RSSAutoImporter2.buildPageIndex(trackedPages);
-          return {
-            syncResult,
-            previousSnapshot,
-            currentItems,
-            feedCount,
-            feedFailedCount,
-            hasFullItemSet,
-            index,
-            nextSnapshot: { ...previousSnapshot },
-            delay: Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay),
-            enrichContext: { aiUsedCount: 0, aiMaxItems: 20 }
-          };
-        },
-        // 同步单条 RSS 条目（MNT-002 提取自 run 循环体）
-        _syncSingleRssItem: async (item, ctx) => {
-          const { settings, index, previousSnapshot, nextSnapshot, enrichContext, total } = ctx;
-          const snapshotEntry = previousSnapshot[item.itemKey] || null;
-          const titleMatch = item.title ? index.byTitle.get(item.title) : null;
-          const safeTitleMatch = titleMatch && (!titleMatch.url || !item.url || titleMatch.url === item.url) ? titleMatch : null;
-          let pageMeta = (item.url ? index.byUrl.get(item.url) : null) || ((snapshotEntry == null ? void 0 : snapshotEntry.pageId) ? index.byPageId.get(snapshotEntry.pageId) : null) || safeTitleMatch;
-          let result = { created: 0, updated: 0, unchanged: 0, failed: 0, denied: 0, itemKey: item.itemKey };
-          let auditOp = "createDatabasePage";
-          try {
-            settings.apiKey = NotionOAuth2.getAccessToken("");
-            if (!pageMeta) {
-              RSSAutoImporter2.updateStatus(`\u6B63\u5728\u65B0\u589E RSS \u6761\u76EE (${ctx.position}/${total}): ${item.title}`);
-              const { OperationGuard: OperationGuard2 } = require_security();
-              if (!OperationGuard2.canExecute("createDatabasePage")) {
-                RSSAutoImporter2._auditAutoSync(
-                  "createDatabasePage",
-                  "denied",
-                  { itemKey: item.itemKey, itemName: item.title, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1ARSS \u81EA\u52A8\u540C\u6B65\u5EFA\u9875\u9700 level\u22651" }
-                );
-                result.denied = 1;
-                if (snapshotEntry) nextSnapshot[item.itemKey] = snapshotEntry;
-                result.success = false;
-                return result;
-              }
-              const enriched = await RSSAutoImporter2.enrichItem(item, settings, enrichContext);
-              const page = await NotionAPI2.request("POST", "/pages", {
-                parent: { database_id: settings.databaseId },
-                properties: RSSAutoImporter2.buildProperties(enriched)
-              }, settings.apiKey);
-              pageMeta = {
-                pageId: String((page == null ? void 0 : page.id) || "").trim(),
-                url: item.url,
-                title: item.title,
-                summary: item.summary,
-                publishedAt: item.publishedAt
-              };
-              RSSAutoImporter2._auditAutoSync(
-                "createDatabasePage",
-                "success",
-                { pageId: pageMeta.pageId, itemKey: item.itemKey, itemName: item.title, databaseId: settings.databaseId }
-              );
-              result.created = 1;
-            } else if (RSSAutoImporter2.needsUpdate(item, snapshotEntry, pageMeta)) {
-              auditOp = "updatePage";
-              RSSAutoImporter2.updateStatus(`\u6B63\u5728\u66F4\u65B0 RSS \u6761\u76EE (${ctx.position}/${total}): ${item.title}`);
-              const { OperationGuard: OperationGuard2 } = require_security();
-              if (!OperationGuard2.canExecute("updatePage")) {
-                RSSAutoImporter2._auditAutoSync(
-                  "updatePage",
-                  "denied",
-                  { pageId: pageMeta.pageId, itemKey: item.itemKey, itemName: item.title, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1ARSS \u81EA\u52A8\u540C\u6B65\u66F4\u65B0\u9700 level\u22651" }
-                );
-                result.denied = 1;
-                if (snapshotEntry) nextSnapshot[item.itemKey] = snapshotEntry;
-                result.success = false;
-                return result;
-              }
-              const enriched = await RSSAutoImporter2.enrichItem(item, settings, enrichContext);
-              await NotionAPI2.updatePage(pageMeta.pageId, RSSAutoImporter2.buildProperties(enriched), settings.apiKey);
-              RSSAutoImporter2._auditAutoSync(
-                "updatePage",
-                "success",
-                { pageId: pageMeta.pageId, itemKey: item.itemKey, itemName: item.title }
-              );
-              result.updated = 1;
-            } else {
-              result.unchanged = 1;
-            }
-            const pageId = (pageMeta == null ? void 0 : pageMeta.pageId) || (snapshotEntry == null ? void 0 : snapshotEntry.pageId) || "";
-            const syncedMeta = {
-              pageId,
-              url: item.url,
-              title: item.title,
-              summary: item.summary,
-              publishedAt: item.publishedAt
-            };
-            if (pageId) index.byPageId.set(pageId, syncedMeta);
-            if (syncedMeta.url) index.byUrl.set(syncedMeta.url, syncedMeta);
-            if (syncedMeta.title) index.byTitle.set(syncedMeta.title, syncedMeta);
-            if (result.created || result.updated || result.unchanged) {
-              SyncCoordinator.markItemSeen("rss", RSSAutoImporter2.buildDedupStoreKey(item));
-            }
-            nextSnapshot[item.itemKey] = RSSAutoImporter2.buildSnapshotEntry(item, pageId);
-            result.success = true;
-            return result;
-          } catch (error) {
-            if (error && error.isAuthTerminal === true) {
-              throw error;
-            }
-            console.error(`[LD-Notion] RSS \u81EA\u52A8\u540C\u6B65\u5931\u8D25: ${item.title || item.url}`, error);
-            RSSAutoImporter2._auditAutoSync(
-              auditOp,
-              "failed",
-              { itemKey: item.itemKey, itemName: item.title || item.url, reason: String((error == null ? void 0 : error.message) || error) }
-            );
-            result.failed = 1;
-            if (snapshotEntry) {
-              nextSnapshot[item.itemKey] = snapshotEntry;
-            }
-            result.success = false;
-            return result;
-          }
-        },
-        // 汇总 RSS 同步状态与 watermark（MNT-002 提取自 run）
-        _aggregateRssState: (ctx, stats, successfulKeys, attemptAt) => {
-          const { currentItems, feedCount, nextSnapshot, hasFullItemSet } = ctx;
-          const { created, updated, unchanged, failed } = stats;
-          const feedFailedCount = Number(ctx.feedFailedCount) || 0;
-          const allFeedsFailed = feedCount > 0 && feedFailedCount >= feedCount;
-          if (hasFullItemSet && currentItems.length > 0) {
-            const keptKeys = new Set(currentItems.map((item) => item.itemKey));
-            for (const key of Object.keys(nextSnapshot)) {
-              if (!keptKeys.has(key)) delete nextSnapshot[key];
-            }
-          }
-          const statePatch = {
-            snapshot: nextSnapshot,
-            lastAttemptAt: attemptAt,
-            lastOutcome: allFeedsFailed ? "error" : failed > 0 ? "partial" : "success",
-            lastError: allFeedsFailed ? `\u5168\u90E8 ${feedCount} \u4E2A RSS Feed \u62C9\u53D6\u5931\u8D25\uFF08\u5DF2\u91CD\u8BD5\uFF09` : "",
-            lastStats: {
-              feeds: feedCount,
-              scanned: currentItems.length,
-              created,
-              updated,
-              unchanged,
-              failed,
-              // R2: P0-4 的 stats.denied 须同落持久化, 否则同步中心读态丢失 denied 计数
-              denied: stats.denied || 0
-            }
-          };
-          if (currentItems.length === 0) {
-            if (!allFeedsFailed) statePatch.lastSuccessAt = Date.now();
-          } else {
-            const leadingSuccessfulItems = SyncState2.takeLeadingItems(
-              currentItems,
-              (entry) => successfulKeys.has(entry.itemKey)
-            );
-            if (leadingSuccessfulItems.length > 0) {
-              statePatch.watermark = SyncState2.buildWatermark(
-                leadingSuccessfulItems,
-                (entry) => entry.publishedAt,
-                (entry) => entry.id
-              );
-              statePatch.lastSuccessAt = Date.now();
-            } else if (failed === 0) {
-              statePatch.lastSuccessAt = Date.now();
-            }
-          }
-          SyncState2.updateRssState(statePatch);
-          if (created === 0 && updated === 0 && failed === 0 && (stats.denied || 0) === 0) {
-            if (allFeedsFailed) {
-              RSSAutoImporter2.updateStatus(`\u274C RSS \u540C\u6B65\u5931\u8D25\uFF1A\u5168\u90E8 ${feedCount} \u4E2A Feed \u62C9\u53D6\u5931\u8D25\uFF08\u5DF2\u91CD\u8BD5\uFF0C\u8BE6\u89C1\u63A7\u5236\u53F0\uFF09 (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`);
-              return;
-            }
-            const feedFailMsg2 = feedFailedCount > 0 ? `\uFF0C${feedFailedCount} \u4E2A Feed \u62C9\u53D6\u5931\u8D25` : "";
-            RSSAutoImporter2.updateStatus(`RSS \u5DF2\u540C\u6B65\uFF0C\u65E0\u65B0\u589E\u53D8\u66F4${feedFailMsg2} (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`);
-            return;
-          }
-          const deniedMsg = (stats.denied || 0) > 0 ? `\uFF0C${stats.denied} \u9879\u56E0\u6743\u9650\u4E0D\u8DB3\u8DF3\u8FC7\uFF08\u53EF\u5728\u8BBE\u7F6E\u4E2D\u63D0\u5347\u6743\u9650\u7EA7\u522B\uFF09` : "";
-          const feedFailMsg = feedFailedCount > 0 ? `\uFF0C${feedFailedCount} \u4E2A Feed \u62C9\u53D6\u5931\u8D25` : "";
-          RSSAutoImporter2.updateStatus(
-            `RSS \u81EA\u52A8\u540C\u6B65\u5B8C\u6210\uFF1A\u65B0\u589E ${created}\uFF0C\u66F4\u65B0 ${updated}\uFF0C\u65E0\u53D8\u66F4 ${unchanged}${failed > 0 ? `\uFF0C\u5931\u8D25 ${failed}` : ""}${deniedMsg}${feedFailMsg} (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`
-          );
-        },
-        run: async () => {
-          if (document.hidden) {
-            RSSAutoImporter2.deferredWhileHidden = true;
-            return;
-          }
-          if (RSSAutoImporter2.isRunning) return;
-          if (SyncLock.isExporting) return;
-          const settings = RSSAutoImporter2.buildSettings();
-          const feedUrls = RSSAutoImporter2.getFeedUrls();
-          if (settings.exportTargetType !== "database") {
-            RSSAutoImporter2.updateStatus("RSS \u81EA\u52A8\u540C\u6B65\u4EC5\u652F\u6301\u5BFC\u51FA\u5230 Notion \u6570\u636E\u5E93");
-            return { importedCount: 0, failedCount: 0, errors: ["RSS \u81EA\u52A8\u540C\u6B65\u4EC5\u652F\u6301\u5BFC\u51FA\u5230 Notion \u6570\u636E\u5E93"] };
-          }
-          if (!settings.apiKey || !settings.databaseId) {
-            RSSAutoImporter2.updateStatus("\u8BF7\u5148\u914D\u7F6E Notion API Key \u548C\u6570\u636E\u5E93 ID");
-            return { importedCount: 0, failedCount: 0, errors: ["\u8BF7\u5148\u914D\u7F6E Notion API Key \u548C\u6570\u636E\u5E93 ID"] };
-          }
-          if (feedUrls.length === 0) {
-            RSSAutoImporter2.updateStatus("\u8BF7\u5148\u914D\u7F6E\u81F3\u5C11\u4E00\u4E2A RSS Feed URL");
-            return { importedCount: 0, failedCount: 0, errors: ["\u8BF7\u5148\u914D\u7F6E\u81F3\u5C11\u4E00\u4E2A RSS Feed URL"] };
-          }
-          const now = Date.now();
-          if (now - RSSAutoImporter2.lastRunAt < RSSAutoImporter2.minimumRunGapMs) return;
-          RSSAutoImporter2.lastRunAt = now;
-          RSSAutoImporter2.isRunning = true;
-          SyncLock.isExporting = true;
-          let lease = null;
-          try {
-            lease = await SyncLock.acquireLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE);
-          } catch (error) {
-            RSSAutoImporter2.isRunning = false;
-            SyncLock.isExporting = false;
-            console.error("[LD-Notion] RSS \u81EA\u52A8\u540C\u6B65\u83B7\u53D6\u79DF\u7EA6\u5931\u8D25:", error);
-            RSSAutoImporter2.updateStatus("\u274C \u83B7\u53D6\u540C\u6B65\u79DF\u7EA6\u5931\u8D25\uFF0C\u672C\u8F6E\u8DF3\u8FC7");
-            return;
-          }
-          if (!lease) {
-            RSSAutoImporter2.isRunning = false;
-            SyncLock.isExporting = false;
-            RSSAutoImporter2.updateStatus("\u23F8 \u5176\u4ED6\u6807\u7B7E\u9875\u6B63\u5728\u540C\u6B65\uFF0C\u672C\u8F6E RSS \u540C\u6B65\u8DF3\u8FC7");
-            return;
-          }
-          let leaseLost = false;
-          const renewTimer = setInterval(() => {
-            let renewed;
-            try {
-              renewed = SyncLock.renewLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
-            } catch (renewError) {
-              console.warn("[LD-Notion] RSS \u81EA\u52A8\u540C\u6B65\u7EED\u7EA6\u5931\u8D25:", renewError);
-              renewed = false;
-            }
-            if (!renewed) {
-              leaseLost = true;
-              clearInterval(renewTimer);
-            }
-          }, 3e4);
-          const attemptAt = Date.now();
-          try {
-            const ctx = await RSSAutoImporter2._initSyncContext(settings, attemptAt);
-            const stats = { created: 0, updated: 0, unchanged: 0, failed: 0, denied: 0 };
-            const successfulKeys = /* @__PURE__ */ new Set();
-            const { DedupStore } = require_storage();
-            DedupStore.beginBatch("rss");
-            try {
-              for (let i = 0; i < ctx.currentItems.length && !leaseLost; i++) {
-                const r = await RSSAutoImporter2._syncSingleRssItem(ctx.currentItems[i], {
-                  settings,
-                  index: ctx.index,
-                  previousSnapshot: ctx.previousSnapshot,
-                  nextSnapshot: ctx.nextSnapshot,
-                  enrichContext: ctx.enrichContext,
-                  position: i + 1,
-                  total: ctx.currentItems.length
-                });
-                stats.created += r.created;
-                stats.updated += r.updated;
-                stats.unchanged += r.unchanged;
-                stats.failed += r.failed;
-                stats.denied += r.denied || 0;
-                if (r.success) successfulKeys.add(r.itemKey);
-                if (ctx.delay > 0 && i < ctx.currentItems.length - 1) {
-                  await Utils2.sleep(ctx.delay);
-                }
-              }
-              RSSAutoImporter2._aggregateRssState(ctx, stats, successfulKeys, attemptAt);
-              if (leaseLost) {
-                RSSAutoImporter2.updateStatus("\u23F8 \u540C\u6B65\u79DF\u7EA6\u5DF2\u88AB\u5176\u4ED6\u6807\u7B7E\u9875\u63A5\u7BA1\uFF0C\u672C\u8F6E RSS \u540C\u6B65\u4E2D\u6B62\uFF08\u5DF2\u5904\u7406\u90E8\u5206\u5DF2\u8BB0\u5F55\uFF09");
-              }
-              return {
-                importedCount: (stats.created || 0) + (stats.updated || 0),
-                failedCount: stats.failed || 0,
-                errors: []
-              };
-            } finally {
-              DedupStore.endBatch("rss");
-            }
-          } catch (error) {
-            console.error("[LD-Notion] RSS \u81EA\u52A8\u540C\u6B65\u51FA\u9519:", error);
-            SyncState2.updateRssState({
-              lastAttemptAt: attemptAt,
-              lastOutcome: "error",
-              lastError: (error == null ? void 0 : error.message) || String(error),
-              lastStats: {}
-            });
-            const authCode = String((error == null ? void 0 : error.authCode) || "").toLowerCase();
-            let statusText = `RSS \u81EA\u52A8\u540C\u6B65\u51FA\u9519: ${error.message}`;
-            if (authCode === "empty_token") {
-              statusText = "RSS \u81EA\u52A8\u540C\u6B65\u51FA\u9519: \u672A\u8BFB\u53D6\u5230\u5DF2\u4FDD\u5B58\u7684 API Key\uFF0C\u8BF7\u91CD\u65B0\u4FDD\u5B58\uFF08\u6216\u91CD\u65B0 OAuth \u4E00\u952E\u6388\u6743\uFF09";
-            } else if (authCode === "unauthorized" || authCode === "invalid_bearer_token") {
-              statusText = "RSS \u81EA\u52A8\u540C\u6B65\u51FA\u9519: Notion \u62D2\u7EDD\u4E86\u8BE5 API Key\uFF08\u53EF\u80FD\u5DF2\u5931\u6548\u6216\u590D\u5236\u4E0D\u5B8C\u6574\uFF09\uFF0C\u8BF7\u91CD\u65B0\u590D\u5236\u4FDD\u5B58\u6216\u91CD\u65B0 OAuth \u6388\u6743";
-            }
-            RSSAutoImporter2.updateStatus(statusText);
-            return { importedCount: 0, failedCount: 0, errors: [statusText] };
-          } finally {
-            clearInterval(renewTimer);
-            SyncLock.releaseLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
-            RSSAutoImporter2.isRunning = false;
-            SyncLock.isExporting = false;
-            emit("bookmarks:updated");
-            emit("sync:center-summary-updated");
-          }
-        },
-        init: () => {
-          if (!RSSAutoImporter2.canStart()) return;
-          RSSAutoImporter2.ensureVisibilityListener();
-          if (RSSAutoImporter2.initTimerId) clearTimeout(RSSAutoImporter2.initTimerId);
-          RSSAutoImporter2.initTimerId = setTimeout(() => {
-            RSSAutoImporter2.initTimerId = null;
-            if (!Storage2.get(CONFIG2.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, false)) return;
-            Utils2.runWhenBrowserIdle(() => {
-              if (!Storage2.get(CONFIG2.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, false)) return;
-              RSSAutoImporter2.run();
-            });
-            const interval = Storage2.get(
-              CONFIG2.STORAGE_KEYS.RSS_AUTO_IMPORT_INTERVAL,
-              CONFIG2.DEFAULTS.rssAutoImportInterval
-            );
-            if (interval > 0) RSSAutoImporter2.startPolling(interval);
-          }, 3e3);
-        }
-      };
-      module.exports = { RSSAutoImporter: RSSAutoImporter2 };
-    }
-  });
-
   // src/bridge/BookmarkOrganizer.js
   var require_BookmarkOrganizer = __commonJS({
     "src/bridge/BookmarkOrganizer.js"(exports, module) {
@@ -16275,7 +15380,6 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
       var { InstallHelper: InstallHelper2 } = require_api();
       var { BookmarkExporter: BookmarkExporter2 } = require_BookmarkExporter();
       var { BookmarkAutoImporter: BookmarkAutoImporter2 } = require_BookmarkAutoImporter();
-      var { RSSAutoImporter: RSSAutoImporter2 } = require_RSSAutoImporter();
       var { BookmarkOrganizer } = require_BookmarkOrganizer();
       // [LD-NOTION-BUILD:BOOKMARK_BRIDGE_START]
       var BookmarkBridge2 = {
@@ -16338,7 +15442,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         }
       };
       // [LD-NOTION-BUILD:BOOKMARK_BRIDGE_END]
-      module.exports = { BookmarkBridge: BookmarkBridge2, BookmarkExporter: BookmarkExporter2, BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2, BookmarkOrganizer };
+      module.exports = { BookmarkBridge: BookmarkBridge2, BookmarkExporter: BookmarkExporter2, BookmarkAutoImporter: BookmarkAutoImporter2, BookmarkOrganizer };
     }
   });
 
@@ -16467,7 +15571,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           };
         },
         // 链接属性安全校验 —— 仅 http(s) 公网(拒内网/169.254/非 http 协议)
-        // 与 BookmarkExporter(hy3 LOW)/RSSAutoImporter(XN-03) 对称: 三 exporter 写入侧统一防线
+        // 与 BookmarkExporter(hy3 LOW) 对称: exporter 写入侧统一防线
         _safeUrl: (url) => {
           const raw = String(url || "").trim();
           if (!raw) return null;
@@ -17012,7 +16116,10 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         },
         // 导出单个帖子
         exportTopic: async (bookmark, settings, onProgress) => {
-          const topicId = bookmark.topic_id || bookmark.bookmarkable_id;
+          const topicId = LinuxDoAPI2.resolveTopicId(bookmark);
+          if (!topicId) {
+            throw new Error(`\u65E0\u6CD5\u89E3\u6790\u8BDD\u9898 ID(\u6536\u85CF\u9879\u7F3A\u5C11 topic_id/bookmarkable_url): ${(bookmark == null ? void 0 : bookmark.title) || (bookmark == null ? void 0 : bookmark.name) || (bookmark == null ? void 0 : bookmark.fancy_title) || "\u672A\u77E5\u6807\u9898"}`);
+          }
           onProgress == null ? void 0 : onProgress({ stage: "fetch", message: "\u83B7\u53D6\u5E16\u5B50\u6570\u636E..." });
           const { topic, posts } = await LinuxDoAPI2.fetchAllPosts(topicId, (current, total) => {
             onProgress == null ? void 0 : onProgress({ stage: "fetch", message: `\u83B7\u53D6\u697C\u5C42 ${current}/${total}` });
@@ -17084,22 +16191,29 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         // 子串匹配会把一次网络抖动误判为认证终态而中止整批(用户报「几分钟后全部失败」主因)。
         isAuthTerminalError: (error) => !!(error && error.isAuthTerminal === true),
         // 认证中止时的剩余项收集:与取消路径同构,但保留原因说明供 UI 报告展示
+        // 经 resolveTopicId 统一话题 ID 口径(Post 收藏 bookmarkable_id 为 postId 不可直用)。
         _collectSkippedFrom: (bookmarks, remaining) => remaining.map((i) => {
           const b = bookmarks[i];
+          const topicId = LinuxDoAPI2.resolveTopicId(b);
           return {
-            topicId: b.topic_id || b.bookmarkable_id,
-            title: b.title || b.name || `\u5E16\u5B50 ${b.topic_id || b.bookmarkable_id}`
+            topicId,
+            title: b.title || b.fancy_title || b.name || `\u5E16\u5B50 ${topicId}`
           };
         }),
+        // 报告/跳过项统一话题 ID 口径 + 新版 serializer 标题回退(fancy_title)。
+        _bookmarkReportOf: (b) => {
+          const topicId = LinuxDoAPI2.resolveTopicId(b);
+          return {
+            topicId,
+            title: b.title || b.fancy_title || b.name || `\u5E16\u5B50 ${topicId}`
+          };
+        },
         exportBookmarks: async (bookmarks, settings, onProgress, startIndex = 0) => {
           if (SyncLock.isExporting) {
             return {
               success: [],
               failed: [],
-              skipped: bookmarks.slice(startIndex).map((b) => ({
-                topicId: b.topic_id || b.bookmarkable_id,
-                title: b.title || b.name || `\u5E16\u5B50 ${b.topic_id || b.bookmarkable_id}`
-              })),
+              skipped: bookmarks.slice(startIndex).map((b) => Exporter2._bookmarkReportOf(b)),
               message: "\u5DF2\u6709\u5BFC\u51FA\u8FDB\u884C\u4E2D\uFF0C\u5DF2\u8DF3\u8FC7\u672C\u6B21\u8BF7\u6C42"
             };
           }
@@ -17111,10 +16225,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
             return {
               success: [],
               failed: [],
-              skipped: bookmarks.slice(startIndex).map((b) => ({
-                topicId: b.topic_id || b.bookmarkable_id,
-                title: b.title || b.name || `\u5E16\u5B50 ${b.topic_id || b.bookmarkable_id}`
-              })),
+              skipped: bookmarks.slice(startIndex).map((b) => Exporter2._bookmarkReportOf(b)),
               message: "\u5176\u4ED6\u6807\u7B7E\u9875\u6B63\u5728\u5BFC\u51FA/\u540C\u6B65\uFF0C\u5DF2\u8DF3\u8FC7\u672C\u6B21\u8BF7\u6C42"
             };
           }
@@ -17157,8 +16268,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
               const i = remaining.shift();
               if (i === void 0) return;
               const bookmark = bookmarks[i];
-              const topicId = bookmark.topic_id || bookmark.bookmarkable_id;
-              const title = bookmark.title || bookmark.name || `\u5E16\u5B50 ${topicId}`;
+              const topicId = LinuxDoAPI2.resolveTopicId(bookmark);
+              const title = bookmark.title || bookmark.fancy_title || bookmark.name || `\u5E16\u5B50 ${topicId}`;
               const taskNum = i - startIndex + 1;
               try {
                 onProgress == null ? void 0 : onProgress({
@@ -18956,7 +18067,7 @@ ${insight.summary || ""}`,
         resolveNewBookmarks: ({ bookmarks = [], dedupStrict = true, remoteUrls = null } = {}) => {
           if (!dedupStrict) return bookmarks.slice();
           return bookmarks.filter((bookmark) => {
-            const topicId = String(bookmark.topic_id || bookmark.bookmarkable_id);
+            const topicId = LinuxDoAPI2.resolveTopicId(bookmark);
             if (remoteUrls) return !remoteUrls.has(`https://linux.do/t/${topicId}`);
             return !Storage2.isTopicExported(topicId);
           });
@@ -18966,7 +18077,7 @@ ${insight.summary || ""}`,
         // batch 纪律同 workspace-insight 对账回填: beginBatch→逐条 mark→endBatch+缓存失效(消除写侧 O(N²))。
         markRemoteExistingTopics: ({ bookmarks = [], newBookmarks = [], remoteUrls = null, dedupStrict = true } = {}) => {
           if (!remoteUrls || !dedupStrict || bookmarks.length <= newBookmarks.length) return 0;
-          const newIds = new Set(newBookmarks.map((b) => String(b.topic_id || b.bookmarkable_id || "")));
+          const newIds = new Set(newBookmarks.map((b) => LinuxDoAPI2.resolveTopicId(b)));
           let marked = 0;
           let linuxdoBatchOpened = false;
           try {
@@ -18976,7 +18087,7 @@ ${insight.summary || ""}`,
           }
           try {
             bookmarks.forEach((b) => {
-              const topicId = String(b.topic_id || b.bookmarkable_id || "");
+              const topicId = LinuxDoAPI2.resolveTopicId(b);
               if (!topicId || newIds.has(topicId)) return;
               if (remoteUrls.has(`https://linux.do/t/${topicId}`)) {
                 Storage2.markTopicExported(topicId);
@@ -18997,7 +18108,7 @@ ${insight.summary || ""}`,
         buildSettings: () => {
           const exportTargetType = Storage2.get(CONFIG2.STORAGE_KEYS.EXPORT_TARGET_TYPE, CONFIG2.DEFAULTS.exportTargetType);
           return {
-            // 与 Bookmark/RSS AutoImporter 对齐：经 getAccessToken 读取，避免绕过 OAuth 语义
+            // 与 Bookmark AutoImporter 对齐：经 getAccessToken 读取，避免绕过 OAuth 语义
             apiKey: NotionOAuth2.getAccessToken(""),
             databaseId: Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_DATABASE_ID, ""),
             parentPageId: Storage2.get(CONFIG2.STORAGE_KEYS.PARENT_PAGE_ID, ""),
@@ -19204,8 +18315,8 @@ ${insight.summary || ""}`,
               const i = remaining.shift();
               if (i === void 0) return;
               const bookmark = newBookmarks[i];
-              const topicId = String(bookmark.topic_id || bookmark.bookmarkable_id);
-              const title = bookmark.title || bookmark.name || `\u5E16\u5B50 ${topicId}`;
+              const topicId = LinuxDoAPI2.resolveTopicId(bookmark);
+              const title = bookmark.title || bookmark.fancy_title || bookmark.name || `\u5E16\u5B50 ${topicId}`;
               AutoImporter2.updateStatus(`\u{1F4EC} \u5BFC\u5165\u4E2D (${i + 1}/${newBookmarks.length}): ${title}`);
               try {
                 settings.apiKey = NotionOAuth2.getAccessToken("");
@@ -20229,7 +19340,7 @@ ${report}
         },
         // OpenAI 对话请求
         // AI 请求重试包装（M1 reliability）：瞬时网络抖动/超时/5xx/429 重试 2 次（1s/2s 指数退避），
-        // 401/400 等不可重试错误直接 reject。对比 NotionAPI 429 重试、RSS fetchFeedWithRetry。
+        // 401/400 等不可重试错误直接 reject。对比 NotionAPI 429 重试。
         _retryable: async (requestFn, retries = 2) => {
           let lastError;
           for (let attempt = 0; attempt <= retries; attempt++) {
@@ -24673,42 +23784,11 @@ ${systemText}
                                 </div>
                             </div>
                             <div id="ldb-bookmark-auto-import-status" style="font-size: var(--ldb-ui-font-size-sm); color: var(--ldb-ui-muted); margin-bottom: var(--ldb-ui-spacing-md);"></div>
-                            <div class="ldb-setting-row ldb-mb-8">
-                                <label style="display: flex; align-items: center; gap: var(--ldb-ui-spacing-sm); cursor: pointer;">
-                                    <input type="checkbox" id="ldb-rss-auto-import-enabled">
-                                    <span>\u542F\u7528 RSS \u81EA\u52A8\u540C\u6B65</span>
-                                </label>
-                            </div>
-                            <div id="ldb-rss-auto-import-options" style="display: none; margin-bottom: var(--ldb-ui-spacing-md);">
-                                <div class="ldb-setting-row" style="margin-bottom: var(--ldb-ui-spacing-md);">
-                                    <label for="ldb-rss-feed-urls" style="display: block; margin-bottom: var(--ldb-ui-spacing-sm);">RSS Feed URL</label>
-                                    <textarea id="ldb-rss-feed-urls" class="ldb-input" rows="3" placeholder="\u6BCF\u884C\u4E00\u4E2A RSS / Atom \u5730\u5740\uFF0C\u6216\u7528\u9017\u53F7\u5206\u9694"></textarea>
-                                </div>
-                                <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
-                                    <label for="ldb-rss-auto-import-interval" style="white-space: nowrap;">RSS \u540C\u6B65\u95F4\u9694</label>
-                                    <select id="ldb-rss-auto-import-interval" class="ldb-input ldb-flex-1">
-                                        <option value="0">\u4EC5\u9875\u9762\u52A0\u8F7D\u65F6</option>
-                                        <option value="3">\u6BCF 3 \u5206\u949F</option>
-                                        <option value="5" selected>\u6BCF 5 \u5206\u949F</option>
-                                        <option value="10">\u6BCF 10 \u5206\u949F</option>
-                                        <option value="30">\u6BCF 30 \u5206\u949F</option>
-                                    </select>
-                                </div>
-                                <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
-                                    <label for="ldb-rss-dedup-mode" style="white-space: nowrap;">RSS \u5BFC\u5165\u53BB\u91CD</label>
-                                    <select id="ldb-rss-dedup-mode" class="ldb-input ldb-flex-1">
-                                        <option value="strict">\u6309\u94FE\u63A5\u53BB\u91CD</option>
-                                        <option value="allow_duplicates">\u6309 Feed + ID \u4FDD\u7559\u91CD\u590D</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div id="ldb-rss-auto-import-status" style="font-size: var(--ldb-ui-font-size-sm); color: var(--ldb-ui-muted); margin-bottom: var(--ldb-ui-spacing-md);"></div>
                             <!-- F-UI-05:\u5404\u6765\u6E90\u300C\u7ACB\u5373\u5BFC\u5165\u300D\u6309\u94AE(\u4E0D\u4F9D\u8D56 AI \u6307\u4EE4,\u76F4\u63A5\u89E6\u53D1\u5B8C\u6574\u540C\u6B65) -->
                             <div class="ldb-input-group ldb-mt-12">
                                 <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-import-now-linuxdo">\u7ACB\u5373\u5BFC\u5165 Linux.do</button>
                                 <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-import-now-github">\u7ACB\u5373\u5BFC\u5165 GitHub</button>
                                 <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-import-now-bookmark">\u7ACB\u5373\u5BFC\u5165\u4E66\u7B7E</button>
-                                <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-import-now-rss">\u7ACB\u5373\u5BFC\u5165 RSS</button>
                             </div>
                             <div class="ldb-tip">\u7ACB\u5373\u5BFC\u5165\u4F1A\u6267\u884C\u5B8C\u6574\u540C\u6B65\uFF08\u62C9\u53D6 + \u5199\u5165 Notion + \u63A8\u8FDB\u6C34\u4F4D\uFF09\uFF0C\u4E0E\u81EA\u52A8\u540C\u6B65\u8DEF\u5F84\u4E00\u81F4\u3002</div>
                             <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
@@ -26047,6 +25127,11 @@ ${systemText}
           if ((bookmark == null ? void 0 : bookmark.source) === "github") {
             return `gh:${bookmark.sourceType}:${bookmark.itemKey}`;
           }
+          try {
+            const { LinuxDoAPI: LinuxDoAPI2 } = require_extract();
+            if (LinuxDoAPI2 == null ? void 0 : LinuxDoAPI2.resolveTopicId) return LinuxDoAPI2.resolveTopicId(bookmark);
+          } catch {
+          }
           return String((bookmark == null ? void 0 : bookmark.topic_id) || (bookmark == null ? void 0 : bookmark.bookmarkable_id) || "");
         },
         // v3.14.16: 导出状态依据（本地账本 | Notion 工作区快照只读覆盖）
@@ -26084,7 +25169,10 @@ ${systemText}
           if (bookmark.source === "github") {
             return UI2().normalizeWorkspaceInsightUrl(((_a = bookmark == null ? void 0 : bookmark.raw) == null ? void 0 : _a.html_url) || "");
           }
-          const topicId = String((bookmark == null ? void 0 : bookmark.topic_id) || (bookmark == null ? void 0 : bookmark.bookmarkable_id) || "");
+          if (bookmark == null ? void 0 : bookmark.bookmarkable_url) {
+            return UI2().normalizeWorkspaceInsightUrl(bookmark.bookmarkable_url);
+          }
+          const topicId = UI2().getBookmarkKey(bookmark);
           if (!topicId) return "";
           return UI2().normalizeWorkspaceInsightUrl(`https://linux.do/t/${topicId}`);
         },
@@ -26186,7 +25274,7 @@ ${systemText}
         buildBookmarkItemHtml: (bookmark, githubMode = false) => {
           var _a;
           const bookmarkKey = UI2().getBookmarkKey(bookmark);
-          const title = bookmark.title || bookmark.name || `\u5E16\u5B50 ${bookmarkKey}`;
+          const title = bookmark.title || bookmark.fancy_title || bookmark.name || `\u5E16\u5B50 ${bookmarkKey}`;
           const escapedTitle = Utils2.escapeHtml(title);
           const escapedTruncatedTitle = Utils2.escapeHtml(Utils2.truncateText(title, 35));
           const isExported = UI2().isBookmarkKeyExported(bookmarkKey);
@@ -26337,7 +25425,7 @@ ${systemText}
       var { ConfirmationDialog: ConfirmationDialog2 } = require_security();
       var { WorkspaceService: WorkspaceService2 } = require_extract();
       var { AutoImporter: AutoImporter2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2 } = require_import();
-      var { BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2 } = require_bridge();
+      var { BookmarkAutoImporter: BookmarkAutoImporter2 } = require_bridge();
       var { AIAssistant: AIAssistant2, AIService: AIService2, ChatUI: ChatUI2, getAISettings } = require_ai();
       var { AISchema } = require_schema();
       var _UI = null;
@@ -26811,10 +25899,6 @@ ${AIService2.isolateContent(JSON.stringify({
             if (!stats.created && !stats.updated && !stats.archived && !stats.failed && !stats.unchanged) return "\u6682\u65E0\u7EDF\u8BA1";
             return `\u65B0\u589E ${stats.created || 0}\uFF0C\u66F4\u65B0 ${stats.updated || 0}\uFF0C\u5F52\u6863 ${stats.archived || 0}\uFF0C\u65E0\u53D8\u66F4 ${stats.unchanged || 0}${stats.failed ? `\uFF0C\u5931\u8D25 ${stats.failed}` : ""}`;
           }
-          if (sourceKey === "rss") {
-            if (!stats.feeds && !stats.scanned && !stats.created && !stats.updated && !stats.failed && !stats.unchanged) return "\u6682\u65E0\u7EDF\u8BA1";
-            return `Feed ${stats.feeds || 0}\uFF0C\u626B\u63CF ${stats.scanned || 0}\uFF0C\u65B0\u589E ${stats.created || 0}\uFF0C\u66F4\u65B0 ${stats.updated || 0}\uFF0C\u65E0\u53D8\u66F4 ${stats.unchanged || 0}${stats.failed ? `\uFF0C\u5931\u8D25 ${stats.failed}` : ""}`;
-          }
           return "\u6682\u65E0\u7EDF\u8BA1";
         },
         buildUnifiedSyncModel: () => {
@@ -26833,8 +25917,6 @@ ${AIService2.isolateContent(JSON.stringify({
             state: SyncState2.getGitHubState(type)
           }));
           const bookmarkState = SyncState2.getBookmarkState();
-          const rssState = SyncState2.getRssState();
-          const rssFeedCount = RSSAutoImporter2.getFeedUrls().length;
           const sourceRows = [
             {
               key: "linuxdo",
@@ -26877,20 +25959,6 @@ ${AIService2.isolateContent(JSON.stringify({
               statsLabel: UI2().buildSyncStatsText("bookmarks", bookmarkState.lastStats),
               scheduleLabel: `\u8DDF\u8E2A ${Object.keys(bookmarkState.snapshot || {}).length} \u4E2A\u5DF2\u77E5\u4E66\u7B7E\u6620\u5C04`,
               detailLabel: "\u589E\u91CF\u57FA\u7EBF\u6765\u81EA\u4E66\u7B7E\u65F6\u95F4 + \u5F53\u524D\u5FEB\u7167\u6620\u5C04"
-            },
-            {
-              key: "rss",
-              label: "RSS",
-              enabled: !!Storage2.get(CONFIG2.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, CONFIG2.DEFAULTS.rssAutoImportEnabled),
-              intervalMinutes: parseInt(Storage2.get(CONFIG2.STORAGE_KEYS.RSS_AUTO_IMPORT_INTERVAL, CONFIG2.DEFAULTS.rssAutoImportInterval), 10) || 0,
-              outcome: rssState.lastOutcome,
-              lastSuccessAt: rssState.lastSuccessAt || 0,
-              lastAttemptAt: rssState.lastAttemptAt || 0,
-              lastError: rssState.lastError || "",
-              watermarkLabel: UI2().formatSyncWatermarkLabel(rssState.watermark),
-              statsLabel: UI2().buildSyncStatsText("rss", rssState.lastStats),
-              scheduleLabel: rssFeedCount > 0 ? `\u76D1\u63A7 ${rssFeedCount} \u4E2A Feed` : "\u672A\u914D\u7F6E Feed URL",
-              detailLabel: "\u589E\u91CF\u57FA\u7EBF\u6765\u81EA Feed \u53D1\u5E03\u65F6\u95F4 + \u5F53\u524D\u5FEB\u7167\u6620\u5C04"
             }
           ].map((row) => {
             const outcomeMeta = UI2().getSyncOutcomeMeta(row.outcome);
@@ -27020,9 +26088,6 @@ ${AIService2.isolateContent(JSON.stringify({
           }
           if (Storage2.get(CONFIG2.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED, CONFIG2.DEFAULTS.bookmarkAutoImportEnabled)) {
             tasks.push({ label: "\u6D4F\u89C8\u5668\u4E66\u7B7E", run: () => BookmarkAutoImporter2.run() });
-          }
-          if (Storage2.get(CONFIG2.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, CONFIG2.DEFAULTS.rssAutoImportEnabled)) {
-            tasks.push({ label: "RSS", run: () => RSSAutoImporter2.run() });
           }
           if (tasks.length === 0) {
             throw new Error("\u81F3\u5C11\u5148\u542F\u7528\u4E00\u4E2A\u81EA\u52A8\u540C\u6B65\u6765\u6E90\u3002");
@@ -28423,7 +27488,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
       var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2 } = require_extract();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
-      var { BookmarkBridge: BookmarkBridge2, BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2 } = require_bridge();
+      var { BookmarkBridge: BookmarkBridge2, BookmarkAutoImporter: BookmarkAutoImporter2 } = require_bridge();
       var { AIAssistant: AIAssistant2, AIService: AIService2, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2, getAISettings } = require_ai();
       var { StyleManager: StyleManager2 } = require_style_manager();
       var { DesignSystem: DesignSystem2 } = require_design_system();
@@ -28484,15 +27549,9 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             viewSyncSummary: panel.querySelector("#ldb-view-sync-summary"),
             viewSyncNowBtn: panel.querySelector("#ldb-view-sync-now"),
             autoImportStatus: panel.querySelector("#ldb-auto-import-status"),
-            rssFeedUrlsInput: panel.querySelector("#ldb-rss-feed-urls"),
-            rssAutoImportEnabled: panel.querySelector("#ldb-rss-auto-import-enabled"),
-            rssAutoImportOptions: panel.querySelector("#ldb-rss-auto-import-options"),
-            rssAutoImportInterval: panel.querySelector("#ldb-rss-auto-import-interval"),
-            rssDedupModeSelect: panel.querySelector("#ldb-rss-dedup-mode"),
             importNowLinuxdoBtn: panel.querySelector("#ldb-import-now-linuxdo"),
             importNowGithubBtn: panel.querySelector("#ldb-import-now-github"),
             importNowBookmarkBtn: panel.querySelector("#ldb-import-now-bookmark"),
-            importNowRssBtn: panel.querySelector("#ldb-import-now-rss"),
             bookmarkAutoImportEnabled: panel.querySelector("#ldb-bookmark-auto-import-enabled"),
             bookmarkAutoImportOptions: panel.querySelector("#ldb-bookmark-auto-import-options"),
             bookmarkAutoImportInterval: panel.querySelector("#ldb-bookmark-auto-import-interval"),
@@ -28814,36 +27873,6 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             bookmarkIntervalSelect.value = String(CONFIG2.DEFAULTS.bookmarkAutoImportInterval);
             Storage2.set(CONFIG2.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_INTERVAL, CONFIG2.DEFAULTS.bookmarkAutoImportInterval);
           }
-          refs.rssFeedUrlsInput.value = Storage2.get(
-            CONFIG2.STORAGE_KEYS.RSS_FEED_URLS,
-            CONFIG2.DEFAULTS.rssFeedUrls
-          );
-          const rssAutoImportEnabled = Storage2.get(
-            CONFIG2.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED,
-            CONFIG2.DEFAULTS.rssAutoImportEnabled
-          );
-          refs.rssAutoImportEnabled.checked = rssAutoImportEnabled;
-          refs.rssAutoImportOptions.style.display = rssAutoImportEnabled ? "block" : "none";
-          const rssAutoInterval = Storage2.get(
-            CONFIG2.STORAGE_KEYS.RSS_AUTO_IMPORT_INTERVAL,
-            CONFIG2.DEFAULTS.rssAutoImportInterval
-          );
-          const rssIntervalSelect = refs.rssAutoImportInterval;
-          rssIntervalSelect.value = String(rssAutoInterval);
-          if (rssIntervalSelect.selectedIndex === -1) {
-            rssIntervalSelect.value = String(CONFIG2.DEFAULTS.rssAutoImportInterval);
-            Storage2.set(CONFIG2.STORAGE_KEYS.RSS_AUTO_IMPORT_INTERVAL, CONFIG2.DEFAULTS.rssAutoImportInterval);
-          }
-          const rssDedupMode = Storage2.get(
-            CONFIG2.STORAGE_KEYS.RSS_IMPORT_DEDUP_MODE,
-            CONFIG2.DEFAULTS.rssImportDedupMode
-          );
-          const rssDedupSelect = refs.rssDedupModeSelect;
-          rssDedupSelect.value = rssDedupMode;
-          if (rssDedupSelect.selectedIndex === -1) {
-            rssDedupSelect.value = CONFIG2.DEFAULTS.rssImportDedupMode;
-            Storage2.set(CONFIG2.STORAGE_KEYS.RSS_IMPORT_DEDUP_MODE, CONFIG2.DEFAULTS.rssImportDedupMode);
-          }
           UI2.renderSyncChainStatus();
           UI2.updateExportTargetSummary();
           const linuxdoDedupMode = Utils2.getLinuxDoImportDedupMode();
@@ -28897,7 +27926,6 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           const OUTCOME_LABELS = { idle: "\u7A7A\u95F2", running: "\u540C\u6B65\u4E2D", success: "\u6210\u529F", partial: "\u90E8\u5206\u6210\u529F", error: "\u5931\u8D25" };
           const chains = [
             { source: "bookmark", selector: "#ldb-bookmark-auto-import-status" },
-            { source: "rss", selector: "#ldb-rss-auto-import-status" },
             { source: "github-stars", selector: "#ldb-auto-import-status" }
           ];
           for (const chain of chains) {
@@ -29934,7 +28962,11 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                 }
                 if (Exporter2.isCancelled) break;
                 const bookmark = selected[i];
-                const topicId = bookmark.topic_id || bookmark.bookmarkable_id;
+                const topicId = LinuxDoAPI2.resolveTopicId(bookmark);
+                if (!topicId) {
+                  results.failed.push({ topicId: "", title: bookmark.title || bookmark.fancy_title || bookmark.name || "\u672A\u77E5\u6807\u9898", error: "\u65E0\u6CD5\u89E3\u6790\u8BDD\u9898 ID" });
+                  continue;
+                }
                 UI2.showProgress(i + 1, selected.length, "\u5BFC\u51FA\u5E16\u5B50\u5230 Obsidian...");
                 try {
                   const { topic, posts } = await LinuxDoAPI2.fetchAllPosts(topicId);
@@ -30101,7 +29133,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                     for (let k = i + 1; k < selected.length; k++) {
                       const skippedBm = selected[k];
                       results.skipped.push({
-                        title: skippedBm.title || skippedBm.name || `\u5E16\u5B50 ${skippedBm.topic_id || ""}`
+                        title: skippedBm.title || skippedBm.fancy_title || skippedBm.name || `\u5E16\u5B50 ${LinuxDoAPI2.resolveTopicId(skippedBm)}`
                       });
                     }
                     break;
@@ -30541,7 +29573,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
       var { UICommandService: UICommandService2 } = require_UICommandService();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
-      var { BookmarkBridge: BookmarkBridge2, BookmarkAutoImporter: BookmarkAutoImporter2, RSSAutoImporter: RSSAutoImporter2, BookmarkExporter: BookmarkExporter2, BookmarkOrganizer } = require_bridge();
+      var { BookmarkBridge: BookmarkBridge2, BookmarkAutoImporter: BookmarkAutoImporter2, BookmarkExporter: BookmarkExporter2, BookmarkOrganizer } = require_bridge();
       var { AIService: AIService2, ChatUI: ChatUI2, AIClassifier: AIClassifier2, AgentTrace, ChatState: ChatState2 } = require_ai();
       var { DesignSystem: DesignSystem2 } = require_design_system();
       var { PanelResize: PanelResize2 } = require_panel_resize();
@@ -31024,64 +30056,13 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               BookmarkAutoImporter2.startPolling(interval);
             }
           };
-          refs.rssFeedUrlsInput.onchange = (e) => {
-            Storage2.set(CONFIG2.STORAGE_KEYS.RSS_FEED_URLS, e.target.value.trim());
+          if (refs.rssFeedUrlsInput) refs.rssFeedUrlsInput.onchange = () => {
           };
-          refs.rssAutoImportEnabled.onchange = (e) => {
-            const enabled = !!e.target.checked;
-            Storage2.set(CONFIG2.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, enabled);
-            refs.rssAutoImportOptions.style.display = enabled ? "block" : "none";
-            if (enabled) {
-              const apiKey = NotionOAuth2.getAccessToken(refs.apiKeyInput.value.trim());
-              const exportTargetType = refs.exportTargetPageRadio.checked ? "page" : "database";
-              if (!apiKey) {
-                RSSAutoImporter2.updateStatus("\u274C \u8BF7\u5148\u914D\u7F6E Notion API Key");
-                e.target.checked = false;
-                Storage2.set(CONFIG2.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, false);
-                refs.rssAutoImportOptions.style.display = "none";
-                return;
-              }
-              if (exportTargetType !== "database") {
-                RSSAutoImporter2.updateStatus("\u274C RSS \u81EA\u52A8\u540C\u6B65\u4EC5\u652F\u6301\u5BFC\u51FA\u5230 Notion \u6570\u636E\u5E93");
-                e.target.checked = false;
-                Storage2.set(CONFIG2.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, false);
-                refs.rssAutoImportOptions.style.display = "none";
-                return;
-              }
-              if (!refs.databaseIdInput.value.trim()) {
-                RSSAutoImporter2.updateStatus("\u274C \u8BF7\u5148\u914D\u7F6E Notion \u6570\u636E\u5E93 ID");
-                e.target.checked = false;
-                Storage2.set(CONFIG2.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, false);
-                refs.rssAutoImportOptions.style.display = "none";
-                return;
-              }
-              if (RSSAutoImporter2.getFeedUrls(refs.rssFeedUrlsInput.value).length === 0) {
-                RSSAutoImporter2.updateStatus("\u274C \u8BF7\u5148\u914D\u7F6E\u81F3\u5C11\u4E00\u4E2A RSS Feed URL");
-                e.target.checked = false;
-                Storage2.set(CONFIG2.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, false);
-                refs.rssAutoImportOptions.style.display = "none";
-                return;
-              }
-              const interval = parseInt(refs.rssAutoImportInterval.value, 10) || 0;
-              Storage2.set(CONFIG2.STORAGE_KEYS.RSS_AUTO_IMPORT_INTERVAL, interval);
-              RSSAutoImporter2.run();
-              if (interval > 0) RSSAutoImporter2.startPolling(interval);
-            } else {
-              RSSAutoImporter2.stopPolling();
-              RSSAutoImporter2.updateStatus("");
-            }
+          if (refs.rssAutoImportEnabled) refs.rssAutoImportEnabled.onchange = () => {
           };
-          refs.rssAutoImportInterval.onchange = (e) => {
-            const interval = parseInt(e.target.value, 10) || 0;
-            Storage2.set(CONFIG2.STORAGE_KEYS.RSS_AUTO_IMPORT_INTERVAL, interval);
-            RSSAutoImporter2.stopPolling();
-            if (interval > 0 && Storage2.get(CONFIG2.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED, false)) {
-              RSSAutoImporter2.startPolling(interval);
-            }
+          if (refs.rssAutoImportInterval) refs.rssAutoImportInterval.onchange = () => {
           };
-          refs.rssDedupModeSelect.onchange = (e) => {
-            const mode = e.target.value === "allow_duplicates" ? "allow_duplicates" : "strict";
-            Storage2.set(CONFIG2.STORAGE_KEYS.RSS_IMPORT_DEDUP_MODE, mode);
+          if (refs.rssDedupModeSelect) refs.rssDedupModeSelect.onchange = () => {
           };
           const bindImportNow = (btn, label, runner) => {
             if (!btn) return;
@@ -31109,7 +30090,6 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           bindImportNow(refs.importNowLinuxdoBtn, "Linux.do \u5BFC\u5165", () => AutoImporter2.run());
           bindImportNow(refs.importNowGithubBtn, "GitHub \u5BFC\u5165", () => GitHubAutoImporter2.run());
           bindImportNow(refs.importNowBookmarkBtn, "\u4E66\u7B7E\u5BFC\u5165", () => BookmarkAutoImporter2.run());
-          bindImportNow(refs.importNowRssBtn, "RSS \u5BFC\u5165", () => RSSAutoImporter2.run());
           refs.linuxdoDedupModeSelect.onchange = (e) => {
             var _a2;
             const mode = e.target.value === "allow_duplicates" ? "allow_duplicates" : "strict";
@@ -34753,7 +33733,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
   var { ZhihuAPI, GenericExtractor, WorkspaceService } = require_extract();
   var { GenericExporter, LinuxDoAPI, Exporter } = require_export();
   var { AutoImporter, UpdateChecker, GitHubAutoImporter, GitHubAPI, GitHubExporter } = require_import();
-  var { BookmarkBridge, BookmarkExporter, BookmarkAutoImporter, RSSAutoImporter } = require_bridge();
+  var { BookmarkBridge, BookmarkExporter, BookmarkAutoImporter } = require_bridge();
   var { StyleManager, DesignSystem, PanelResize, NotionSiteUI, UI_CSS, UIEvents, UI, GenericUI } = require_ui();
   var { UICommandService } = require_coordination();
   var syncModule = false ? null : null;
@@ -34820,17 +33800,14 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
             Utils.runWhenBrowserIdle(() => AutoImporter.init());
           }
           Utils.runWhenBrowserIdle(() => BookmarkAutoImporter.init());
-          Utils.runWhenBrowserIdle(() => RSSAutoImporter.init());
         } else if (currentSite === SiteDetector.SITES.NOTION) {
           NotionSiteUI.init();
           Utils.runWhenBrowserIdle(() => BookmarkAutoImporter.init());
-          Utils.runWhenBrowserIdle(() => RSSAutoImporter.init());
         } else if (currentSite === SiteDetector.SITES.GITHUB) {
           UI.init();
           Utils.runWhenBrowserIdle(() => UpdateChecker.init());
           Utils.runWhenBrowserIdle(() => GitHubAutoImporter.init());
           Utils.runWhenBrowserIdle(() => BookmarkAutoImporter.init());
-          Utils.runWhenBrowserIdle(() => RSSAutoImporter.init());
         } else if (currentSite === SiteDetector.SITES.ZHIHU) {
           GenericUI.init();
         } else if (currentSite === SiteDetector.SITES.GENERIC) {

@@ -6,7 +6,7 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![文档站](https://img.shields.io/badge/文档站-GitHub%20Pages-6f42c1?style=for-the-badge&logo=githubpages)](https://smith-106.github.io/LD-Notion/) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前仓库源码版本：`v3.14.35`
+- 当前仓库源码版本：`v3.15.0`
 - 最新 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/latest>
 - 文档站：<https://smith-106.github.io/LD-Notion/>
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
@@ -382,7 +382,7 @@ A: 请检查：
   5. 如涉及扩展交付：`node scripts/build-extension.js`
   6. 最后按 `docs/ui-regression-checklist.md` 做 Linux.do / Notion / 通用网页 / `chrome-extension-full` 手工 smoke
 - 一键交付验证：`npm run verify:delivery`（包含 baseline、`bounded_hosts` smoke、bridge runtime smoke 与默认扩展构建）
-- `npm test`：81 个测试文件、1512 个用例，覆盖 SyncStateV2、DedupStore、Config、OperationLog、AIService、AI Schema/Trace/Handlers、API 模块、RSS/Atom 解析、GitHub/书签/通用导出、UI 基线与**双出口内容保真**（`tests/dom-exit-surface.test.js`）等模块
+- `npm test`：109 个测试文件、1827 个用例（另有 legacy 三件套），覆盖 SyncStateV2、DedupStore、Config、OperationLog、AIService、AI Schema/Trace/Handlers、API 模块、GitHub/书签/通用导出、UI 基线与**双出口内容保真**（`tests/dom-exit-surface.test.js`）等模块（RSS 源已于 v3.15.0 移除）
 - Node 测试会直接读取并执行当前 `LinuxDo-Bookmarks-to-Notion.user.js` 的核心代码，并复用 `scripts/build-extension.js` 的提取/构建 seam，而不是维护一份单独的测试副本
 - 当前自动化验证重点覆盖：Utils 辅助函数、OAuth 回调与 refresh fallback、`TargetState`、`quickParseIntent` 正/反例、`assistant_result v1` 输出契约，以及 `scripts/build-extension.js` 的锚点、builder seam、manifest profile、bridge runtime 边界与构建冒烟
 - 语法检查：`node --check LinuxDo-Bookmarks-to-Notion.user.js`（如无 Node 可跳过）
@@ -394,6 +394,13 @@ A: 请检查：
 - 四级权限模型 + `OperationGuard` 统一保护用户触发与 AI 触发的写入入口；危险操作额外确认，撤销窗口只覆盖危险操作
 
 ## 更新日志
+
+### v3.15.0
+
+- **帖子导出链路修复**：`getRequestOpts` 显式 `credentials:include` + Accept/X-Requested-With/Discourse-Present/Discourse-Logged-In 四头（对齐 LDStatusPro 可用口径，修复 Tampermonkey 沙箱 cookie 丢失致 bookmarks.json 403/401“无法导出帖子”）；`_getUsername` 补 current-user 链 + Ember `Discourse.User.current()` 探测；新增 `resolveTopicId`（Post 收藏 `bookmarkable_id`=postId 误用致 `/t/{postId}.json` 404，统一经 topic_id/bookmarkable_url 纠正），export/import/adapter/UI 六处统一口径；401 可行动提示，404 单次不重试。
+- **RSS 源移除（破坏性变更）**：删除 `src/bridge/RSSAutoImporter.js`、`src/adapter/RSSAdapter.js`、`tests/rss-importer.test.js`、`tests/quality-rss-fullflow.test.js`；配置键/STORAGE_KEYS/默认值/同步间隔 RSS 项同步删除；存量 RSS 同步状态由 `_load` 自动剪枝，`ldb_rss_feed_urls` 保留 BLACKLIST 硬拦截，历史导出账本保留防重复导出。
+- **文档对齐**：Notion 写入默认 2022-06-28（markdown/comments 端点 2026-03-11）；Obsidian REST 契约（GET/PUT `/vault/` + Bearer + 逐段编码）经官方文档核对无变更。
+- **验证**：vitest 109 文件/1827 用例 + legacy 三件套全绿；`verify:build`/`verify:delivery` 全链通过；标准条款逐项映射见 `verification-evidence/MAPPING.md`。
 
 ### v3.14.35
 

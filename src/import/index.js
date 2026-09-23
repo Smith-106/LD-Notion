@@ -29,7 +29,7 @@ const AutoImporter = {
     resolveNewBookmarks: ({ bookmarks = [], dedupStrict = true, remoteUrls = null } = {}) => {
         if (!dedupStrict) return bookmarks.slice();
         return bookmarks.filter((bookmark) => {
-            const topicId = String(bookmark.topic_id || bookmark.bookmarkable_id);
+            const topicId = LinuxDoAPI.resolveTopicId(bookmark);
             if (remoteUrls) return !remoteUrls.has(`https://linux.do/t/${topicId}`);
             return !Storage.isTopicExported(topicId);
         });
@@ -40,7 +40,7 @@ const AutoImporter = {
     // batch 纪律同 workspace-insight 对账回填: beginBatch→逐条 mark→endBatch+缓存失效(消除写侧 O(N²))。
     markRemoteExistingTopics: ({ bookmarks = [], newBookmarks = [], remoteUrls = null, dedupStrict = true } = {}) => {
         if (!remoteUrls || !dedupStrict || bookmarks.length <= newBookmarks.length) return 0;
-        const newIds = new Set(newBookmarks.map((b) => String(b.topic_id || b.bookmarkable_id || "")));
+        const newIds = new Set(newBookmarks.map((b) => LinuxDoAPI.resolveTopicId(b)));
         let marked = 0;
         let linuxdoBatchOpened = false;
         try {
@@ -49,7 +49,7 @@ const AutoImporter = {
         } catch { /* batch 不可用时降级直写 */ }
         try {
             bookmarks.forEach((b) => {
-                const topicId = String(b.topic_id || b.bookmarkable_id || "");
+                const topicId = LinuxDoAPI.resolveTopicId(b);
                 if (!topicId || newIds.has(topicId)) return;
                 if (remoteUrls.has(`https://linux.do/t/${topicId}`)) {
                     Storage.markTopicExported(topicId);
@@ -68,7 +68,7 @@ const AutoImporter = {
     buildSettings: () => {
         const exportTargetType = Storage.get(CONFIG.STORAGE_KEYS.EXPORT_TARGET_TYPE, CONFIG.DEFAULTS.exportTargetType);
         return {
-            // 与 Bookmark/RSS AutoImporter 对齐：经 getAccessToken 读取，避免绕过 OAuth 语义
+            // 与 Bookmark AutoImporter 对齐：经 getAccessToken 读取，避免绕过 OAuth 语义
             apiKey: NotionOAuth.getAccessToken(""),
             databaseId: Storage.get(CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID, ""),
             parentPageId: Storage.get(CONFIG.STORAGE_KEYS.PARENT_PAGE_ID, ""),
@@ -193,7 +193,7 @@ AutoImporter.run = async () => {
     // 会误清并发手动导出已置位的互斥(与 GitHubAutoImporter glm P1 同型)
     const exportMutexAcquired = SyncLock.isExporting !== true;
     SyncLock.isExporting = true;
-    // P4 收敛(c09): 与 GitHub/Bookmark/RSS 同构 —— 取跨 tab 租约。
+    // P4 收敛(c09): 与 GitHub/Bookmark 同构 —— 取跨 tab 租约。
     // 仅置进程内 isExporting 无法防两 tab 同时读-标记 isTopicExported 的竞态(重复建页)。
     let lease = null;
     try {
@@ -313,8 +313,8 @@ AutoImporter.run = async () => {
                 if (i === undefined) return;
 
                 const bookmark = newBookmarks[i];
-                const topicId = String(bookmark.topic_id || bookmark.bookmarkable_id);
-                const title = bookmark.title || bookmark.name || `帖子 ${topicId}`;
+                const topicId = LinuxDoAPI.resolveTopicId(bookmark);
+                const title = bookmark.title || bookmark.fancy_title || bookmark.name || `帖子 ${topicId}`;
                 AutoImporter.updateStatus(`📬 导入中 (${i + 1}/${newBookmarks.length}): ${title}`);
 
                 try {

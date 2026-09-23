@@ -21,11 +21,9 @@ describe("audit remediation", () => {
     expect(src).toMatch(/AIService\.isolateContent/);
     expect(src).toMatch(/<user_content>/);
   });
-  it("4xx short-circuit present in LinuxDoAPI and RSS", () => {
+  it("4xx short-circuit present in LinuxDoAPI", () => {
     const ld = fs.readFileSync("src/extract/LinuxDoAPI.js","utf8");
-    const rss = fs.readFileSync("src/bridge/RSSAutoImporter.js","utf8");
     expect(ld).toContain("40[0134]");
-    expect(rss).toContain("40[013]");
   });
 });
 
@@ -212,8 +210,8 @@ describe("agent-executor deps getter 调用守卫(修复 ChatState2.updateLastMe
 });
 
 describe("P1 三模型共识修复守卫(异步/定时器/禁用绕过)", () => {
-    it("Bookmark/RSS init 延迟启动定时器必须可被 stopPolling 清理", () => {
-        for (const f of ["src/bridge/BookmarkAutoImporter.js", "src/bridge/RSSAutoImporter.js"]) {
+    it("Bookmark init 延迟启动定时器必须可被 stopPolling 清理", () => {
+        for (const f of ["src/bridge/BookmarkAutoImporter.js"]) {
             const src = fs.readFileSync(f, "utf8");
             expect(src).toContain("initTimerId");
             // stopPolling 内必须清理 initTimerId, 否则禁用后延迟回调仍 run + 复活轮询
@@ -230,7 +228,7 @@ describe("P1 三模型共识修复守卫(异步/定时器/禁用绕过)", () => 
         expect(src).toMatch(/const runSync = \(\) => \{[\s\S]{0,400}const epoch = this\._epochs\.get\(sourceType\)[\s\S]{0,300}if \(epoch !== \(this\._epochs\.get\(sourceType\)/);
     });
     it("init 延迟回调执行前复核 enabled(防延迟窗口内禁用)", () => {
-        for (const [f, key] of [["src/bridge/BookmarkAutoImporter.js", "BOOKMARK_AUTO_IMPORT_ENABLED"], ["src/bridge/RSSAutoImporter.js", "RSS_AUTO_IMPORT_ENABLED"]]) {
+        for (const [f, key] of [["src/bridge/BookmarkAutoImporter.js", "BOOKMARK_AUTO_IMPORT_ENABLED"]]) {
             const src = fs.readFileSync(f, "utf8");
             const start = src.indexOf("initTimerId = setTimeout");
             const end = src.indexOf("}, 3000)", start);
@@ -265,7 +263,7 @@ describe("P1 共识第三轮守卫(GitHub 互斥/定时器/续约健壮性)", ()
         expect(stopBody).toContain("deferredWhileHidden = false");
     });
     it("三个导入器 + 导出路径的续约回调必须捕获异常并视为失租", () => {
-        for (const f of ["src/bridge/BookmarkAutoImporter.js", "src/bridge/RSSAutoImporter.js", "src/import/GitHubAutoImporter.js", "src/export/index.js"]) {
+        for (const f of ["src/bridge/BookmarkAutoImporter.js", "src/import/GitHubAutoImporter.js", "src/export/index.js"]) {
             const src = fs.readFileSync(f, "utf8");
             const i = src.indexOf("renewTimer = setInterval");
             const block = src.slice(i, src.indexOf("}, 30000)", i));
@@ -274,10 +272,9 @@ describe("P1 共识第三轮守卫(GitHub 互斥/定时器/续约健壮性)", ()
             expect(block).toContain("leaseLost = true");
         }
     });
-    it("visibilitychange 排队的 idle 回调必须复核启用态(三个导入器)", () => {
+    it("visibilitychange 排队的 idle 回调必须复核启用态(两个导入器)", () => {
         const pairs = [
             ["src/bridge/BookmarkAutoImporter.js", "BOOKMARK_AUTO_IMPORT_ENABLED"],
-            ["src/bridge/RSSAutoImporter.js", "RSS_AUTO_IMPORT_ENABLED"],
             ["src/import/GitHubAutoImporter.js", "GITHUB_AUTO_IMPORT_ENABLED"],
         ];
         for (const [f, key] of pairs) {
@@ -313,10 +310,9 @@ describe("P1 共识第四轮守卫(UpdateChecker / idle 回调复核)", () => {
         expect(fn).toContain("onabort");
         expect(fn).toContain("response?.status");
     });
-    it("三个导入器 init 的 idle 回调内必须复核启用态", () => {
+    it("两个导入器 init 的 idle 回调内必须复核启用态", () => {
         const pairs = [
             ["src/bridge/BookmarkAutoImporter.js", "BOOKMARK_AUTO_IMPORT_ENABLED"],
-            ["src/bridge/RSSAutoImporter.js", "RSS_AUTO_IMPORT_ENABLED"],
             ["src/import/GitHubAutoImporter.js", "GITHUB_AUTO_IMPORT_ENABLED"],
         ];
         for (const [f, key] of pairs) {
@@ -368,12 +364,10 @@ describe("P1 共识第六轮守卫(Bookmark 误清互斥 / 导出 reset 顺序 /
         const block = src.slice(start, src.indexOf("return;", start));
         expect(block).not.toMatch(/SyncLock\.isExporting\s*=/);
     });
-    it("RSS 侧租约异常路径可以清 isExporting(置位在取租约之前)", () => {
-        const src = fs.readFileSync("src/bridge/RSSAutoImporter.js", "utf8");
-        const setIdx = src.indexOf("SyncLock.isExporting = true;");
-        const leaseIdx = src.indexOf("SyncLock.acquireLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE)");
-        expect(setIdx).toBeGreaterThan(-1);
-        expect(leaseIdx).toBeGreaterThan(setIdx);
+    it("BookmarkAutoImporter 置位 isExporting(取租约前后均可接受, 异常路径不得误清未持有者)", () => {
+        const src = fs.readFileSync("src/bridge/BookmarkAutoImporter.js", "utf8");
+        expect(src).toContain("SyncLock.isExporting = true;");
+        expect(src).toContain("SyncLock.acquireLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE)");
     });
     it("导出 reset 必须在取租约之前(取租约期间取消不得被清除)", () => {
         const src = fs.readFileSync("src/export/index.js", "utf8");

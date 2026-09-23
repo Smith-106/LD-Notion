@@ -16,7 +16,6 @@ const SOURCE_INTERVAL_KEYS = {
     "github-forks": CONFIG.STORAGE_KEYS.SYNC_INTERVAL_GITHUB,
     "github-gists": CONFIG.STORAGE_KEYS.SYNC_INTERVAL_GITHUB,
     bookmark: CONFIG.STORAGE_KEYS.SYNC_INTERVAL_BOOKMARKS,
-    rss: CONFIG.STORAGE_KEYS.SYNC_INTERVAL_RSS,
 };
 
 const SOURCE_INTERVAL_DEFAULTS = {
@@ -26,7 +25,6 @@ const SOURCE_INTERVAL_DEFAULTS = {
     "github-forks": CONFIG.DEFAULTS.syncIntervalGithub,
     "github-gists": CONFIG.DEFAULTS.syncIntervalGithub,
     bookmark: CONFIG.DEFAULTS.syncIntervalBookmarks,
-    rss: CONFIG.DEFAULTS.syncIntervalRss,
 };
 
 // 源类型到自动导入启用键的映射
@@ -37,7 +35,6 @@ const SOURCE_ENABLED_KEYS = {
     "github-forks": CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED,
     "github-gists": CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED,
     bookmark: CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED,
-    rss: CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED,
 };
 
 // 重试退避策略: 初始 5 分钟, 二次 15 分钟, 后续 60 分钟
@@ -57,7 +54,6 @@ const SOURCE_RUNNERS = {
     "github-forks": () => require("../import").GitHubAutoImporter.run(),
     "github-gists": () => require("../import").GitHubAutoImporter.run(),
     bookmark: () => require("../bridge").BookmarkAutoImporter.run(),
-    rss: () => require("../bridge").RSSAutoImporter.run(),
 };
 
 /**

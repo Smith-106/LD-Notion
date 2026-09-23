@@ -1,8 +1,9 @@
 "use strict";
 
 // v3.14.13 更新路径 token invalid 修复回归测试:
-// P1-3: Bookmark/RSS 自动导入器循环内重读 token + isAuthTerminal fail-fast
+// P1-3: Bookmark 自动导入器循环内重读 token + isAuthTerminal fail-fast
 //   (401 风暴根因: buildSettings 快照整轮复用, OAuth 续签后后续项仍带旧 token)
+//   (v3.15: RSS 自动导入器已删除, 原 R-AUTH-02 用例由 Bookmark 等价语义承担)
 // P1-4: clearConnection 无条件清 OAuth 残留键值(manual 模式下残留 access_token 也清)
 // 模式: 真实模块 + GM mock(与 auth-failfast.test.js 一致, 本项目 vi.mock 对 CJS 不生效)
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -30,7 +31,6 @@ const { NotionOAuth } = require("../src/auth");
 const { SyncLock } = require("../src/sync-lock");
 const { BookmarkExporter } = require("../src/bridge/BookmarkExporter");
 const { BookmarkBridge } = require("../src/bridge/index");
-const { RSSAutoImporter } = require("../src/bridge/RSSAutoImporter");
 const { BookmarkAutoImporter } = require("../src/bridge/BookmarkAutoImporter");
 
 beforeEach(() => {
@@ -38,48 +38,11 @@ beforeEach(() => {
     global.__ldNotionResponder = null;
     BookmarkAutoImporter.isRunning = false;
     BookmarkAutoImporter.lastRunAt = 0;
-    RSSAutoImporter.isRunning = false;
-    RSSAutoImporter.lastRunAt = 0;
     vi.restoreAllMocks();
 });
 
-describe("R-AUTH-02: RSS 自动导入 isAuthTerminal fail-fast + 逐项重读 token", () => {
-    const makeCtx = () => ({
-        settings: {
-            apiKey: "secret_test",
-            databaseId: "db1",
-            categories: [],
-            aiApiKey: "",
-            aiService: "",
-            aiModel: "",
-            aiBaseUrl: "",
-        },
-        index: { byUrl: new Map(), byPageId: new Map(), byTitle: new Map() },
-        previousSnapshot: {},
-        nextSnapshot: {},
-        enrichContext: { aiUsedCount: 0, aiMaxItems: 0 },
-        position: 1,
-        total: 1,
-    });
-    const item = { itemKey: "k1", title: "标题", url: "https://example.com", summary: "", publishedAt: "" };
-
-    it("401 终态错误 → _syncSingleRssItem 抛原错误(带 isAuthTerminal + authCode)", async () => {
-        Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "secret_test");
-        await expect(RSSAutoImporter._syncSingleRssItem(item, makeCtx())).rejects.toMatchObject({
-            isAuthTerminal: true,
-            authCode: "unauthorized",
-        });
-    });
-
-    it("每项开工前重读 token(getAccessToken 被调用, 不依赖快照)", async () => {
-        Storage.set(CONFIG.STORAGE_KEYS.NOTION_API_KEY, "secret_test");
-        const spy = vi.spyOn(NotionOAuth, "getAccessToken");
-        try {
-            await RSSAutoImporter._syncSingleRssItem(item, makeCtx());
-        } catch (e) { /* 预期抛错 */ }
-        expect(spy).toHaveBeenCalled();
-    });
-});
+// (v3.15 RSS 已删除: R-AUTH-02 的逐项重读 token + isAuthTerminal 语义由 R-AUTH-03 承担,
+//  Bookmark processBookmark 开工前同样 getAccessToken 重读并抛原 error, 见下)
 
 describe("R-AUTH-03: Bookmark 自动导入 isAuthTerminal fail-fast + 逐项重读 token", () => {
     const bookmarks = [

@@ -10,7 +10,7 @@ const { OperationGuard, UndoManager, OperationLog, ConfirmationDialog } = requir
 const { ZhihuAPI, GenericExtractor, WorkspaceService } = require("../extract");
 const { Exporter, LinuxDoAPI, GenericExporter } = require("../export");
 const { AutoImporter, UpdateChecker, GitHubAutoImporter, GitHubAPI, GitHubExporter } = require("../import");
-const { BookmarkBridge, BookmarkAutoImporter, RSSAutoImporter } = require("../bridge");
+const { BookmarkBridge, BookmarkAutoImporter } = require("../bridge");
 const { AIAssistant, AIService, AIWelcomeUI, ChatUI, getAISettings } = require("../ai");
 const { StyleManager } = require("./style-manager");
 const { DesignSystem } = require("./design-system");
@@ -76,15 +76,9 @@ const UI = {
             viewSyncSummary: panel.querySelector("#ldb-view-sync-summary"),
             viewSyncNowBtn: panel.querySelector("#ldb-view-sync-now"),
             autoImportStatus: panel.querySelector("#ldb-auto-import-status"),
-            rssFeedUrlsInput: panel.querySelector("#ldb-rss-feed-urls"),
-            rssAutoImportEnabled: panel.querySelector("#ldb-rss-auto-import-enabled"),
-            rssAutoImportOptions: panel.querySelector("#ldb-rss-auto-import-options"),
-            rssAutoImportInterval: panel.querySelector("#ldb-rss-auto-import-interval"),
-            rssDedupModeSelect: panel.querySelector("#ldb-rss-dedup-mode"),
             importNowLinuxdoBtn: panel.querySelector("#ldb-import-now-linuxdo"),
             importNowGithubBtn: panel.querySelector("#ldb-import-now-github"),
             importNowBookmarkBtn: panel.querySelector("#ldb-import-now-bookmark"),
-            importNowRssBtn: panel.querySelector("#ldb-import-now-rss"),
             bookmarkAutoImportEnabled: panel.querySelector("#ldb-bookmark-auto-import-enabled"),
             bookmarkAutoImportOptions: panel.querySelector("#ldb-bookmark-auto-import-options"),
             bookmarkAutoImportInterval: panel.querySelector("#ldb-bookmark-auto-import-interval"),
@@ -474,38 +468,7 @@ const UI = {
             Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_INTERVAL, CONFIG.DEFAULTS.bookmarkAutoImportInterval);
         }
 
-        refs.rssFeedUrlsInput.value = Storage.get(
-            CONFIG.STORAGE_KEYS.RSS_FEED_URLS,
-            CONFIG.DEFAULTS.rssFeedUrls
-        );
-        const rssAutoImportEnabled = Storage.get(
-            CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_ENABLED,
-            CONFIG.DEFAULTS.rssAutoImportEnabled
-        );
-        refs.rssAutoImportEnabled.checked = rssAutoImportEnabled;
-        refs.rssAutoImportOptions.style.display = rssAutoImportEnabled ? "block" : "none";
-        const rssAutoInterval = Storage.get(
-            CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_INTERVAL,
-            CONFIG.DEFAULTS.rssAutoImportInterval
-        );
-        const rssIntervalSelect = refs.rssAutoImportInterval;
-        rssIntervalSelect.value = String(rssAutoInterval);
-        if (rssIntervalSelect.selectedIndex === -1) {
-            rssIntervalSelect.value = String(CONFIG.DEFAULTS.rssAutoImportInterval);
-            Storage.set(CONFIG.STORAGE_KEYS.RSS_AUTO_IMPORT_INTERVAL, CONFIG.DEFAULTS.rssAutoImportInterval);
-        }
-        const rssDedupMode = Storage.get(
-            CONFIG.STORAGE_KEYS.RSS_IMPORT_DEDUP_MODE,
-            CONFIG.DEFAULTS.rssImportDedupMode
-        );
-        const rssDedupSelect = refs.rssDedupModeSelect;
-        rssDedupSelect.value = rssDedupMode;
-        if (rssDedupSelect.selectedIndex === -1) {
-            rssDedupSelect.value = CONFIG.DEFAULTS.rssImportDedupMode;
-            Storage.set(CONFIG.STORAGE_KEYS.RSS_IMPORT_DEDUP_MODE, CONFIG.DEFAULTS.rssImportDedupMode);
-        }
-
-        // F-UI-31:三条自动同步链状态持久化回显（上次同步:时间·结果）
+        // F-UI-31:两条自动同步链状态持久化回显（上次同步:时间·结果）
         UI.renderSyncChainStatus();
         // F-UI-35:收藏 Tab 导出目标摘要
         UI.updateExportTargetSummary();
@@ -566,7 +529,6 @@ const UI = {
         const OUTCOME_LABELS = { idle: "空闲", running: "同步中", success: "成功", partial: "部分成功", error: "失败" };
         const chains = [
             { source: "bookmark", selector: "#ldb-bookmark-auto-import-status" },
-            { source: "rss", selector: "#ldb-rss-auto-import-status" },
             { source: "github-stars", selector: "#ldb-auto-import-status" },
         ];
         for (const chain of chains) {

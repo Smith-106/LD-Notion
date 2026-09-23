@@ -143,7 +143,7 @@ describe("SyncEngine 双设备收敛", () => {
 
     it("pull 应用 watermark 胜出项", async () => {
         initEngine("A");
-        SyncStateV2.updateSourceState("rss", {
+        SyncStateV2.updateSourceState("bookmark", {
             watermark: { time: "2026-01-01T00:00:00.000Z", ids: ["x"] },
             epoch: 0,
         });
@@ -153,7 +153,7 @@ describe("SyncEngine 双设备收敛", () => {
         resetLocalOnly();
         initEngine("B");
         await SyncEngine.pull({ reason: "test" });
-        const st = SyncStateV2.getSourceState("rss");
+        const st = SyncStateV2.getSourceState("bookmark");
         expect(st.watermark).toEqual({ time: "2026-01-01T00:00:00.000Z", ids: ["x"] });
     });
 

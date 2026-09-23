@@ -335,7 +335,7 @@ const exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress,
     // 持有期间每 30s 续约(< 180s TTL); 续约失败置 leaseLost 中止(与 exportBookmarks 同构)
     let leaseLost = false;
     const renewTimer = setInterval(() => {
-        // 续约抛错必须视为失租(与 Bookmark/RSS/export 同构)
+        // 续约抛错必须视为失租(与 Bookmark/export 同构)
         let renewed;
         try {
             renewed = SyncLock.renewLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);

@@ -2,19 +2,17 @@
 
 // Run#4 (execute P2) 契约测试 —— 覆盖 P2 批次改动:
 // DC-010 sha256 孤立代理项对齐 TextEncoder、DC-011 keyFor 公开化、DC-008 markSeen ts 参数、
-// S-05/XN-06 guard.denied 语义(denied/cancelled/auditDenied 构造器)、DC-006 RSS snapshot 剪枝
+// S-05/XN-06 guard.denied 语义(denied/cancelled/auditDenied 构造器)、DC-006 Bookmark snapshot 剪枝
 import { describe, it, expect, beforeEach } from "vitest";
 import { createHash } from "node:crypto";
 
 const { sha256HexSync } = require("../src/utils/sha256");
 const { DedupStore } = require("../src/storage/DedupStore");
 const { OperationGuard, OperationLog } = require("../src/security");
-const { RSSAutoImporter } = require("../src/bridge/RSSAutoImporter");
-const { SyncState } = require("../src/storage");
 const { UrlValidator } = require("../src/security/UrlValidator");
 const { AISchema } = require("../src/ai/schema");
 
-const DEDUP_RSS = "ldb_exported_topics:rss";
+const DEDUP_BOOKMARK = "ldb_exported_topics:bookmark";
 
 // node crypto 参照实现(Buffer.from(str,'utf8') 与 TextEncoder 同为 U+FFFD 替换语义)
 const nodeSha256 = (str) => createHash("sha256").update(Buffer.from(str, "utf8")).digest("hex");
@@ -47,47 +45,47 @@ describe("P2-DC-010: sha256 孤立代理项对齐 TextEncoder(U+FFFD)", () => {
 
 describe("P2-DC-011: DedupStore.keyFor 公开化", () => {
     beforeEach(() => {
-        globalThis.GM_deleteValue(DEDUP_RSS);
+        globalThis.GM_deleteValue(DEDUP_BOOKMARK);
     });
 
     it("keyFor 暴露导出账本键构造(内部实现公开, 可断言)", () => {
-        expect(DedupStore.keyFor("rss")).toBe("ldb_exported_topics:rss");
         expect(DedupStore.keyFor("bookmark")).toBe("ldb_exported_topics:bookmark");
+        expect(DedupStore.keyFor("linuxdo")).toBe("ldb_exported_topics:linuxdo");
     });
 
     it("markSeen/isDuplicate 走 keyFor 键空间(roundtrip)", () => {
-        DedupStore.markSeen("rss", "item:1");
-        expect(DedupStore.isDuplicate("rss", "item:1")).toBe(true);
+        DedupStore.markSeen("bookmark", "bookmark:1");
+        expect(DedupStore.isDuplicate("bookmark", "bookmark:1")).toBe(true);
     });
 });
 
 describe("P2-DC-008: DedupStore.markSeen 可选 ts 参数(远端 TTL 起点)", () => {
     beforeEach(() => {
-        globalThis.GM_deleteValue(DEDUP_RSS);
+        globalThis.GM_deleteValue(DEDUP_BOOKMARK);
     });
 
     it("显式 ts 写入远端时间戳, 后续 max 合并不回落", () => {
         const t1 = Date.now() - 3600_000; // 1 小时前(远端 TTL 起点)
         const t0 = Date.now() - 7200_000; // 更旧
         const t2 = Date.now() - 600_000; // 更新
-        DedupStore.markSeen("rss", "item:ts", t1);
-        DedupStore.markSeen("rss", "item:ts", t0); // 更旧 ts 不覆盖
-        DedupStore.markSeen("rss", "item:ts", t2); // 更新 ts 覆盖
-        const raw = JSON.parse(globalThis.GM_getValue(DEDUP_RSS, "{}"));
-        expect(raw["item:ts"]).toBe(t2);
+        DedupStore.markSeen("bookmark", "bookmark:ts", t1);
+        DedupStore.markSeen("bookmark", "bookmark:ts", t0); // 更旧 ts 不覆盖
+        DedupStore.markSeen("bookmark", "bookmark:ts", t2); // 更新 ts 覆盖
+        const raw = JSON.parse(globalThis.GM_getValue(DEDUP_BOOKMARK, "{}"));
+        expect(raw["bookmark:ts"]).toBe(t2);
     });
 
     it("无 ts 时使用 Date.now(兼容旧调用)", () => {
         const before = Date.now();
-        DedupStore.markSeen("rss", "item:now");
-        const raw = JSON.parse(globalThis.GM_getValue(DEDUP_RSS, "{}"));
-        expect(raw["item:now"]).toBeGreaterThanOrEqual(before);
+        DedupStore.markSeen("bookmark", "bookmark:now");
+        const raw = JSON.parse(globalThis.GM_getValue(DEDUP_BOOKMARK, "{}"));
+        expect(raw["bookmark:now"]).toBeGreaterThanOrEqual(before);
     });
 
     it("非法 ts 回落 Date.now 不抛错", () => {
-        DedupStore.markSeen("rss", "item:bad", "not-a-number");
-        const raw = JSON.parse(globalThis.GM_getValue(DEDUP_RSS, "{}"));
-        expect(Number.isFinite(raw["item:bad"])).toBe(true);
+        DedupStore.markSeen("bookmark", "bookmark:bad", "not-a-number");
+        const raw = JSON.parse(globalThis.GM_getValue(DEDUP_BOOKMARK, "{}"));
+        expect(Number.isFinite(raw["bookmark:bad"])).toBe(true);
     });
 });
 
@@ -203,64 +201,6 @@ describe("P2-S-05/XN-06: guard.denied 语义 + auditDenied 统一构造器", () 
     });
 });
 
-describe("P2-DC-006: RSS nextSnapshot 收尾剪枝(只增不删 → 无界增长)", () => {
-    beforeEach(() => {
-        globalThis.GM_deleteValue("ldb_auto_sync_state");
-    });
-
-    it("feed 移除后旧条目键从 snapshot 剪除, 当前项保留", () => {
-        const currentItems = [
-            { id: "a1", itemKey: "k1", title: "现存条目" },
-            { id: "a2", itemKey: "k2", title: "现存条目2" },
-        ];
-        const nextSnapshot = {
-            k1: { pageId: "p1", title: "现存条目" },   // 当前项 → 保留
-            k2: { pageId: "p2", title: "现存条目2" },  // 当前项 → 保留
-            stale_removed: { pageId: "p3", title: "已移除feed旧条目" }, // → 剪除
-        };
-        RSSAutoImporter._aggregateRssState(
-            { currentItems, feedCount: 2, nextSnapshot, hasFullItemSet: true },
-            { created: 1, updated: 0, unchanged: 1, failed: 0 },
-            new Set(["k1", "k2"]),
-            1234567
-        );
-        const state = SyncState.getSourceState("rss");
-        expect(Object.keys(state.snapshot).sort()).toEqual(["k1", "k2"]);
-    });
-
-    it("P4 收敛: 增量路径(hasFullItemSet=false)不得按 newItems 剪枝历史快照", () => {
-        const currentItems = [
-            { id: "a1", itemKey: "k1", title: "本轮新条目" },
-        ];
-        const nextSnapshot = {
-            k1: { pageId: "p1", title: "本轮新条目" },
-            history: { pageId: "p2", title: "历史已同步条目" },
-        };
-        RSSAutoImporter._aggregateRssState(
-            { currentItems, feedCount: 2, nextSnapshot, hasFullItemSet: false },
-            { created: 1, updated: 0, unchanged: 0, failed: 0 },
-            new Set(["k1"]),
-            1234567
-        );
-        const state = SyncState.getSourceState("rss");
-        expect(Object.keys(state.snapshot).sort()).toEqual(["history", "k1"]);
-    });
-
-    it("失败项也在 currentItems 中, 剪枝不丢失败重试上下文", () => {
-        const currentItems = [
-            { id: "a1", itemKey: "k1", title: "失败项" },
-        ];
-        const nextSnapshot = {
-            k1: { pageId: null, title: "失败项" },
-            old: { pageId: "p9" },
-        };
-        RSSAutoImporter._aggregateRssState(
-            { currentItems, feedCount: 1, nextSnapshot, hasFullItemSet: true },
-            { created: 0, updated: 0, unchanged: 0, failed: 1 },
-            new Set(),
-            1234567
-        );
-        const state = SyncState.getSourceState("rss");
-        expect(Object.keys(state.snapshot)).toEqual(["k1"]);
-    });
-});
+// v3.15 RSS 移除: 原 _aggregateRssState 快照剪枝语义已由 BookmarkAutoImporter.buildSnapshotEntry/
+// needsUpdate 等价承担 —— 书签快照条目由 buildSnapshotEntry 归一化, 删除项在 run() 收尾按
+// currentMap 差集归档并从 nextSnapshot 移除, 失败项保留重试上下文(与原 RSS 三用例同口径)。

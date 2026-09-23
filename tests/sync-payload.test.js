@@ -172,12 +172,12 @@ describe("SyncPayload.buildFromLocal", () => {
             deviceId: "dev-x",
             now: 1700000000000,
             dedupSets: { linuxdo: { "1": 100 } },
-            watermarks: { rss: { epoch: 0, time: "2026-01-01T00:00:00.000Z", ids: ["a"] } },
+            watermarks: { linuxdo: { epoch: 0, time: "2026-01-01T00:00:00.000Z", ids: ["a"] } },
             settings: { theme: { value: "dark", updatedAt: "2026-01-01T00:00:00.000Z" } },
         });
         expect(p.schemaVersion).toBe(1);
         expect(p.dedup.linuxdo).toEqual({ "1": 100 });
-        expect(p.watermarks.rss.epoch).toBe(0);
+        expect(p.watermarks.linuxdo.epoch).toBe(0);
         expect(p.settings.theme.deviceId).toBe("dev-x");
     });
 });

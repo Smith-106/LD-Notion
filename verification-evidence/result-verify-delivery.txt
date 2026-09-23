@@ -1,0 +1,12 @@
+✅ Chrome 扩展构建完成
+✅ Built extension surface runtime smoke passed
+  [PASS] 全部 29 个必需常量存在于 bundle 中
+  [PASS] 全部 8 个 sync/ 模块常量按剪枝预期缺席 bundle
+  [PASS] 全部 7 个 GM_api 函数存在于 bundle 中
+  [PASS] 全部 112 个 STORAGE_KEYS 值作为字符串字面量存在于 bundle 中
+  [PASS] 全部 4 个 BUILD 锚点标记存在于 bundle 中
+  [PASS] 桥接扩展 manifest_version = 3
+  [PASS] 桥接扩展 manifest 包含 bookmarks 权限
+  [PASS] 完整扩展构建配置包含 storage + bookmarks 权限
+✅ 构建产物等价性验证全部通过
+✅ verify:delivery all passed

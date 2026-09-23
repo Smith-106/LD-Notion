@@ -1,3 +1,12 @@
+## [3.15.0] - 2026-09-24
+
+### fix + BREAKING
+
+- **帖子导出链路修复**：`getRequestOpts` 显式 `credentials:include` + Accept/X-Requested-With/Discourse-Present/Discourse-Logged-In 四头（修复 Tampermonkey 沙箱 cookie 丢失致 bookmarks.json 403/401“无法导出帖子”）；`_getUsername` 补 current-user 链 + Ember `Discourse.User.current()` 探测；新增 `resolveTopicId`（Post 收藏 `bookmarkable_id`=postId 误用致 `/t/{postId}.json` 404，统一纠正），export/import/adapter/UI 六处统一口径；401 可行动提示，404 单次不重试
+- **BREAKING RSS 源移除**：删除 `src/bridge/RSSAutoImporter.js`、`src/adapter/RSSAdapter.js`、`tests/rss-importer.test.js`、`tests/quality-rss-fullflow.test.js`；配置键/STORAGE_KEYS/默认值/同步间隔 RSS 项同步删除；存量 RSS 同步状态由 `_load` 自动剪枝，`ldb_rss_feed_urls` 保留 BLACKLIST 硬拦截，历史导出账本保留防重复导出
+- **文档对齐**：Notion 写入默认 2022-06-28（markdown/comments 端点 2026-03-11）；Obsidian REST 契约核对无变更
+- **验证**：vitest 109 文件/1827 用例 + legacy 三件套全绿；`verify:build`/`verify:delivery` 全链通过；标准条款逐项映射见 `verification-evidence/MAPPING.md`
+
 ## [3.14.35] - 2026-09-19
 
 ### test + chore

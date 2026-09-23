@@ -177,7 +177,7 @@ GitHubAutoImporter._exportViaGitHubExporter = async (mappedItems, type, meta, se
     // 20260914: Notion 实际状态对账 —— 远端「链接」索引是 ground truth(换库/重建库后本地
     // 账本残留会把新库缺失项误判为已导出 → 假跳过致状态发现错误)。判定顺序: 远端命中 →
     // skip; 远端未命中 → 导出(账本不阻断); 远端查询失败 → 降级本地账本(旧语义, 防查询
-    // 故障时重复轰炸)。Bookmark/RSS 的 fetchTrackedPages 为同构范本。
+    // 故障时重复轰炸)。Bookmark 的 fetchTrackedPages 为同构范本。
     let remoteUrls = null;
     try {
         remoteUrls = await NotionAPI.collectDatabaseUrls(settings.apiKey, settings.databaseId);
@@ -506,7 +506,7 @@ GitHubAutoImporter.run = async () => {
 
     // 2/3 共识(qwen+dsf): 仅读 isExporting 而不上锁 —— 自动导入进入异步写页后
     // 手动导出可并发启动(检查时仍为 false), 两路竞速写 Notion/互相覆盖导出标记。
-    // 与 Bookmark/RSS/export 同构: 取跨 tab 租约 + 占用进程内互斥, finally 释放。
+    // 与 Bookmark/export 同构: 取跨 tab 租约 + 占用进程内互斥, finally 释放。
     let lease = null;
     try {
         lease = await SyncLock.acquireLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE);
