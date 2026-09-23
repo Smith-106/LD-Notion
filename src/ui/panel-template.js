@@ -116,6 +116,10 @@ function renderPanel(personaName) {
                             <div class="ldb-setting-row ldb-mb-8">
                                 <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-recompute-export-status" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-lg);">按 Notion 重算导出状态</button>
                             </div>
+                            <div class="ldb-tip" id="ldb-export-status-diff-tip" style="display: none;"></div>
+                            <div class="ldb-setting-row ldb-mb-8">
+                                <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-align-ledger-to-snapshot" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-lg);">按快照对齐本地账本（去残留）</button>
+                            </div>
                             <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
                                 <label for="ldb-bookmark-dedup-mode" style="white-space: nowrap;">书签导入去重</label>
                                 <select id="ldb-bookmark-dedup-mode" class="ldb-input ldb-flex-1">

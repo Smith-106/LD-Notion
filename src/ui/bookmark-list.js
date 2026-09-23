@@ -279,11 +279,108 @@ const BookmarkList = {
         UI().renderBookmarkList?.();
         // P3 共识(dsf+glm): renderBookmarkList 内部已调 updateSelectCount → renderVisualSummary,
         // 原实现再显式调用造成同轮双渲染。
+        const diff = UI().computeLedgerSnapshotDiff();
         return {
             source: UI().getExportStatusSource(),
             hasSnapshot: UI().hasWorkspaceExportSnapshot(),
             urlCount: UI().getWorkspaceExportedUrlSet().size,
+            // v3.15.1: 分歧可视化 —— 本地账本记已导出、但 Notion 快照缺失的当前列表项
+            // (用户报「Notion 为空但本地显示待导出偏少」时, 一眼看到账本残留规模)。
+            ledgerOnly: diff.ledgerOnly,
+            ledgerOnlyCount: diff.ledgerOnly.length,
+            snapshotOnly: diff.snapshotOnly,
+            snapshotOnlyCount: diff.snapshotOnly.length,
+            snapshotStale: diff.snapshotStale,
         };
+    },
+
+    // v3.15.1: 本地账本 vs Notion 快照分歧计算(纯函数, 无快照/空列表时返回空分歧+原因)。
+    // 口径: 仅覆盖当前已加载列表(UI.bookmarks, 含 LinuxDo + GitHub 两源);
+    // allow_duplicates 下 LinuxDo 项本地恒判待导出, 不纳入 ledgerOnly(与 isExportedForUi 同口径)。
+    computeLedgerSnapshotDiff: () => {
+        const empty = (reason) => ({
+            ledgerOnly: [], snapshotOnly: [],
+            hasSnapshot: UI().hasWorkspaceExportSnapshot(),
+            snapshotStale: false, reason,
+        });
+        const bookmarks = Array.isArray(UI().bookmarks) ? UI().bookmarks : [];
+        if (bookmarks.length === 0) return empty("empty-list");
+        if (!UI().hasWorkspaceExportSnapshot()) return empty("no-snapshot");
+        const snap = UI().workspaceVisualSnapshot;
+        const urlSet = UI().getWorkspaceExportedUrlSet();
+        const urlCount = urlSet.size;
+        // maxPages 截断的快照天然不全: 快照链接数 < 本地账本命中数时标 stale, 文案提示而非静默。
+        const maxPages = Number(snap?.maxPages) || 0;
+        const ledgerOnly = [];
+        const snapshotOnly = [];
+        for (const b of bookmarks) {
+            const bookmarkKey = UI().getBookmarkKey(b);
+            if (!bookmarkKey) continue;
+            const title = b.title || b.fancy_title || b.name || `帖子 ${bookmarkKey}`;
+            const inLedger = !!UI().isBookmarkKeyExportedLocal(bookmarkKey);
+            // 快照侧判定复用 notion 分支 URL 口径(含 strict/allow 口径一致性)。
+            let inSnapshot = false;
+            try {
+                const url = bookmarkKey.startsWith("gh:")
+                    ? UI().buildBookmarkKeyCanonicalUrl(bookmarkKey)
+                    : UI().buildBookmarkCanonicalUrl(b);
+                inSnapshot = !!url && urlSet.has(url);
+            } catch { inSnapshot = false; }
+            if (inLedger && !inSnapshot) ledgerOnly.push({ key: bookmarkKey, title });
+            else if (!inLedger && inSnapshot) snapshotOnly.push({ key: bookmarkKey, title });
+        }
+        return {
+            ledgerOnly, snapshotOnly,
+            hasSnapshot: true,
+            snapshotStale: maxPages > 0 && urlCount > 0 && urlCount < ledgerOnly.length + snapshotOnly.length + 1
+                ? false : (maxPages > 0 && urlCount === maxPages),
+            reason: "ok",
+        };
+    },
+
+    // v3.15.1: 按快照对齐本地账本 —— 仅 unmark 当前已加载列表中「账本有记、快照缺失」的
+    // LinuxDo/GitHub 项(逐项经 Storage.unmarkTopicExported / GitHubAPI.unmark*, 双账本对称)。
+    // 安全护栏: ① 无快照/空快照(records 为空)直接拒绝(Notion 被清空≠快照为空, 须先刷新工作区
+    // 拿到真实快照); ② 空列表拒绝; ③ 仅动当前列表交集, 不碰未加载源; ④ 调用方负责确认弹窗+审计。
+    alignLedgerToSnapshot: (keys) => {
+        if (!UI().hasWorkspaceExportSnapshot()) {
+            return { ok: false, reason: "no-snapshot", aligned: 0 };
+        }
+        const records = UI().workspaceVisualSnapshot?.records;
+        if (!Array.isArray(records) || records.length === 0) {
+            // 空快照无法区分「Notion 真空」与「扫描失败/截断」—— 拒绝静默全清。
+            return { ok: false, reason: "empty-snapshot", aligned: 0 };
+        }
+        const bookmarks = Array.isArray(UI().bookmarks) ? UI().bookmarks : [];
+        if (bookmarks.length === 0) return { ok: false, reason: "empty-list", aligned: 0 };
+        const wanted = keys ? new Set(keys.map(String)) : null;
+        const inList = new Set(bookmarks.map((b) => String(UI().getBookmarkKey(b) || "").trim()).filter(Boolean));
+        const diff = UI().computeLedgerSnapshotDiff();
+        let aligned = 0;
+        const alignedKeys = [];
+        for (const { key } of diff.ledgerOnly) {
+            const k = String(key);
+            if (wanted && !wanted.has(k)) continue;
+            if (!inList.has(k)) continue; // 仅动当前列表交集
+            let removed = false;
+            if (k.startsWith("gh:")) {
+                const parts = k.split(":");
+                const sourceType = parts[1] || "";
+                const itemKey = parts.slice(2).join(":");
+                if (!itemKey) continue;
+                removed = sourceType === "gists"
+                    ? GitHubAPI.unmarkGistExported(itemKey)
+                    : GitHubAPI.unmarkExported(itemKey);
+            } else {
+                removed = Storage.unmarkTopicExported(k);
+            }
+            if (removed) { aligned++; alignedKeys.push(k); }
+        }
+        if (aligned > 0) {
+            UI().recomputeExportStats?.();
+            UI().renderBookmarkList?.();
+        }
+        return { ok: true, reason: "ok", aligned, alignedKeys };
     },
 
     getSelectedBookmarks: () => {

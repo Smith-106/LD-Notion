@@ -136,6 +136,8 @@ const UI = {
             exportStatusSourceSelect: panel.querySelector("#ldb-export-status-source"),
             exportStatusTip: panel.querySelector("#ldb-export-status-tip"),
             recomputeExportStatusBtn: panel.querySelector("#ldb-recompute-export-status"),
+            exportStatusDiffTip: panel.querySelector("#ldb-export-status-diff-tip"),
+            alignLedgerToSnapshotBtn: panel.querySelector("#ldb-align-ledger-to-snapshot"),
             bookmarkDedupModeSelect: panel.querySelector("#ldb-bookmark-dedup-mode"),
             aiCategoryAutoDedupCheckbox: panel.querySelector("#ldb-ai-category-auto-dedup"),
             crossSourceModeSelect: panel.querySelector("#ldb-cross-source-mode"),

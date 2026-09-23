@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.15.0
+// @version      3.15.1
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -81,7 +81,7 @@
       "use strict";
       var CONFIG2 = {
         // Keep in sync with package.json + userscript @version + build.js header.
-        SCRIPT_VERSION: "3.15.0",
+        SCRIPT_VERSION: "3.15.1",
         // 编译期 feature flag: 多端同步。默认关闭——off 时 main.js 不初始化同步引擎、
         // 零网络/零定时器/零 DOM,行为与关闭前字节级一致(F-SYNC-11)。
         MULTI_DEVICE_SYNC_ENABLED: false,
@@ -23809,6 +23809,10 @@ ${systemText}
                             <div class="ldb-setting-row ldb-mb-8">
                                 <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-recompute-export-status" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-lg);">\u6309 Notion \u91CD\u7B97\u5BFC\u51FA\u72B6\u6001</button>
                             </div>
+                            <div class="ldb-tip" id="ldb-export-status-diff-tip" style="display: none;"></div>
+                            <div class="ldb-setting-row ldb-mb-8">
+                                <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-align-ledger-to-snapshot" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-lg);">\u6309\u5FEB\u7167\u5BF9\u9F50\u672C\u5730\u8D26\u672C\uFF08\u53BB\u6B8B\u7559\uFF09</button>
+                            </div>
                             <div class="ldb-setting-row ldb-flex-center-gap ldb-mb-8">
                                 <label for="ldb-bookmark-dedup-mode" style="white-space: nowrap;">\u4E66\u7B7E\u5BFC\u5165\u53BB\u91CD</label>
                                 <select id="ldb-bookmark-dedup-mode" class="ldb-input ldb-flex-1">
@@ -25257,11 +25261,107 @@ ${systemText}
           UI2().updateExportStatusTip();
           (_b = (_a = UI2()).recomputeExportStats) == null ? void 0 : _b.call(_a);
           (_d = (_c = UI2()).renderBookmarkList) == null ? void 0 : _d.call(_c);
+          const diff = UI2().computeLedgerSnapshotDiff();
           return {
             source: UI2().getExportStatusSource(),
             hasSnapshot: UI2().hasWorkspaceExportSnapshot(),
-            urlCount: UI2().getWorkspaceExportedUrlSet().size
+            urlCount: UI2().getWorkspaceExportedUrlSet().size,
+            // v3.15.1: 分歧可视化 —— 本地账本记已导出、但 Notion 快照缺失的当前列表项
+            // (用户报「Notion 为空但本地显示待导出偏少」时, 一眼看到账本残留规模)。
+            ledgerOnly: diff.ledgerOnly,
+            ledgerOnlyCount: diff.ledgerOnly.length,
+            snapshotOnly: diff.snapshotOnly,
+            snapshotOnlyCount: diff.snapshotOnly.length,
+            snapshotStale: diff.snapshotStale
           };
+        },
+        // v3.15.1: 本地账本 vs Notion 快照分歧计算(纯函数, 无快照/空列表时返回空分歧+原因)。
+        // 口径: 仅覆盖当前已加载列表(UI.bookmarks, 含 LinuxDo + GitHub 两源);
+        // allow_duplicates 下 LinuxDo 项本地恒判待导出, 不纳入 ledgerOnly(与 isExportedForUi 同口径)。
+        computeLedgerSnapshotDiff: () => {
+          const empty = (reason) => ({
+            ledgerOnly: [],
+            snapshotOnly: [],
+            hasSnapshot: UI2().hasWorkspaceExportSnapshot(),
+            snapshotStale: false,
+            reason
+          });
+          const bookmarks = Array.isArray(UI2().bookmarks) ? UI2().bookmarks : [];
+          if (bookmarks.length === 0) return empty("empty-list");
+          if (!UI2().hasWorkspaceExportSnapshot()) return empty("no-snapshot");
+          const snap = UI2().workspaceVisualSnapshot;
+          const urlSet = UI2().getWorkspaceExportedUrlSet();
+          const urlCount = urlSet.size;
+          const maxPages = Number(snap == null ? void 0 : snap.maxPages) || 0;
+          const ledgerOnly = [];
+          const snapshotOnly = [];
+          for (const b of bookmarks) {
+            const bookmarkKey = UI2().getBookmarkKey(b);
+            if (!bookmarkKey) continue;
+            const title = b.title || b.fancy_title || b.name || `\u5E16\u5B50 ${bookmarkKey}`;
+            const inLedger = !!UI2().isBookmarkKeyExportedLocal(bookmarkKey);
+            let inSnapshot = false;
+            try {
+              const url = bookmarkKey.startsWith("gh:") ? UI2().buildBookmarkKeyCanonicalUrl(bookmarkKey) : UI2().buildBookmarkCanonicalUrl(b);
+              inSnapshot = !!url && urlSet.has(url);
+            } catch {
+              inSnapshot = false;
+            }
+            if (inLedger && !inSnapshot) ledgerOnly.push({ key: bookmarkKey, title });
+            else if (!inLedger && inSnapshot) snapshotOnly.push({ key: bookmarkKey, title });
+          }
+          return {
+            ledgerOnly,
+            snapshotOnly,
+            hasSnapshot: true,
+            snapshotStale: maxPages > 0 && urlCount > 0 && urlCount < ledgerOnly.length + snapshotOnly.length + 1 ? false : maxPages > 0 && urlCount === maxPages,
+            reason: "ok"
+          };
+        },
+        // v3.15.1: 按快照对齐本地账本 —— 仅 unmark 当前已加载列表中「账本有记、快照缺失」的
+        // LinuxDo/GitHub 项(逐项经 Storage.unmarkTopicExported / GitHubAPI.unmark*, 双账本对称)。
+        // 安全护栏: ① 无快照/空快照(records 为空)直接拒绝(Notion 被清空≠快照为空, 须先刷新工作区
+        // 拿到真实快照); ② 空列表拒绝; ③ 仅动当前列表交集, 不碰未加载源; ④ 调用方负责确认弹窗+审计。
+        alignLedgerToSnapshot: (keys) => {
+          var _a, _b, _c, _d, _e;
+          if (!UI2().hasWorkspaceExportSnapshot()) {
+            return { ok: false, reason: "no-snapshot", aligned: 0 };
+          }
+          const records = (_a = UI2().workspaceVisualSnapshot) == null ? void 0 : _a.records;
+          if (!Array.isArray(records) || records.length === 0) {
+            return { ok: false, reason: "empty-snapshot", aligned: 0 };
+          }
+          const bookmarks = Array.isArray(UI2().bookmarks) ? UI2().bookmarks : [];
+          if (bookmarks.length === 0) return { ok: false, reason: "empty-list", aligned: 0 };
+          const wanted = keys ? new Set(keys.map(String)) : null;
+          const inList = new Set(bookmarks.map((b) => String(UI2().getBookmarkKey(b) || "").trim()).filter(Boolean));
+          const diff = UI2().computeLedgerSnapshotDiff();
+          let aligned = 0;
+          const alignedKeys = [];
+          for (const { key } of diff.ledgerOnly) {
+            const k = String(key);
+            if (wanted && !wanted.has(k)) continue;
+            if (!inList.has(k)) continue;
+            let removed = false;
+            if (k.startsWith("gh:")) {
+              const parts = k.split(":");
+              const sourceType = parts[1] || "";
+              const itemKey = parts.slice(2).join(":");
+              if (!itemKey) continue;
+              removed = sourceType === "gists" ? GitHubAPI2.unmarkGistExported(itemKey) : GitHubAPI2.unmarkExported(itemKey);
+            } else {
+              removed = Storage2.unmarkTopicExported(k);
+            }
+            if (removed) {
+              aligned++;
+              alignedKeys.push(k);
+            }
+          }
+          if (aligned > 0) {
+            (_c = (_b = UI2()).recomputeExportStats) == null ? void 0 : _c.call(_b);
+            (_e = (_d = UI2()).renderBookmarkList) == null ? void 0 : _e.call(_d);
+          }
+          return { ok: true, reason: "ok", aligned, alignedKeys };
         },
         getSelectedBookmarks: () => {
           if (!Array.isArray(UI2().bookmarks) || UI2().bookmarks.length === 0) return [];
@@ -27609,6 +27709,8 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             exportStatusSourceSelect: panel.querySelector("#ldb-export-status-source"),
             exportStatusTip: panel.querySelector("#ldb-export-status-tip"),
             recomputeExportStatusBtn: panel.querySelector("#ldb-recompute-export-status"),
+            exportStatusDiffTip: panel.querySelector("#ldb-export-status-diff-tip"),
+            alignLedgerToSnapshotBtn: panel.querySelector("#ldb-align-ledger-to-snapshot"),
             bookmarkDedupModeSelect: panel.querySelector("#ldb-bookmark-dedup-mode"),
             aiCategoryAutoDedupCheckbox: panel.querySelector("#ldb-ai-category-auto-dedup"),
             crossSourceModeSelect: panel.querySelector("#ldb-cross-source-mode"),
@@ -30112,7 +30214,9 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           }
           if (refs.recomputeExportStatusBtn) {
             refs.recomputeExportStatusBtn.onclick = () => {
+              var _a2;
               const result = UI2.recomputeExportStatusFromNotion();
+              (_a2 = UI2.renderLedgerSnapshotDiffTip) == null ? void 0 : _a2.call(UI2, result);
               if (UI2.getExportStatusSource() !== "notion") {
                 UI2.showStatus("\u5F53\u524D\u4E3A\u672C\u5730\u8D26\u672C\u6A21\u5F0F\uFF1B\u5207\u6362\u5230\u300CNotion \u5DE5\u4F5C\u533A\u300D\u540E\u53EF\u6309\u5FEB\u7167\u91CD\u7B97\u3002", "info");
                 return;
@@ -30121,7 +30225,84 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                 UI2.showStatus("\u8BF7\u5148\u5237\u65B0\u5DE5\u4F5C\u533A\u540E\u518D\u6309 Notion \u91CD\u7B97\u5BFC\u51FA\u72B6\u6001", "error");
                 return;
               }
-              UI2.showStatus(`\u5DF2\u6309 Notion \u5FEB\u7167\u91CD\u7B97\uFF08\u8BC6\u522B\u5230 ${result.urlCount} \u6761\u94FE\u63A5\uFF0C\u672A\u6539\u672C\u5730\u8D26\u672C\uFF09`, "success");
+              const extra = result.ledgerOnlyCount > 0 ? `\uFF1B\u672C\u5730\u8D26\u672C\u591A\u8BB0 ${result.ledgerOnlyCount} \u9879\uFF08\u5FEB\u7167\u7F3A\u5931\uFF0C\u53EF\u6309\u5FEB\u7167\u5BF9\u9F50\u53BB\u6B8B\u7559\uFF09` : "\uFF1B\u672C\u5730\u8D26\u672C\u4E0E\u5FEB\u7167\u4E00\u81F4\uFF0C\u65E0\u6B8B\u7559";
+              UI2.showStatus(`\u5DF2\u6309 Notion \u5FEB\u7167\u91CD\u7B97\uFF08\u8BC6\u522B\u5230 ${result.urlCount} \u6761\u94FE\u63A5\uFF0C\u672A\u6539\u672C\u5730\u8D26\u672C${extra}\uFF09`, "success");
+            };
+          }
+          UI2.renderLedgerSnapshotDiffTip = (result) => {
+            const tip = refs.exportStatusDiffTip;
+            if (!tip) return;
+            const diff = result || UI2.computeLedgerSnapshotDiff();
+            if (!diff.hasSnapshot) {
+              tip.style.display = "";
+              tip.textContent = "\u6682\u65E0 Notion \u5FEB\u7167\uFF1A\u8BF7\u5148\u5237\u65B0\u5DE5\u4F5C\u533A\uFF0C\u518D\u5BF9\u6BD4\u672C\u5730\u8D26\u672C\u4E0E\u5FEB\u7167\u7684\u5206\u6B67\u3002";
+              return;
+            }
+            if (diff.reason === "empty-list") {
+              tip.style.display = "";
+              tip.textContent = "\u5F53\u524D\u672A\u52A0\u8F7D\u6536\u85CF\u5217\u8868\uFF1A\u8BF7\u5148\u52A0\u8F7D\uFF0C\u518D\u5BF9\u6BD4\u5206\u6B67\u3002";
+              return;
+            }
+            if (diff.ledgerOnly.length === 0 && diff.snapshotOnly.length === 0) {
+              tip.style.display = "";
+              tip.textContent = "\u672C\u5730\u8D26\u672C\u4E0E Notion \u5FEB\u7167\u4E00\u81F4\uFF1A\u5F53\u524D\u5217\u8868\u65E0\u5206\u6B67\u3002";
+              return;
+            }
+            const stale = diff.snapshotStale ? "\uFF08\u5FEB\u7167\u53EF\u80FD\u88AB maxPages \u622A\u65AD\uFF0C\u4EC5\u4F9B\u53C2\u8003\uFF09" : "";
+            tip.style.display = "";
+            tip.textContent = `\u5206\u6B67\uFF1A\u672C\u5730\u591A\u8BB0 ${diff.ledgerOnly.length} \u9879\uFF08\u5FEB\u7167\u7F3A\u5931\uFF09${stale}\uFF1B\u5FEB\u7167\u591A\u8BB0 ${diff.snapshotOnly.length} \u9879\uFF08\u672C\u5730\u672A\u8BB0\uFF09\u3002\u5BF9\u9F50\u4EC5\u79FB\u9664\u5F53\u524D\u5217\u8868\u4E2D\u672C\u5730\u591A\u8BB0\u9879\u7684\u8D26\u672C\u8BB0\u5F55\uFF0C\u4E0D\u5220 Notion \u5185\u5BB9\u3002`;
+          };
+          if (refs.alignLedgerToSnapshotBtn) {
+            refs.alignLedgerToSnapshotBtn.onclick = async () => {
+              var _a2, _b, _c, _d;
+              const diff = UI2.computeLedgerSnapshotDiff();
+              (_a2 = UI2.renderLedgerSnapshotDiffTip) == null ? void 0 : _a2.call(UI2, diff);
+              if (!diff.hasSnapshot) {
+                UI2.showStatus("\u8BF7\u5148\u5237\u65B0\u5DE5\u4F5C\u533A\u62FF\u5230 Notion \u5FEB\u7167\uFF0C\u518D\u5BF9\u9F50\u672C\u5730\u8D26\u672C", "error");
+                return;
+              }
+              if (diff.reason === "empty-list") {
+                UI2.showStatus("\u5F53\u524D\u672A\u52A0\u8F7D\u6536\u85CF\u5217\u8868\uFF0C\u65E0\u53EF\u5BF9\u9F50\u9879", "error");
+                return;
+              }
+              if (!Array.isArray((_b = UI2.workspaceVisualSnapshot) == null ? void 0 : _b.records) || UI2.workspaceVisualSnapshot.records.length === 0) {
+                UI2.showStatus("\u5FEB\u7167\u4E3A\u7A7A\uFF080 \u6761\u8BB0\u5F55\uFF09\uFF1A\u65E0\u6CD5\u533A\u5206 Notion \u771F\u7A7A\u4E0E\u626B\u63CF\u5931\u8D25\uFF0C\u5DF2\u62D2\u7EDD\u5168\u6E05\uFF1B\u8BF7\u5148\u5237\u65B0\u5DE5\u4F5C\u533A", "error");
+                return;
+              }
+              if (diff.ledgerOnly.length === 0) {
+                UI2.showStatus("\u672C\u5730\u8D26\u672C\u4E0E\u5FEB\u7167\u4E00\u81F4\uFF0C\u65E0\u6B8B\u7559\u53EF\u5BF9\u9F50", "success");
+                return;
+              }
+              const preview = diff.ledgerOnly.slice(0, 8).map((it) => `\xB7 ${it.title || it.key}`).join("\n");
+              const more = diff.ledgerOnly.length > 8 ? `
+\u2026\u7B49\u5171 ${diff.ledgerOnly.length} \u9879` : "";
+              const goOn = await ConfirmationDialog2.show({
+                title: "\u6309\u5FEB\u7167\u5BF9\u9F50\u672C\u5730\u8D26\u672C",
+                message: `\u5C06\u79FB\u9664\u5F53\u524D\u5DF2\u52A0\u8F7D\u5217\u8868\u4E2D ${diff.ledgerOnly.length} \u9879\u7684\u672C\u5730\u5DF2\u5BFC\u51FA\u6807\u8BB0\uFF08\u5FEB\u7167\u4E2D\u65E0\u5BF9\u5E94\u94FE\u63A5\uFF09\uFF0C\u4E4B\u540E\u5B83\u4EEC\u4F1A\u56DE\u5230\u300C\u5F85\u5BFC\u51FA\u300D\u3002
+
+${preview}${more}
+
+\u4EC5\u6539\u672C\u5730\u8D26\u672C\uFF0C\u4E0D\u5220\u9664 Notion \u5185\u5BB9\uFF1B\u672A\u52A0\u8F7D\u6765\u6E90\u4E0D\u53D7\u5F71\u54CD\u3002\u662F\u5426\u7EE7\u7EED\uFF1F`,
+                confirmText: "\u786E\u8BA4\u5BF9\u9F50",
+                countdown: 0
+              });
+              if (!goOn) return;
+              if (!OperationGuard2.canExecute("notion.queryDatabase")) {
+                OperationGuard2.auditDenied("notion.queryDatabase", { action: "alignLedgerToSnapshot", count: diff.ledgerOnly.length }, { phase: "execute", reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u5BF9\u9F50\u9700 query \u6743\u9650" });
+                UI2.showStatus("\u6743\u9650\u4E0D\u8DB3\uFF1A\u5BF9\u9F50\u672C\u5730\u8D26\u672C\u9700\u8981\u67E5\u8BE2\u6743\u9650\uFF08level\u22650\uFF09", "error");
+                return;
+              }
+              const res = UI2.alignLedgerToSnapshot();
+              if (!res.ok) {
+                UI2.showStatus(`\u5BF9\u9F50\u88AB\u62D2\u7EDD\uFF08${res.reason}\uFF09\uFF1A\u672A\u6539\u672C\u5730\u8D26\u672C`, "error");
+                return;
+              }
+              try {
+                (_c = OperationLog2 == null ? void 0 : OperationLog2.add) == null ? void 0 : _c.call(OperationLog2, { action: "ledger.align", aligned: res.aligned, keys: (res.alignedKeys || []).slice(0, 50), actor: "user" });
+              } catch {
+              }
+              (_d = UI2.renderLedgerSnapshotDiffTip) == null ? void 0 : _d.call(UI2);
+              UI2.showStatus(`\u5DF2\u5BF9\u9F50 ${res.aligned} \u9879\uFF1A\u672C\u5730\u6B8B\u7559\u6807\u8BB0\u5DF2\u79FB\u9664\uFF0C\u5BF9\u5E94\u6761\u76EE\u56DE\u5230\u5F85\u5BFC\u51FA`, "success");
             };
           }
           (_a = UI2.updateExportStatusTip) == null ? void 0 : _a.call(UI2);

@@ -664,6 +664,7 @@ const UIEvents = {
         if (refs.recomputeExportStatusBtn) {
             refs.recomputeExportStatusBtn.onclick = () => {
                 const result = UI.recomputeExportStatusFromNotion();
+                UI.renderLedgerSnapshotDiffTip?.(result);
                 if (UI.getExportStatusSource() !== "notion") {
                     UI.showStatus("当前为本地账本模式；切换到「Notion 工作区」后可按快照重算。", "info");
                     return;
@@ -672,7 +673,79 @@ const UIEvents = {
                     UI.showStatus("请先刷新工作区后再按 Notion 重算导出状态", "error");
                     return;
                 }
-                UI.showStatus(`已按 Notion 快照重算（识别到 ${result.urlCount} 条链接，未改本地账本）`, "success");
+                const extra = (result.ledgerOnlyCount > 0)
+                    ? `；本地账本多记 ${result.ledgerOnlyCount} 项（快照缺失，可按快照对齐去残留）`
+                    : "；本地账本与快照一致，无残留";
+                UI.showStatus(`已按 Notion 快照重算（识别到 ${result.urlCount} 条链接，未改本地账本${extra}）`, "success");
+            };
+        }
+        // v3.15.1: 按快照对齐本地账本（去残留）—— 仅 unmark 当前已加载列表中
+        // 「账本有记、快照缺失」项；空/无快照时拒绝；执行前二次确认 + 审计。
+        UI.renderLedgerSnapshotDiffTip = (result) => {
+            const tip = refs.exportStatusDiffTip;
+            if (!tip) return;
+            const diff = result || UI.computeLedgerSnapshotDiff();
+            if (!diff.hasSnapshot) {
+                tip.style.display = "";
+                tip.textContent = "暂无 Notion 快照：请先刷新工作区，再对比本地账本与快照的分歧。";
+                return;
+            }
+            if (diff.reason === "empty-list") {
+                tip.style.display = "";
+                tip.textContent = "当前未加载收藏列表：请先加载，再对比分歧。";
+                return;
+            }
+            if (diff.ledgerOnly.length === 0 && diff.snapshotOnly.length === 0) {
+                tip.style.display = "";
+                tip.textContent = "本地账本与 Notion 快照一致：当前列表无分歧。";
+                return;
+            }
+            const stale = diff.snapshotStale ? "（快照可能被 maxPages 截断，仅供参考）" : "";
+            tip.style.display = "";
+            tip.textContent = `分歧：本地多记 ${diff.ledgerOnly.length} 项（快照缺失）${stale}；快照多记 ${diff.snapshotOnly.length} 项（本地未记）。对齐仅移除当前列表中本地多记项的账本记录，不删 Notion 内容。`;
+        };
+        if (refs.alignLedgerToSnapshotBtn) {
+            refs.alignLedgerToSnapshotBtn.onclick = async () => {
+                const diff = UI.computeLedgerSnapshotDiff();
+                UI.renderLedgerSnapshotDiffTip?.(diff);
+                if (!diff.hasSnapshot) {
+                    UI.showStatus("请先刷新工作区拿到 Notion 快照，再对齐本地账本", "error");
+                    return;
+                }
+                if (diff.reason === "empty-list") {
+                    UI.showStatus("当前未加载收藏列表，无可对齐项", "error");
+                    return;
+                }
+                if (!Array.isArray(UI.workspaceVisualSnapshot?.records) || UI.workspaceVisualSnapshot.records.length === 0) {
+                    UI.showStatus("快照为空（0 条记录）：无法区分 Notion 真空与扫描失败，已拒绝全清；请先刷新工作区", "error");
+                    return;
+                }
+                if (diff.ledgerOnly.length === 0) {
+                    UI.showStatus("本地账本与快照一致，无残留可对齐", "success");
+                    return;
+                }
+                const preview = diff.ledgerOnly.slice(0, 8).map((it) => `· ${it.title || it.key}`).join("\n");
+                const more = diff.ledgerOnly.length > 8 ? `\n…等共 ${diff.ledgerOnly.length} 项` : "";
+                const goOn = await ConfirmationDialog.show({
+                    title: "按快照对齐本地账本",
+                    message: `将移除当前已加载列表中 ${diff.ledgerOnly.length} 项的本地已导出标记（快照中无对应链接），之后它们会回到「待导出」。\n\n${preview}${more}\n\n仅改本地账本，不删除 Notion 内容；未加载来源不受影响。是否继续？`,
+                    confirmText: "确认对齐",
+                    countdown: 0,
+                });
+                if (!goOn) return;
+                if (!OperationGuard.canExecute("notion.queryDatabase")) {
+                    OperationGuard.auditDenied("notion.queryDatabase", { action: "alignLedgerToSnapshot", count: diff.ledgerOnly.length }, { phase: "execute", reason: "权限不足：对齐需 query 权限" });
+                    UI.showStatus("权限不足：对齐本地账本需要查询权限（level≥0）", "error");
+                    return;
+                }
+                const res = UI.alignLedgerToSnapshot();
+                if (!res.ok) {
+                    UI.showStatus(`对齐被拒绝（${res.reason}）：未改本地账本`, "error");
+                    return;
+                }
+                try { OperationLog?.add?.({ action: "ledger.align", aligned: res.aligned, keys: (res.alignedKeys || []).slice(0, 50), actor: "user" }); } catch { /* 审计落盘失败不阻断对齐结果展示 */ }
+                UI.renderLedgerSnapshotDiffTip?.();
+                UI.showStatus(`已对齐 ${res.aligned} 项：本地残留标记已移除，对应条目回到待导出`, "success");
             };
         }
         UI.updateExportStatusTip?.();

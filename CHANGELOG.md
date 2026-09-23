@@ -1,3 +1,12 @@
+## [3.15.1] - 2026-09-24
+
+### fix (本地账本 vs Notion 快照分歧可视化 + 安全对齐)
+
+- **问题**：Notion 为空但本地模式显示「已加载 N 个，待导出 M 个」—— 本地账本（Notion/Obsidian 共用导出账本 + 对账回填 + 历史残留）与 Notion 实际内容天然可分歧，旧 UI 只给计数、无分歧解释、无选择性对齐入口。
+- **分歧可视化**：新增 `computeLedgerSnapshotDiff`（纯函数，仅覆盖当前已加载列表）+「按 Notion 重算」透出 `ledgerOnly/ledgerOnlyCount` + 设置区新增常驻分歧提示条。
+- **安全对齐**：新增「按快照对齐本地账本（去残留）」按钮 + `alignLedgerToSnapshot`—— 仅 unmark 当前列表中「账本有记、快照缺失」项（LinuxDo 经 `unmarkTopicExported`、GitHub 经 `unmarkExported/unmarkGistExported`）；无快照/空快照(0 records)/空列表直接拒绝；执行前列前 8 项预览二次确认 + query 权限闸门 + 审计落盘；仅改本地账本、不删 Notion 内容、未加载来源不受影响。
+- **验证**：新增 `tests/ledger-snapshot-align.test.js` 6 项；vitest 110 文件/1833 用例 + legacy 三件套全绿；`verify:build` PASS。
+
 ## [3.15.0] - 2026-09-24
 
 ### fix + BREAKING

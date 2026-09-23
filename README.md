@@ -6,7 +6,7 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![文档站](https://img.shields.io/badge/文档站-GitHub%20Pages-6f42c1?style=for-the-badge&logo=githubpages)](https://smith-106.github.io/LD-Notion/) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前仓库源码版本：`v3.15.0`
+- 当前仓库源码版本：`v3.15.1`
 - 最新 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/latest>
 - 文档站：<https://smith-106.github.io/LD-Notion/>
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
@@ -394,6 +394,11 @@ A: 请检查：
 - 四级权限模型 + `OperationGuard` 统一保护用户触发与 AI 触发的写入入口；危险操作额外确认，撤销窗口只覆盖危险操作
 
 ## 更新日志
+
+### v3.15.1
+
+- **分歧可视化 + 安全对齐**：本地账本 vs Notion 快照分歧计算（仅当前已加载列表）+「按 Notion 重算」透出本地多记数 + 新增「按快照对齐本地账本（去残留）」按钮（仅 unmark 当前列表中账本有记、快照缺失项；无/空快照拒绝；二次确认 + 审计；不删 Notion 内容）。Notion 为空但本地显示待导出偏少时，先刷新工作区拿到真实快照，再看分歧条、一键对齐。
+- **验证**：新增 `tests/ledger-snapshot-align.test.js` 6 项；vitest 110 文件/1833 用例 + legacy 三件套全绿。
 
 ### v3.15.0
 
