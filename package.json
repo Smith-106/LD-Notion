@@ -16,6 +16,7 @@
     "verify:mutation": "node scripts/verify-mutation.js",
     "verify:mutation:equivalence": "node scripts/verify-mutation-equivalence.js",
     "verify:delivery": "node scripts/verify-delivery.js",
+    "verify:github-no-callback": "node scripts/verify-github-no-callback.js",
     "build": "node build.js",
     "verify:build": "node scripts/verify-build.js",
     "docs:dev": "vitepress docs",
