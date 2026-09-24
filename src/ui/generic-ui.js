@@ -10,7 +10,7 @@ const { NotionAPI, DOMToNotion, SiteDetector, InstallHelper, HTMLToMarkdown, Obs
 const { OperationGuard, UndoManager, OperationLog, ConfirmationDialog } = require("../security");
 const { ZhihuAPI, GenericExtractor, WorkspaceService } = require("../extract");
 const { UICommandService } = require("../coordination/UICommandService");
-const { Exporter, LinuxDoAPI, GenericExporter } = require("../export");
+const { Exporter, LinuxDoAPI, GenericExporter, PageFileExporter } = require("../export");
 const { AutoImporter, UpdateChecker, GitHubAutoImporter, GitHubAPI, GitHubExporter } = require("../import");
 const { AIAssistant, getAISettings } = require("../ai");
 const { StyleManager } = require("./style-manager");
@@ -338,6 +338,32 @@ const GenericUI = {
                 <button class="gclip-btn gclip-btn-secondary" id="gclip-obs-export" style="display: block;">
                     导出到 Obsidian
                 </button>
+                <!-- v3.16.0: 存为本地文件（.md/.html/.json，通用站可用，不经 Notion/Obsidian） -->
+                <div class="gclip-field" id="gclip-file-wrap" style="margin-top: var(--ldb-ui-spacing-md);">
+                    <label for="gclip-file-format">存为本地文件</label>
+                    <div style="display:flex;gap:var(--ldb-ui-spacing-md);align-items:center;">
+                        <select id="gclip-file-format" class="gclip-input" style="flex:1;" aria-label="本地文件格式">
+                            <option value="md">Markdown（.md）</option>
+                            <option value="html">网页存档（.html）</option>
+                            <option value="json">数据（.json）</option>
+                        </select>
+                        <button class="gclip-btn gclip-btn-secondary" id="gclip-save-file" style="white-space:nowrap;">💾 存文件</button>
+                    </div>
+                </div>
+                <!-- v3.16.0: 发布到 linux.do（仅 linux.do 域名可用，经 Guard + 二次确认） -->
+                <div class="gclip-field" id="gclip-publish-wrap" style="margin-top: var(--ldb-ui-spacing-md);">
+                    <label>发布到 linux.do</label>
+                    <div style="display:flex;gap:var(--ldb-ui-spacing-md);align-items:center;">
+                        <select id="gclip-publish-mode" class="gclip-input" style="flex:1;" aria-label="发布模式">
+                            <option value="topic">发新话题</option>
+                            <option value="reply">回复话题</option>
+                        </select>
+                        <button class="gclip-btn gclip-btn-secondary" id="gclip-publish" style="white-space:nowrap;">📮 发布</button>
+                    </div>
+                    <input type="text" id="gclip-publish-title" class="gclip-input" placeholder="新话题标题（回复模式可空）" aria-label="发布标题" style="margin-top:var(--ldb-ui-spacing-md);">
+                    <input type="text" id="gclip-publish-topic" class="gclip-input" placeholder="回复话题 ID（发新话题可空）" aria-label="回复话题 ID" style="margin-top:var(--ldb-ui-spacing-md);" inputmode="numeric">
+                    <input type="text" id="gclip-publish-category" class="gclip-input" placeholder="分类 ID（可选，留空用站点默认）" aria-label="分类 ID" style="margin-top:var(--ldb-ui-spacing-md);" inputmode="numeric">
+                </div>
                 <button class="gclip-btn gclip-btn-setup" id="gclip-show-settings" style="display: ${isConfigured ? 'block' : 'none'};">
                     修改配置
                 </button>
@@ -729,6 +755,17 @@ const GenericUI = {
             GenericUI.doExport();
         });
 
+        // v3.16.0: 存为本地文件（知乎 / linux.do 话题页 / 通用页同口径经 PageFileExporter；
+        // 纯本地写不经 Guard，与书签备份/工作区报告下载先例同口径；成功同样落 clipper 账本）
+        panel.querySelector("#gclip-save-file").addEventListener("click", () => {
+            GenericUI.saveCurrentPageToFile();
+        });
+
+        // v3.16.0: 发布到 linux.do（仅 linux.do 域名可用；Guard + 二次确认 + 审计）
+        panel.querySelector("#gclip-publish").addEventListener("click", () => {
+            GenericUI.publishCurrentPageToLinuxDo();
+        });
+
         // 导出到 Obsidian
         panel.querySelector("#gclip-obs-export").addEventListener("click", async () => {
             if (GenericUI.isExporting) return;
@@ -920,6 +957,107 @@ const GenericUI = {
                 btn.disabled = false;
                 btn.textContent = "导出当前页面";
             }
+        }
+    },
+
+    // v3.16.0: 存为本地文件 —— 当前页面 → .md/.html/.json（知乎/linux.do/通用站通用，
+    // 不经 Notion/Obsidian）。纯本地写不经 Guard；成功落 clipper 账本（与 Notion/Obsidian
+    // 导出同账本，避免已存文件又被记为待导出）。
+    saveCurrentPageToFile: async () => {
+        if (GenericUI.isExporting) return;
+        GenericUI.isExporting = true;
+        let btn = null;
+        try {
+            btn = GenericUI.panel.querySelector("#gclip-save-file");
+            if (btn) { btn.disabled = true; btn.textContent = "保存中..."; }
+            const format = GenericUI.panel.querySelector("#gclip-file-format")?.value || "md";
+            GenericUI.showStatus("正在提取页面内容...", "info");
+            const built = await PageFileExporter.buildCurrentPage();
+            // html 格式需正文原 HTML（通用页路由）；markdown/json 由装配层直接产出
+            let bodyHtml = "";
+            if (format === "html") {
+                const contentEl = GenericExtractor.extractContent();
+                bodyHtml = contentEl ? contentEl.innerHTML : "";
+            }
+            const payload = PageFileExporter.buildFilePayload(built, format, bodyHtml);
+            PageFileExporter.downloadFile(payload.filename, payload.content, payload.mime);
+            try { GenericExporter.markClipperExported(built.meta || {}); } catch (markError) {
+                console.warn("[LD-Notion] 存文件账本标记失败(文件已下载):", markError);
+            }
+            GenericUI.showStatus(`已保存本地文件：${payload.filename}`, "success");
+        } catch (error) {
+            GenericUI.showStatus(`存文件失败: ${error.message}`, "error");
+        } finally {
+            GenericUI.isExporting = false;
+            if (btn) { btn.disabled = false; btn.textContent = "💾 存文件"; }
+        }
+    },
+
+    // v3.16.0: 发布当前页到 linux.do —— 仅 linux.do 域名可用（跨站调用直接拒绝）。
+    // 经 OperationGuard.execute("linuxdo.publish")（权限检查 + 用户二次确认 + 审计，正文
+    // raw 永不进审计）；服务端 422/401/403/429 由 LinuxDoAPI.postJson 转为可行动错误。
+    // 成功同样落 clipper 账本。
+    publishCurrentPageToLinuxDo: async () => {
+        if (GenericUI.isExporting) return;
+        const hostname = window.location.hostname || "";
+        if (hostname !== "linux.do" && !hostname.endsWith(".linux.do")) {
+            GenericUI.showStatus("发布到 linux.do 仅可在 linux.do 站点使用（当前页为站外，内容请先存为本地文件再手动发布）", "error");
+            return;
+        }
+        GenericUI.isExporting = true;
+        let btn = null;
+        try {
+            btn = GenericUI.panel.querySelector("#gclip-publish");
+            if (btn) { btn.disabled = true; btn.textContent = "发布中..."; }
+            const mode = GenericUI.panel.querySelector("#gclip-publish-mode")?.value || "topic";
+            const titleInput = (GenericUI.panel.querySelector("#gclip-publish-title")?.value || "").trim();
+            const topicInput = (GenericUI.panel.querySelector("#gclip-publish-topic")?.value || "").trim();
+            const categoryInput = (GenericUI.panel.querySelector("#gclip-publish-category")?.value || "").trim();
+            GenericUI.showStatus("正在提取页面内容...", "info");
+            const built = await PageFileExporter.buildCurrentPage();
+            const raw = built.markdown || "";
+            const title = titleInput || built.meta?.title || document.title || "无标题";
+            let params;
+            try {
+                params = PageFileExporter.buildPublishParams({
+                    mode, title, raw, category: categoryInput, topicId: topicInput,
+                });
+            } catch (paramError) {
+                GenericUI.showStatus(`发布参数有误: ${paramError.message}`, "error");
+                return;
+            }
+            const itemName = mode === "reply" ? `回复话题 ${params.topic_id}` : `新话题《${params.title}》`;
+            const ok = await ConfirmationDialog.show({
+                title: "发布到 linux.do",
+                message: mode === "reply"
+                    ? `将以当前登录身份回复话题 ${params.topic_id}（正文约 ${params.raw.length} 字），发布后不可由脚本撤回，是否继续？`
+                    : `将以当前登录身份在 linux.do 发布新话题《${params.title}》（正文约 ${params.raw.length} 字），发布后不可由脚本撤回，是否继续？`,
+                itemName,
+                confirmText: "确认发布",
+                countdown: 0,
+            });
+            if (!ok) { GenericUI.showStatus("已取消发布", "info"); return; }
+            GenericUI.showStatus(mode === "reply" ? "正在回复话题..." : "正在发布新话题...", "info");
+            const result = await OperationGuard.execute("linuxdo.publish", async () => {
+                return mode === "reply"
+                    ? LinuxDoAPI.replyToTopic(params)
+                    : LinuxDoAPI.createTopic(params);
+            }, {
+                itemName,
+                trigger: "user_requested_write",
+                linuxdoTopicId: mode === "reply" ? params.topic_id : "",
+                linuxdoCategory: mode === "topic" ? (params.category || "") : "",
+            });
+            try { GenericExporter.markClipperExported(built.meta || {}); } catch (markError) {
+                console.warn("[LD-Notion] 发帖账本标记失败(帖子已发布):", markError);
+            }
+            const link = result.topicId ? `https://linux.do/t/${result.topicId}` : "";
+            GenericUI.showStatus(link ? `发布成功：${link}` : "发布成功", "success");
+        } catch (error) {
+            GenericUI.showStatus(`发布失败: ${error.message}`, "error");
+        } finally {
+            GenericUI.isExporting = false;
+            if (btn) { btn.disabled = false; btn.textContent = "📮 发布"; }
         }
     },
 

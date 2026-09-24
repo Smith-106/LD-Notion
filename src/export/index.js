@@ -1075,4 +1075,6 @@ const Exporter = {
     },
 };
 
-module.exports = { GenericExporter, LinuxDoAPI, Exporter };
+const { PageFileExporter } = require("./page-file");
+
+module.exports = { GenericExporter, LinuxDoAPI, Exporter, PageFileExporter };

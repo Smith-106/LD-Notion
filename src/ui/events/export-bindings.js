@@ -11,7 +11,7 @@ const { Utils } = require("../../utils");
 const { Storage, DedupStore } = require("../../storage");
 const { NotionOAuth } = require("../../auth");
 const { OperationGuard, OperationLog, ConfirmationDialog } = require("../../security");
-const { Exporter, LinuxDoAPI } = require("../../export");
+const { Exporter, LinuxDoAPI, GenericExporter, PageFileExporter } = require("../../export");
 const { GitHubAPI } = require("../../import");
 const { BookmarkExporter } = require("../../bridge");
 const { UICommandService } = require("../../coordination/UICommandService");
@@ -504,6 +504,94 @@ const bindExport = (ctx) => {
                 Exporter.reset();
             }
         };
+
+        // v3.16.0: 当前页 → 本地文件 / 发布到 linux.do（linux.do 话题页入口；
+        // 对齐 LDStatus Pro：当前页面可直接存为本地文件，也可发布到 linux.do。
+        // 存文件为纯本地写不经 Guard；发布经 OperationGuard.execute("linuxdo.publish")
+        // + 用户二次确认 + 审计（正文 raw 永不进审计）；成功同样落 clipper 账本。）
+        if (refs.pageFileBtn) {
+            refs.pageFileBtn.onclick = async () => {
+                if (refs.pageFileBtn.disabled) return;
+                refs.pageFileBtn.disabled = true;
+                try {
+                    UI.showStatus("正在提取当前页面内容...", "info");
+                    const built = await PageFileExporter.buildCurrentPage();
+                    const format = refs.pageFileFormatSelect?.value || "md";
+                    let bodyHtml = "";
+                    if (format === "html") {
+                        const { GenericExtractor } = require("../../extract");
+                        const contentEl = GenericExtractor.extractContent();
+                        bodyHtml = contentEl ? contentEl.innerHTML : "";
+                    }
+                    const payload = PageFileExporter.buildFilePayload(built, format, bodyHtml);
+                    PageFileExporter.downloadFile(payload.filename, payload.content, payload.mime);
+                    try { GenericExporter.markClipperExported(built.meta || {}); } catch (markError) {
+                        console.warn("[LD-Notion] 存文件账本标记失败(文件已下载):", markError);
+                    }
+                    UI.showStatus(`已保存本地文件：${payload.filename}`, "success");
+                } catch (error) {
+                    UI.showStatus(`存文件失败: ${error.message}`, "error");
+                } finally {
+                    refs.pageFileBtn.disabled = false;
+                }
+            };
+        }
+        if (refs.pagePublishBtn) {
+            refs.pagePublishBtn.onclick = async () => {
+                if (refs.pagePublishBtn.disabled) return;
+                refs.pagePublishBtn.disabled = true;
+                try {
+                    const mode = refs.pagePublishModeSelect?.value || "topic";
+                    const titleInput = (refs.pagePublishTitleInput?.value || "").trim();
+                    const topicInput = (refs.pagePublishTopicInput?.value || "").trim();
+                    const categoryInput = (refs.pagePublishCategoryInput?.value || "").trim();
+                    UI.showStatus("正在提取当前页面内容...", "info");
+                    const built = await PageFileExporter.buildCurrentPage();
+                    const raw = built.markdown || "";
+                    const title = titleInput || built.meta?.title || document.title || "无标题";
+                    let params;
+                    try {
+                        params = PageFileExporter.buildPublishParams({
+                            mode, title, raw, category: categoryInput, topicId: topicInput,
+                        });
+                    } catch (paramError) {
+                        UI.showStatus(`发布参数有误: ${paramError.message}`, "error");
+                        return;
+                    }
+                    const itemName = mode === "reply" ? `回复话题 ${params.topic_id}` : `新话题《${params.title}》`;
+                    const ok = await ConfirmationDialog.show({
+                        title: "发布到 linux.do",
+                        message: mode === "reply"
+                            ? `将以当前登录身份回复话题 ${params.topic_id}（正文约 ${params.raw.length} 字），发布后不可由脚本撤回，是否继续？`
+                            : `将以当前登录身份在 linux.do 发布新话题《${params.title}》（正文约 ${params.raw.length} 字），发布后不可由脚本撤回，是否继续？`,
+                        itemName,
+                        confirmText: "确认发布",
+                        countdown: 0,
+                    });
+                    if (!ok) { UI.showStatus("已取消发布", "info"); return; }
+                    UI.showStatus(mode === "reply" ? "正在回复话题..." : "正在发布新话题...", "info");
+                    const result = await OperationGuard.execute("linuxdo.publish", async () => {
+                        return mode === "reply"
+                            ? LinuxDoAPI.replyToTopic(params)
+                            : LinuxDoAPI.createTopic(params);
+                    }, {
+                        itemName,
+                        trigger: "user_requested_write",
+                        linuxdoTopicId: mode === "reply" ? params.topic_id : "",
+                        linuxdoCategory: mode === "topic" ? (params.category || "") : "",
+                    });
+                    try { GenericExporter.markClipperExported(built.meta || {}); } catch (markError) {
+                        console.warn("[LD-Notion] 发帖账本标记失败(帖子已发布):", markError);
+                    }
+                    const link = result.topicId ? `https://linux.do/t/${result.topicId}` : "";
+                    UI.showStatus(link ? `发布成功：${link}` : "发布成功", "success");
+                } catch (error) {
+                    UI.showStatus(`发布失败: ${error.message}`, "error");
+                } finally {
+                    refs.pagePublishBtn.disabled = false;
+                }
+            };
+        }
 
         // 权限设置事件
         refs.permissionLevelSelect.onchange = (e) => {

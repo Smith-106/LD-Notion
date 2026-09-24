@@ -209,6 +209,34 @@ function renderPanel(personaName) {
                             </button>
                         </div>
 
+                        <!-- v3.16.0: 当前页 → 本地文件 / 发布到 linux.do（对齐 LDStatus Pro；
+                             话题页可用：buildCurrentPage 在 LINUX_DO 下走 fetchAllPosts 装配） -->
+                        <div class="ldb-section" id="ldb-current-page-block" style="margin-top: var(--ldb-ui-spacing-md);">
+                            <div class="ldb-section-title">📄 当前页面</div>
+                            <div style="display:flex;gap:var(--ldb-ui-spacing-sm);align-items:center;margin-bottom:var(--ldb-ui-spacing-sm);">
+                                <select id="ldb-page-file-format" class="ldb-input ldb-flex-1" aria-label="本地文件格式">
+                                    <option value="md">Markdown（.md）</option>
+                                    <option value="html">网页存档（.html）</option>
+                                    <option value="json">数据（.json）</option>
+                                </select>
+                                <button class="ldb-btn ldb-btn-secondary ldb-btn-small" id="ldb-page-save-file">
+                                    💾 存文件
+                                </button>
+                            </div>
+                            <div style="display:flex;gap:var(--ldb-ui-spacing-sm);align-items:center;margin-bottom:var(--ldb-ui-spacing-sm);">
+                                <select id="ldb-page-publish-mode" class="ldb-input" aria-label="发布模式" style="flex:0 0 auto;">
+                                    <option value="topic">发新话题</option>
+                                    <option value="reply">回复话题</option>
+                                </select>
+                                <button class="ldb-btn ldb-btn-secondary ldb-btn-small" id="ldb-page-publish">
+                                    📮 发布到 linux.do
+                                </button>
+                            </div>
+                            <input type="text" id="ldb-page-publish-title" class="ldb-input" placeholder="新话题标题（回复模式可空）" aria-label="发布标题" style="width:100%;margin-bottom:var(--ldb-ui-spacing-sm);">
+                            <input type="text" id="ldb-page-publish-topic" class="ldb-input" placeholder="回复话题 ID（发新话题可空）" aria-label="回复话题 ID" style="width:100%;margin-bottom:var(--ldb-ui-spacing-sm);" inputmode="numeric">
+                            <input type="text" id="ldb-page-publish-category" class="ldb-input" placeholder="分类 ID（可选，留空用站点默认）" aria-label="分类 ID" style="width:100%;" inputmode="numeric">
+                        </div>
+
                         <!-- 控制按钮 (导出时显示) -->
                         <div class="ldb-control-btns" id="ldb-control-btns" style="display: none;">
                             <button class="ldb-btn ldb-btn-warning ldb-btn-small" id="ldb-pause">

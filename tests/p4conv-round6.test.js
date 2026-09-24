@@ -227,7 +227,8 @@ describe("P4 收敛(c09/c13/c14): 源码级契约锁定", () => {
     it("两处导出锁的前置步骤都在 try 内", () => {
         const src = read("src/ui/generic-ui.js");
         expect(src).not.toContain("GenericUI.isExporting = false;\n                GenericUI.showStatus(\"已取消");
-        expect((src.match(/let btn = null;/g) || []).length).toBe(2);
+        // v3.16.0: 新增存文件/发布两个同范式方法(前置步骤同样 try 内 + finally 复位)，计数 2→4
+        expect((src.match(/let btn = null;/g) || []).length).toBe(4);
         expect((src.match(/if \(btn\) \{\n                    btn\.disabled = false;/g) || []).length).toBe(1);
         expect(src).toContain('if (floatBtn) floatBtn.className = "gclip-float-btn error";');
     });

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.15.1
+// @version      3.16.0
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -81,7 +81,7 @@
       "use strict";
       var CONFIG2 = {
         // Keep in sync with package.json + userscript @version + build.js header.
-        SCRIPT_VERSION: "3.15.1",
+        SCRIPT_VERSION: "3.16.0",
         // 编译期 feature flag: 多端同步。默认关闭——off 时 main.js 不初始化同步引擎、
         // 零网络/零定时器/零 DOM,行为与关闭前字节级一致(F-SYNC-11)。
         MULTI_DEVICE_SYNC_ENABLED: false,
@@ -7334,6 +7334,9 @@ Content-Type: ${safeContentType}\r
           // 级仍可写零审计。登记后 writeNote/writeImage 统一经 canExecute 闸门 + auditDenied。
           "obsidian.writeNote": 1,
           "obsidian.writeImage": 1,
+          // v3.16.0: 发布当前页到 linux.do（Discourse POST /posts.json，需站点登录态；
+          // 401/403/422 由 LinuxDoAPI.postJson 转为可行动错误，服务端为最终校验）
+          "linuxdo.publish": 1,
           // 20260914: 浏览器书签整理写回(移动优先零删除; 可逆 move, 不入 DANGEROUS)
           "bookmarks.organize": 2,
           // 多端同步(F-SYNC-05, HIGH-1 共识: 必须 P0 静态注册,接线在后)
@@ -7517,7 +7520,9 @@ Content-Type: ${safeContentType}\r
           "sync.state.pull": "sync.state.pulled",
           "sync.state.push": "sync.state.pushed",
           "sync.medium.provision": "sync.medium.provisioned",
-          "sync.medium.reset": "sync.medium.reset"
+          "sync.medium.reset": "sync.medium.reset",
+          // v3.16.0: 发帖审计事件（失败回退 import.failed 会误导为导入失败）
+          "linuxdo.publish": "linuxdo.post.published"
         }),
         SENSITIVE_KEY_HINTS: Object.freeze([
           { pattern: /token/i, label: "token" },
@@ -7589,6 +7594,14 @@ Content-Type: ${safeContentType}\r
               type: "notion_comment",
               id: OperationLog2.redactTargetId(context.commentId, redaction),
               title: context.itemName || ""
+            };
+          }
+          if (context.linuxdoTopicId || context.linuxdoCategory) {
+            return {
+              type: "linuxdo_post",
+              id: context.linuxdoTopicId ? String(context.linuxdoTopicId) : "",
+              title: context.itemName || "",
+              category: context.linuxdoCategory ? String(context.linuxdoCategory) : ""
             };
           }
           return context.itemName ? { type: "generic", title: context.itemName } : null;
@@ -8192,6 +8205,81 @@ Content-Type: ${safeContentType}\r
           const url = `${window.location.origin}/u/${encodeURIComponent(username)}/bookmarks.json?page=${page}`;
           const data = await LinuxDoAPI2.fetchJson(url);
           return data;
+        },
+        // —— Discourse 写操作（发布当前页到 linux.do） ——
+        // v3.16.0: 此前 LinuxDoAPI 仅含 GET 抓取，发布链路无 POST 回写能力。
+        // 新话题 POST /posts.json {title, raw, category?, archetype}；回复 POST /posts.json
+        // {topic_id, raw}。同源登录态（credentials:include + CSRF 头）复用 getRequestOpts。
+        // 401/403（未登录/无权限）与 422（服务端校验：标题过短/正文超限/分类非法）转为可行动
+        // 错误原文透出；429 走短路抛错（服务端限流由用户稍后重试，避免批量重试放大）。
+        postJson: async (path, payload, retries = 1) => {
+          const opts = LinuxDoAPI2.getRequestOpts();
+          const url = `${window.location.origin}${path}`;
+          let lastErr = null;
+          for (let i = 0; i <= retries; i++) {
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), 15e3);
+            try {
+              const res = await fetch(url, {
+                ...opts,
+                method: "POST",
+                headers: { ...opts.headers, "Content-Type": "application/json; charset=utf-8" },
+                body: JSON.stringify(payload),
+                signal: ctrl.signal
+              });
+              if (res.status === 401) throw new Error("HTTP 401\uFF1A\u672A\u767B\u5F55\u6216\u767B\u5F55\u6001\u5931\u6548\uFF0C\u8BF7\u5148\u5728 linux.do \u767B\u5F55\u540E\u91CD\u8BD5");
+              if (res.status === 403) throw new Error("HTTP 403\uFF1A\u65E0\u53D1\u5E16\u6743\u9650\uFF08\u8D26\u53F7\u7B49\u7EA7/\u5206\u7C7B\u6743\u9650\u4E0D\u8DB3\uFF09");
+              if (res.status === 429) throw new Error("HTTP 429\uFF1A\u53D1\u5E16\u8FC7\u4E8E\u9891\u7E41\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5");
+              if (res.status === 422) {
+                let detail = "";
+                try {
+                  const body = await res.json();
+                  const errs = (body == null ? void 0 : body.errors) || (body == null ? void 0 : body.error) || (body == null ? void 0 : body.message);
+                  detail = Array.isArray(errs) ? errs.join("\uFF1B") : String(errs || "");
+                } catch (_) {
+                }
+                throw new Error(`\u53D1\u5E16\u88AB\u7AD9\u70B9\u62D2\u7EDD(422)${detail ? `\uFF1A${detail.slice(0, 300)}` : "\uFF1A\u6807\u9898\u8FC7\u77ED/\u6B63\u6587\u8D85\u9650/\u5206\u7C7B\u975E\u6CD5\uFF0C\u8BF7\u8C03\u6574\u540E\u91CD\u8BD5"}`);
+              }
+              if (!res.ok) throw new Error(`HTTP ${res.status}`);
+              return await res.json();
+            } catch (e) {
+              lastErr = e;
+              const msg = String(e && e.message || e || "");
+              if (/\bHTTP\s+40[13]\b/.test(msg) || /HTTP 40[13]/.test(msg) || /\bHTTP\s+429\b/.test(msg) || /\(422\)/.test(msg)) throw e;
+              if (i < retries) await Utils2.sleep(1e3 * Math.pow(2, i));
+            } finally {
+              clearTimeout(timer);
+            }
+          }
+          throw lastErr || new Error("postJson failed");
+        },
+        // 发布新话题：params 经 PageFileExporter.buildPublishParams 组装（纯函数已校验）。
+        // 仅在 linux.do 域名下执行（跨站调用被拒绝，防用户在任意站点误发）。
+        createTopic: async (params = {}) => {
+          if (window.location.hostname !== "linux.do" && !window.location.hostname.endsWith(".linux.do")) {
+            throw new Error("\u53D1\u5E03\u8BDD\u9898\u4EC5\u53EF\u5728 linux.do \u7AD9\u70B9\u6267\u884C");
+          }
+          const title = String(params.title || "").trim();
+          const raw = String(params.raw || "").trim();
+          if (!title || !raw) throw new Error("\u6807\u9898\u4E0E\u6B63\u6587\u4E0D\u80FD\u4E3A\u7A7A");
+          const body = { title: title.slice(0, 255), raw, archetype: "regular" };
+          if (params.category) body.category = params.category;
+          const data = await LinuxDoAPI2.postJson("/posts.json", body);
+          const topicId = data == null ? void 0 : data.topic_id;
+          return { topicId: topicId ? String(topicId) : "", slug: (data == null ? void 0 : data.topic_slug) || "", postId: (data == null ? void 0 : data.id) ?? null, raw: data };
+        },
+        // 回复既有话题：params 经 PageFileExporter.buildPublishParams(mode="reply") 组装。
+        // 仅在 linux.do 域名下执行。
+        replyToTopic: async (params = {}) => {
+          if (window.location.hostname !== "linux.do" && !window.location.hostname.endsWith(".linux.do")) {
+            throw new Error("\u56DE\u590D\u8BDD\u9898\u4EC5\u53EF\u5728 linux.do \u7AD9\u70B9\u6267\u884C");
+          }
+          const topicId = String(params.topic_id || "").trim();
+          const raw = String(params.raw || "").trim();
+          if (!/^\d+$/.test(topicId)) throw new Error("\u56DE\u590D\u9700\u586B\u5199\u6570\u5B57\u8BDD\u9898 ID");
+          if (!raw) throw new Error("\u56DE\u590D\u6B63\u6587\u4E0D\u80FD\u4E3A\u7A7A");
+          const data = await LinuxDoAPI2.postJson("/posts.json", { topic_id: topicId, raw });
+          return { topicId, postId: (data == null ? void 0 : data.id) ?? null, raw: data };
         },
         // 从 bookmark 项解析话题 ID: topic_id 优先(Post/Topic 收藏均有) → bookmarkable_url
         // 尾段数字(/t/slug/123 或 /t/123/45 取话题段) → Topic 收藏的 bookmarkable_id。
@@ -15446,6 +15534,249 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
     }
   });
 
+  // src/export/page-file.js
+  var require_page_file = __commonJS({
+    "src/export/page-file.js"(exports, module) {
+      "use strict";
+      var { Utils: Utils2 } = require_utils();
+      var { SiteDetector: SiteDetector2, HTMLToMarkdown: HTMLToMarkdown2 } = require_api();
+      var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, LinuxDoAPI: LinuxDoAPI2 } = require_extract();
+      var sanitizeFileName = (name, fallback = "page") => {
+        const base = String(name || "").trim().replace(/[\\/:*?"<>|]/g, "_").substring(0, 80);
+        return base || fallback;
+      };
+      var MAX_PUBLISH_RAW_LENGTH = 6e4;
+      var MIN_PUBLISH_TITLE_LENGTH = 5;
+      var PageFileExporter = {
+        MAX_PUBLISH_RAW_LENGTH,
+        MIN_PUBLISH_TITLE_LENGTH,
+        sanitizeFileName,
+        // —— Markdown 装配（三种来源） ——
+        // 通用页：meta + 正文 HTML → markdown
+        buildMarkdownFromGeneric: (meta = {}, bodyHtml = "") => {
+          const safeMeta = {
+            title: meta.title || "\u65E0\u6807\u9898",
+            url: meta.url || (typeof location !== "undefined" ? location.href : ""),
+            author: meta.author || "",
+            source: meta.source || meta.siteName || "\u901A\u7528\u9875\u9762",
+            sourceType: meta.sourceType || "\u7F51\u9875"
+          };
+          let md = HTMLToMarkdown2.buildFrontmatter(safeMeta);
+          md += `> [!info] \u9875\u9762\u4FE1\u606F
+> - **\u6765\u6E90**: ${Utils2.mdText(safeMeta.source)}
+> - **\u94FE\u63A5**: ${Utils2.mdLink(safeMeta.title, safeMeta.url)}
+`;
+          if (safeMeta.author) md += `> - **\u4F5C\u8005**: ${Utils2.mdText(safeMeta.author)}
+`;
+          md += `> - **\u5BFC\u51FA\u65F6\u95F4**: ${(/* @__PURE__ */ new Date()).toLocaleString("zh-CN")}
+
+`;
+          if (bodyHtml) md += `${HTMLToMarkdown2.convert(bodyHtml)}
+`;
+          return { meta: safeMeta, markdown: md };
+        },
+        // 知乎内容对象（ZhihuAPI.extractContent 形态）→ markdown（与 generic-ui Obsidian 分支同构）
+        buildMarkdownFromZhihu: (content = {}) => {
+          const title = content.title || "\u65E0\u6807\u9898";
+          const safeMeta = {
+            title,
+            url: content.url || (typeof location !== "undefined" ? location.href : ""),
+            author: content.author || "",
+            source: "\u77E5\u4E4E",
+            sourceType: content.type === "answer" ? "\u56DE\u7B54" : content.type === "question" ? "\u95EE\u9898" : "\u6587\u7AE0"
+          };
+          let md = HTMLToMarkdown2.buildFrontmatter(safeMeta);
+          md += `> [!info] \u9875\u9762\u4FE1\u606F
+> - **\u6765\u6E90**: \u77E5\u4E4E
+> - **\u94FE\u63A5**: ${Utils2.mdLink(title, safeMeta.url)}
+> - **\u4F5C\u8005**: ${Utils2.mdText(content.author || "\u672A\u77E5")}
+> - **\u5BFC\u51FA\u65F6\u95F4**: ${(/* @__PURE__ */ new Date()).toLocaleString("zh-CN")}
+
+`;
+          if (content.detail && content.type === "question") md += `${HTMLToMarkdown2.convert(content.detail)}
+
+`;
+          if (content.html) md += `${HTMLToMarkdown2.convert(content.html)}
+
+`;
+          if (Array.isArray(content.answers)) {
+            content.answers.forEach((ans, i) => {
+              md += `> [!note]+ #${i + 1} ${Utils2.mdText(ans.author || "\u533F\u540D")} \xB7 \u{1F44D} ${ans.voteCount || 0}
+`;
+              const lines = HTMLToMarkdown2.convert(ans.html || "").trim().split("\n");
+              md += lines.map((l) => `> ${l}`).join("\n") + "\n\n";
+            });
+          }
+          return { meta: safeMeta, markdown: md };
+        },
+        // linux.do 话题（fetchAllPosts 形态）→ markdown（与 Obsidian 批量导出同构）
+        buildMarkdownFromPosts: (topic = {}, posts = []) => {
+          const safeMeta = {
+            title: topic.title || "\u65E0\u6807\u9898",
+            url: topic.url || "",
+            author: topic.opUsername || "",
+            source: "Linux.do",
+            sourceType: "\u5E16\u5B50",
+            topicId: topic.topicId || topic.topic_id || "",
+            category: topic.categoryName || topic.category || "",
+            tags: topic.tags || [],
+            floors: posts.length
+          };
+          let md = HTMLToMarkdown2.buildFrontmatter(safeMeta);
+          md += `> [!info] \u5E16\u5B50\u4FE1\u606F
+`;
+          md += `> - **\u539F\u59CB\u94FE\u63A5**: ${Utils2.mdLink(safeMeta.title, safeMeta.url)}
+`;
+          md += `> - **\u697C\u4E3B**: @${Utils2.mdText(safeMeta.author || "\u672A\u77E5")}
+`;
+          md += `> - **\u5206\u7C7B**: ${Utils2.mdText(safeMeta.category || "\u65E0")}
+`;
+          md += `> - **\u6807\u7B7E**: ${Utils2.mdText((safeMeta.tags || []).join(", ") || "\u65E0")}
+`;
+          md += `> - **\u5BFC\u51FA\u65F6\u95F4**: ${(/* @__PURE__ */ new Date()).toLocaleString("zh-CN")}
+
+`;
+          posts.forEach((post, idx) => {
+            const isOp = post.username === topic.opUsername;
+            md += HTMLToMarkdown2.buildPostCallout(post, idx, isOp);
+          });
+          return { meta: safeMeta, markdown: md };
+        },
+        // —— 当前页面统一装配（来源路由与 GenericExporter.exportCurrentPage 同口径） ——
+        buildCurrentPage: async () => {
+          var _a;
+          const site = SiteDetector2.detect();
+          if (site === SiteDetector2.SITES.ZHIHU) {
+            const content = ZhihuAPI2.extractContent();
+            if (content) return PageFileExporter.buildMarkdownFromZhihu(content);
+          }
+          if (site === SiteDetector2.SITES.LINUX_DO) {
+            const pathSegments = window.location.pathname.split("/").filter(Boolean);
+            const tIndex = pathSegments.indexOf("t");
+            const numericTopicId = tIndex >= 0 ? pathSegments.slice(tIndex + 1).find((seg) => /^\d+$/.test(seg)) : null;
+            const topicId = numericTopicId || ((_a = window.location.pathname.match(/\/t\/([^/]+)/)) == null ? void 0 : _a[1]) || "";
+            if (topicId) {
+              const { topic, posts } = await LinuxDoAPI2.fetchAllPosts(topicId);
+              return PageFileExporter.buildMarkdownFromPosts(topic, posts);
+            }
+          }
+          const meta = GenericExtractor2.extractMeta();
+          const contentEl = GenericExtractor2.extractContent();
+          return PageFileExporter.buildMarkdownFromGeneric(meta, contentEl ? contentEl.innerHTML : "");
+        },
+        // —— 文件载荷 ——
+        // 独立 HTML：标题/链接头 + 正文原 HTML（本地存档可直接打开）
+        buildStandaloneHtml: (meta = {}, bodyHtml = "") => {
+          const title = Utils2.escapeHtml(meta.title || "\u65E0\u6807\u9898");
+          const url = Utils2.escapeHtml(meta.url || "");
+          return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>${title}</title>
+</head>
+<body>
+<h1>${title}</h1>
+<p>\u6765\u6E90\uFF1A<a href="${url}">${title}</a></p>
+<article>
+${bodyHtml || ""}
+</article>
+</body>
+</html>
+`;
+        },
+        // JSON 载荷：meta + markdown（可再生，机器可读）
+        buildJsonPayload: (meta = {}, markdown = "") => {
+          return JSON.stringify({
+            kind: "ld-notion-page-file",
+            version: 1,
+            exportedAt: (/* @__PURE__ */ new Date()).toISOString(),
+            meta,
+            markdown
+          }, null, 2);
+        },
+        // format: md | html | json → { filename, content, mime }
+        buildFilePayload: (built = {}, format = "md", bodyHtml = "") => {
+          const { meta = {}, markdown = "" } = built;
+          const base = PageFileExporter.sanitizeFileName(meta.title, "page");
+          if (format === "html") {
+            return {
+              filename: `${base}.html`,
+              content: PageFileExporter.buildStandaloneHtml(meta, bodyHtml),
+              mime: "text/html;charset=utf-8"
+            };
+          }
+          if (format === "json") {
+            return {
+              filename: `${base}.json`,
+              content: PageFileExporter.buildJsonPayload(meta, markdown),
+              mime: "application/json;charset=utf-8"
+            };
+          }
+          return {
+            filename: `${base}.md`,
+            content: markdown,
+            mime: "text/markdown;charset=utf-8"
+          };
+        },
+        // 本地下载触发（BookmarkOrganizer.backup / workspace 报告先例：Blob + a.click）
+        downloadFile: (filename, content, mime) => {
+          if (typeof document === "undefined" || typeof Blob === "undefined") {
+            throw new Error("\u5F53\u524D\u73AF\u5883\u4E0D\u652F\u6301\u6587\u4EF6\u4E0B\u8F7D");
+          }
+          const objectUrlApi = typeof window !== "undefined" && window.URL && typeof window.URL.createObjectURL === "function" ? window.URL : typeof URL !== "undefined" && typeof URL.createObjectURL === "function" ? URL : null;
+          if (!objectUrlApi) throw new Error("\u5F53\u524D\u73AF\u5883\u4E0D\u652F\u6301\u6587\u4EF6\u4E0B\u8F7D");
+          const blob = new Blob([content], { type: mime || "text/plain;charset=utf-8" });
+          const href = objectUrlApi.createObjectURL(blob);
+          try {
+            const link = document.createElement("a");
+            link.href = href;
+            link.download = filename;
+            link.style.display = "none";
+            document.body.appendChild(link);
+            link.click();
+            if (typeof link.remove === "function") link.remove();
+          } finally {
+            if (typeof objectUrlApi.revokeObjectURL === "function") {
+              setTimeout(() => objectUrlApi.revokeObjectURL(href), 5e3);
+            }
+          }
+          return filename;
+        },
+        // —— 发往 linux.do 的参数组装（纯函数，可单测） ——
+        // mode: "topic" | "reply"
+        buildPublishParams: ({ mode = "topic", title = "", raw = "", category = "", topicId = "" } = {}) => {
+          const cleanTitle = String(title || "").trim();
+          const cleanRaw = String(raw || "").trim();
+          if (mode === "reply") {
+            const tid = String(topicId || "").trim();
+            if (!/^\d+$/.test(tid)) throw new Error("\u56DE\u590D\u6A21\u5F0F\u9700\u586B\u5199\u6570\u5B57\u8BDD\u9898 ID");
+            if (cleanRaw.length < 10) throw new Error("\u6B63\u6587\u8FC7\u77ED\uFF08\u81F3\u5C11 10 \u4E2A\u5B57\u7B26\uFF09");
+            if (cleanRaw.length > MAX_PUBLISH_RAW_LENGTH) {
+              throw new Error(`\u6B63\u6587\u8D85\u957F\uFF08${cleanRaw.length} > ${MAX_PUBLISH_RAW_LENGTH}\uFF09\uFF0C\u8BF7\u6539\u5B58\u672C\u5730\u6587\u4EF6`);
+            }
+            return { mode, topic_id: tid, raw: cleanRaw };
+          }
+          if (cleanTitle.length < MIN_PUBLISH_TITLE_LENGTH) {
+            throw new Error(`\u6807\u9898\u8FC7\u77ED\uFF08\u81F3\u5C11 ${MIN_PUBLISH_TITLE_LENGTH} \u4E2A\u5B57\u7B26\uFF09`);
+          }
+          if (cleanRaw.length < 10) throw new Error("\u6B63\u6587\u8FC7\u77ED\uFF08\u81F3\u5C11 10 \u4E2A\u5B57\u7B26\uFF09");
+          if (cleanRaw.length > MAX_PUBLISH_RAW_LENGTH) {
+            throw new Error(`\u6B63\u6587\u8D85\u957F\uFF08${cleanRaw.length} > ${MAX_PUBLISH_RAW_LENGTH}\uFF09\uFF0C\u8BF7\u6539\u5B58\u672C\u5730\u6587\u4EF6`);
+          }
+          const params = { mode, title: cleanTitle.slice(0, 255), raw: cleanRaw, archetype: "regular" };
+          const cat = String(category || "").trim();
+          if (cat !== "") {
+            if (!/^\d+$/.test(cat)) throw new Error("\u5206\u7C7B\u9700\u586B\u5199\u6570\u5B57 ID\uFF08\u7559\u7A7A\u5219\u7531\u7AD9\u70B9\u9ED8\u8BA4\uFF09");
+            params.category = cat;
+          }
+          return params;
+        }
+      };
+      module.exports = { PageFileExporter };
+    }
+  });
+
   // src/export/index.js
   var require_export = __commonJS({
     "src/export/index.js"(exports, module) {
@@ -16340,7 +16671,8 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           return results;
         }
       };
-      module.exports = { GenericExporter: GenericExporter2, LinuxDoAPI: LinuxDoAPI2, Exporter: Exporter2 };
+      var { PageFileExporter } = require_page_file();
+      module.exports = { GenericExporter: GenericExporter2, LinuxDoAPI: LinuxDoAPI2, Exporter: Exporter2, PageFileExporter };
     }
   });
 
@@ -23902,6 +24234,34 @@ ${systemText}
                             </button>
                         </div>
 
+                        <!-- v3.16.0: \u5F53\u524D\u9875 \u2192 \u672C\u5730\u6587\u4EF6 / \u53D1\u5E03\u5230 linux.do\uFF08\u5BF9\u9F50 LDStatus Pro\uFF1B
+                             \u8BDD\u9898\u9875\u53EF\u7528\uFF1AbuildCurrentPage \u5728 LINUX_DO \u4E0B\u8D70 fetchAllPosts \u88C5\u914D\uFF09 -->
+                        <div class="ldb-section" id="ldb-current-page-block" style="margin-top: var(--ldb-ui-spacing-md);">
+                            <div class="ldb-section-title">\u{1F4C4} \u5F53\u524D\u9875\u9762</div>
+                            <div style="display:flex;gap:var(--ldb-ui-spacing-sm);align-items:center;margin-bottom:var(--ldb-ui-spacing-sm);">
+                                <select id="ldb-page-file-format" class="ldb-input ldb-flex-1" aria-label="\u672C\u5730\u6587\u4EF6\u683C\u5F0F">
+                                    <option value="md">Markdown\uFF08.md\uFF09</option>
+                                    <option value="html">\u7F51\u9875\u5B58\u6863\uFF08.html\uFF09</option>
+                                    <option value="json">\u6570\u636E\uFF08.json\uFF09</option>
+                                </select>
+                                <button class="ldb-btn ldb-btn-secondary ldb-btn-small" id="ldb-page-save-file">
+                                    \u{1F4BE} \u5B58\u6587\u4EF6
+                                </button>
+                            </div>
+                            <div style="display:flex;gap:var(--ldb-ui-spacing-sm);align-items:center;margin-bottom:var(--ldb-ui-spacing-sm);">
+                                <select id="ldb-page-publish-mode" class="ldb-input" aria-label="\u53D1\u5E03\u6A21\u5F0F" style="flex:0 0 auto;">
+                                    <option value="topic">\u53D1\u65B0\u8BDD\u9898</option>
+                                    <option value="reply">\u56DE\u590D\u8BDD\u9898</option>
+                                </select>
+                                <button class="ldb-btn ldb-btn-secondary ldb-btn-small" id="ldb-page-publish">
+                                    \u{1F4EE} \u53D1\u5E03\u5230 linux.do
+                                </button>
+                            </div>
+                            <input type="text" id="ldb-page-publish-title" class="ldb-input" placeholder="\u65B0\u8BDD\u9898\u6807\u9898\uFF08\u56DE\u590D\u6A21\u5F0F\u53EF\u7A7A\uFF09" aria-label="\u53D1\u5E03\u6807\u9898" style="width:100%;margin-bottom:var(--ldb-ui-spacing-sm);">
+                            <input type="text" id="ldb-page-publish-topic" class="ldb-input" placeholder="\u56DE\u590D\u8BDD\u9898 ID\uFF08\u53D1\u65B0\u8BDD\u9898\u53EF\u7A7A\uFF09" aria-label="\u56DE\u590D\u8BDD\u9898 ID" style="width:100%;margin-bottom:var(--ldb-ui-spacing-sm);" inputmode="numeric">
+                            <input type="text" id="ldb-page-publish-category" class="ldb-input" placeholder="\u5206\u7C7B ID\uFF08\u53EF\u9009\uFF0C\u7559\u7A7A\u7528\u7AD9\u70B9\u9ED8\u8BA4\uFF09" aria-label="\u5206\u7C7B ID" style="width:100%;" inputmode="numeric">
+                        </div>
+
                         <!-- \u63A7\u5236\u6309\u94AE (\u5BFC\u51FA\u65F6\u663E\u793A) -->
                         <div class="ldb-control-btns" id="ldb-control-btns" style="display: none;">
                             <button class="ldb-btn ldb-btn-warning ldb-btn-small" id="ldb-pause">
@@ -27630,6 +27990,14 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             autoImportIntervalLabel: panel.querySelector("#ldb-auto-import-interval-label"),
             exportBtn: panel.querySelector("#ldb-export"),
             obsExportBtn: panel.querySelector("#ldb-obs-export"),
+            // v3.16.0: 当前页 → 本地文件 / 发布到 linux.do
+            pageFileBtn: panel.querySelector("#ldb-page-save-file"),
+            pageFileFormatSelect: panel.querySelector("#ldb-page-file-format"),
+            pagePublishBtn: panel.querySelector("#ldb-page-publish"),
+            pagePublishModeSelect: panel.querySelector("#ldb-page-publish-mode"),
+            pagePublishTitleInput: panel.querySelector("#ldb-page-publish-title"),
+            pagePublishTopicInput: panel.querySelector("#ldb-page-publish-topic"),
+            pagePublishCategoryInput: panel.querySelector("#ldb-page-publish-category"),
             bookmarkListContainer: panel.querySelector("#ldb-bookmark-list-container"),
             bookmarkEmptyState: panel.querySelector("#ldb-bookmark-empty-state"),
             bookmarkEmptyLoad: panel.querySelector("#ldb-bookmark-empty-load"),
@@ -28834,7 +29202,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
       var { Storage: Storage2, DedupStore } = require_storage();
       var { NotionOAuth: NotionOAuth2 } = require_auth();
       var { OperationGuard: OperationGuard2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
-      var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2 } = require_export();
+      var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2, PageFileExporter } = require_export();
       var { GitHubAPI: GitHubAPI2 } = require_import();
       var { BookmarkExporter: BookmarkExporter2 } = require_bridge();
       var { UICommandService: UICommandService2 } = require_UICommandService();
@@ -29260,6 +29628,98 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             Exporter2.reset();
           }
         };
+        if (refs.pageFileBtn) {
+          refs.pageFileBtn.onclick = async () => {
+            var _a;
+            if (refs.pageFileBtn.disabled) return;
+            refs.pageFileBtn.disabled = true;
+            try {
+              UI2.showStatus("\u6B63\u5728\u63D0\u53D6\u5F53\u524D\u9875\u9762\u5185\u5BB9...", "info");
+              const built = await PageFileExporter.buildCurrentPage();
+              const format = ((_a = refs.pageFileFormatSelect) == null ? void 0 : _a.value) || "md";
+              let bodyHtml = "";
+              if (format === "html") {
+                const { GenericExtractor: GenericExtractor2 } = require_extract();
+                const contentEl = GenericExtractor2.extractContent();
+                bodyHtml = contentEl ? contentEl.innerHTML : "";
+              }
+              const payload = PageFileExporter.buildFilePayload(built, format, bodyHtml);
+              PageFileExporter.downloadFile(payload.filename, payload.content, payload.mime);
+              try {
+                GenericExporter2.markClipperExported(built.meta || {});
+              } catch (markError) {
+                console.warn("[LD-Notion] \u5B58\u6587\u4EF6\u8D26\u672C\u6807\u8BB0\u5931\u8D25(\u6587\u4EF6\u5DF2\u4E0B\u8F7D):", markError);
+              }
+              UI2.showStatus(`\u5DF2\u4FDD\u5B58\u672C\u5730\u6587\u4EF6\uFF1A${payload.filename}`, "success");
+            } catch (error) {
+              UI2.showStatus(`\u5B58\u6587\u4EF6\u5931\u8D25: ${error.message}`, "error");
+            } finally {
+              refs.pageFileBtn.disabled = false;
+            }
+          };
+        }
+        if (refs.pagePublishBtn) {
+          refs.pagePublishBtn.onclick = async () => {
+            var _a, _b, _c, _d, _e;
+            if (refs.pagePublishBtn.disabled) return;
+            refs.pagePublishBtn.disabled = true;
+            try {
+              const mode = ((_a = refs.pagePublishModeSelect) == null ? void 0 : _a.value) || "topic";
+              const titleInput = (((_b = refs.pagePublishTitleInput) == null ? void 0 : _b.value) || "").trim();
+              const topicInput = (((_c = refs.pagePublishTopicInput) == null ? void 0 : _c.value) || "").trim();
+              const categoryInput = (((_d = refs.pagePublishCategoryInput) == null ? void 0 : _d.value) || "").trim();
+              UI2.showStatus("\u6B63\u5728\u63D0\u53D6\u5F53\u524D\u9875\u9762\u5185\u5BB9...", "info");
+              const built = await PageFileExporter.buildCurrentPage();
+              const raw = built.markdown || "";
+              const title = titleInput || ((_e = built.meta) == null ? void 0 : _e.title) || document.title || "\u65E0\u6807\u9898";
+              let params;
+              try {
+                params = PageFileExporter.buildPublishParams({
+                  mode,
+                  title,
+                  raw,
+                  category: categoryInput,
+                  topicId: topicInput
+                });
+              } catch (paramError) {
+                UI2.showStatus(`\u53D1\u5E03\u53C2\u6570\u6709\u8BEF: ${paramError.message}`, "error");
+                return;
+              }
+              const itemName = mode === "reply" ? `\u56DE\u590D\u8BDD\u9898 ${params.topic_id}` : `\u65B0\u8BDD\u9898\u300A${params.title}\u300B`;
+              const ok = await ConfirmationDialog2.show({
+                title: "\u53D1\u5E03\u5230 linux.do",
+                message: mode === "reply" ? `\u5C06\u4EE5\u5F53\u524D\u767B\u5F55\u8EAB\u4EFD\u56DE\u590D\u8BDD\u9898 ${params.topic_id}\uFF08\u6B63\u6587\u7EA6 ${params.raw.length} \u5B57\uFF09\uFF0C\u53D1\u5E03\u540E\u4E0D\u53EF\u7531\u811A\u672C\u64A4\u56DE\uFF0C\u662F\u5426\u7EE7\u7EED\uFF1F` : `\u5C06\u4EE5\u5F53\u524D\u767B\u5F55\u8EAB\u4EFD\u5728 linux.do \u53D1\u5E03\u65B0\u8BDD\u9898\u300A${params.title}\u300B\uFF08\u6B63\u6587\u7EA6 ${params.raw.length} \u5B57\uFF09\uFF0C\u53D1\u5E03\u540E\u4E0D\u53EF\u7531\u811A\u672C\u64A4\u56DE\uFF0C\u662F\u5426\u7EE7\u7EED\uFF1F`,
+                itemName,
+                confirmText: "\u786E\u8BA4\u53D1\u5E03",
+                countdown: 0
+              });
+              if (!ok) {
+                UI2.showStatus("\u5DF2\u53D6\u6D88\u53D1\u5E03", "info");
+                return;
+              }
+              UI2.showStatus(mode === "reply" ? "\u6B63\u5728\u56DE\u590D\u8BDD\u9898..." : "\u6B63\u5728\u53D1\u5E03\u65B0\u8BDD\u9898...", "info");
+              const result = await OperationGuard2.execute("linuxdo.publish", async () => {
+                return mode === "reply" ? LinuxDoAPI2.replyToTopic(params) : LinuxDoAPI2.createTopic(params);
+              }, {
+                itemName,
+                trigger: "user_requested_write",
+                linuxdoTopicId: mode === "reply" ? params.topic_id : "",
+                linuxdoCategory: mode === "topic" ? params.category || "" : ""
+              });
+              try {
+                GenericExporter2.markClipperExported(built.meta || {});
+              } catch (markError) {
+                console.warn("[LD-Notion] \u53D1\u5E16\u8D26\u672C\u6807\u8BB0\u5931\u8D25(\u5E16\u5B50\u5DF2\u53D1\u5E03):", markError);
+              }
+              const link = result.topicId ? `https://linux.do/t/${result.topicId}` : "";
+              UI2.showStatus(link ? `\u53D1\u5E03\u6210\u529F\uFF1A${link}` : "\u53D1\u5E03\u6210\u529F", "success");
+            } catch (error) {
+              UI2.showStatus(`\u53D1\u5E03\u5931\u8D25: ${error.message}`, "error");
+            } finally {
+              refs.pagePublishBtn.disabled = false;
+            }
+          };
+        }
         refs.permissionLevelSelect.onchange = (e) => {
           const level = parseInt(e.target.value);
           OperationGuard2.setLevel(level);
@@ -30951,7 +31411,7 @@ ${preview}${more}
       var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
       var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2 } = require_extract();
       var { UICommandService: UICommandService2 } = require_UICommandService();
-      var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
+      var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2, PageFileExporter } = require_export();
       var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
       var { AIAssistant: AIAssistant2, getAISettings } = require_ai();
       var { StyleManager: StyleManager2 } = require_style_manager();
@@ -31267,6 +31727,32 @@ ${preview}${more}
                 <button class="gclip-btn gclip-btn-secondary" id="gclip-obs-export" style="display: block;">
                     \u5BFC\u51FA\u5230 Obsidian
                 </button>
+                <!-- v3.16.0: \u5B58\u4E3A\u672C\u5730\u6587\u4EF6\uFF08.md/.html/.json\uFF0C\u901A\u7528\u7AD9\u53EF\u7528\uFF0C\u4E0D\u7ECF Notion/Obsidian\uFF09 -->
+                <div class="gclip-field" id="gclip-file-wrap" style="margin-top: var(--ldb-ui-spacing-md);">
+                    <label for="gclip-file-format">\u5B58\u4E3A\u672C\u5730\u6587\u4EF6</label>
+                    <div style="display:flex;gap:var(--ldb-ui-spacing-md);align-items:center;">
+                        <select id="gclip-file-format" class="gclip-input" style="flex:1;" aria-label="\u672C\u5730\u6587\u4EF6\u683C\u5F0F">
+                            <option value="md">Markdown\uFF08.md\uFF09</option>
+                            <option value="html">\u7F51\u9875\u5B58\u6863\uFF08.html\uFF09</option>
+                            <option value="json">\u6570\u636E\uFF08.json\uFF09</option>
+                        </select>
+                        <button class="gclip-btn gclip-btn-secondary" id="gclip-save-file" style="white-space:nowrap;">\u{1F4BE} \u5B58\u6587\u4EF6</button>
+                    </div>
+                </div>
+                <!-- v3.16.0: \u53D1\u5E03\u5230 linux.do\uFF08\u4EC5 linux.do \u57DF\u540D\u53EF\u7528\uFF0C\u7ECF Guard + \u4E8C\u6B21\u786E\u8BA4\uFF09 -->
+                <div class="gclip-field" id="gclip-publish-wrap" style="margin-top: var(--ldb-ui-spacing-md);">
+                    <label>\u53D1\u5E03\u5230 linux.do</label>
+                    <div style="display:flex;gap:var(--ldb-ui-spacing-md);align-items:center;">
+                        <select id="gclip-publish-mode" class="gclip-input" style="flex:1;" aria-label="\u53D1\u5E03\u6A21\u5F0F">
+                            <option value="topic">\u53D1\u65B0\u8BDD\u9898</option>
+                            <option value="reply">\u56DE\u590D\u8BDD\u9898</option>
+                        </select>
+                        <button class="gclip-btn gclip-btn-secondary" id="gclip-publish" style="white-space:nowrap;">\u{1F4EE} \u53D1\u5E03</button>
+                    </div>
+                    <input type="text" id="gclip-publish-title" class="gclip-input" placeholder="\u65B0\u8BDD\u9898\u6807\u9898\uFF08\u56DE\u590D\u6A21\u5F0F\u53EF\u7A7A\uFF09" aria-label="\u53D1\u5E03\u6807\u9898" style="margin-top:var(--ldb-ui-spacing-md);">
+                    <input type="text" id="gclip-publish-topic" class="gclip-input" placeholder="\u56DE\u590D\u8BDD\u9898 ID\uFF08\u53D1\u65B0\u8BDD\u9898\u53EF\u7A7A\uFF09" aria-label="\u56DE\u590D\u8BDD\u9898 ID" style="margin-top:var(--ldb-ui-spacing-md);" inputmode="numeric">
+                    <input type="text" id="gclip-publish-category" class="gclip-input" placeholder="\u5206\u7C7B ID\uFF08\u53EF\u9009\uFF0C\u7559\u7A7A\u7528\u7AD9\u70B9\u9ED8\u8BA4\uFF09" aria-label="\u5206\u7C7B ID" style="margin-top:var(--ldb-ui-spacing-md);" inputmode="numeric">
+                </div>
                 <button class="gclip-btn gclip-btn-setup" id="gclip-show-settings" style="display: ${isConfigured ? "block" : "none"};">
                     \u4FEE\u6539\u914D\u7F6E
                 </button>
@@ -31588,6 +32074,12 @@ ${preview}${more}
           panel.querySelector("#gclip-export").addEventListener("click", () => {
             GenericUI2.doExport();
           });
+          panel.querySelector("#gclip-save-file").addEventListener("click", () => {
+            GenericUI2.saveCurrentPageToFile();
+          });
+          panel.querySelector("#gclip-publish").addEventListener("click", () => {
+            GenericUI2.publishCurrentPageToLinuxDo();
+          });
           panel.querySelector("#gclip-obs-export").addEventListener("click", async () => {
             if (GenericUI2.isExporting) return;
             GenericUI2.isExporting = true;
@@ -31755,6 +32247,125 @@ ${preview}${more}
             if (btn) {
               btn.disabled = false;
               btn.textContent = "\u5BFC\u51FA\u5F53\u524D\u9875\u9762";
+            }
+          }
+        },
+        // v3.16.0: 存为本地文件 —— 当前页面 → .md/.html/.json（知乎/linux.do/通用站通用，
+        // 不经 Notion/Obsidian）。纯本地写不经 Guard；成功落 clipper 账本（与 Notion/Obsidian
+        // 导出同账本，避免已存文件又被记为待导出）。
+        saveCurrentPageToFile: async () => {
+          var _a;
+          if (GenericUI2.isExporting) return;
+          GenericUI2.isExporting = true;
+          let btn = null;
+          try {
+            btn = GenericUI2.panel.querySelector("#gclip-save-file");
+            if (btn) {
+              btn.disabled = true;
+              btn.textContent = "\u4FDD\u5B58\u4E2D...";
+            }
+            const format = ((_a = GenericUI2.panel.querySelector("#gclip-file-format")) == null ? void 0 : _a.value) || "md";
+            GenericUI2.showStatus("\u6B63\u5728\u63D0\u53D6\u9875\u9762\u5185\u5BB9...", "info");
+            const built = await PageFileExporter.buildCurrentPage();
+            let bodyHtml = "";
+            if (format === "html") {
+              const contentEl = GenericExtractor2.extractContent();
+              bodyHtml = contentEl ? contentEl.innerHTML : "";
+            }
+            const payload = PageFileExporter.buildFilePayload(built, format, bodyHtml);
+            PageFileExporter.downloadFile(payload.filename, payload.content, payload.mime);
+            try {
+              GenericExporter2.markClipperExported(built.meta || {});
+            } catch (markError) {
+              console.warn("[LD-Notion] \u5B58\u6587\u4EF6\u8D26\u672C\u6807\u8BB0\u5931\u8D25(\u6587\u4EF6\u5DF2\u4E0B\u8F7D):", markError);
+            }
+            GenericUI2.showStatus(`\u5DF2\u4FDD\u5B58\u672C\u5730\u6587\u4EF6\uFF1A${payload.filename}`, "success");
+          } catch (error) {
+            GenericUI2.showStatus(`\u5B58\u6587\u4EF6\u5931\u8D25: ${error.message}`, "error");
+          } finally {
+            GenericUI2.isExporting = false;
+            if (btn) {
+              btn.disabled = false;
+              btn.textContent = "\u{1F4BE} \u5B58\u6587\u4EF6";
+            }
+          }
+        },
+        // v3.16.0: 发布当前页到 linux.do —— 仅 linux.do 域名可用（跨站调用直接拒绝）。
+        // 经 OperationGuard.execute("linuxdo.publish")（权限检查 + 用户二次确认 + 审计，正文
+        // raw 永不进审计）；服务端 422/401/403/429 由 LinuxDoAPI.postJson 转为可行动错误。
+        // 成功同样落 clipper 账本。
+        publishCurrentPageToLinuxDo: async () => {
+          var _a, _b, _c, _d, _e;
+          if (GenericUI2.isExporting) return;
+          const hostname = window.location.hostname || "";
+          if (hostname !== "linux.do" && !hostname.endsWith(".linux.do")) {
+            GenericUI2.showStatus("\u53D1\u5E03\u5230 linux.do \u4EC5\u53EF\u5728 linux.do \u7AD9\u70B9\u4F7F\u7528\uFF08\u5F53\u524D\u9875\u4E3A\u7AD9\u5916\uFF0C\u5185\u5BB9\u8BF7\u5148\u5B58\u4E3A\u672C\u5730\u6587\u4EF6\u518D\u624B\u52A8\u53D1\u5E03\uFF09", "error");
+            return;
+          }
+          GenericUI2.isExporting = true;
+          let btn = null;
+          try {
+            btn = GenericUI2.panel.querySelector("#gclip-publish");
+            if (btn) {
+              btn.disabled = true;
+              btn.textContent = "\u53D1\u5E03\u4E2D...";
+            }
+            const mode = ((_a = GenericUI2.panel.querySelector("#gclip-publish-mode")) == null ? void 0 : _a.value) || "topic";
+            const titleInput = (((_b = GenericUI2.panel.querySelector("#gclip-publish-title")) == null ? void 0 : _b.value) || "").trim();
+            const topicInput = (((_c = GenericUI2.panel.querySelector("#gclip-publish-topic")) == null ? void 0 : _c.value) || "").trim();
+            const categoryInput = (((_d = GenericUI2.panel.querySelector("#gclip-publish-category")) == null ? void 0 : _d.value) || "").trim();
+            GenericUI2.showStatus("\u6B63\u5728\u63D0\u53D6\u9875\u9762\u5185\u5BB9...", "info");
+            const built = await PageFileExporter.buildCurrentPage();
+            const raw = built.markdown || "";
+            const title = titleInput || ((_e = built.meta) == null ? void 0 : _e.title) || document.title || "\u65E0\u6807\u9898";
+            let params;
+            try {
+              params = PageFileExporter.buildPublishParams({
+                mode,
+                title,
+                raw,
+                category: categoryInput,
+                topicId: topicInput
+              });
+            } catch (paramError) {
+              GenericUI2.showStatus(`\u53D1\u5E03\u53C2\u6570\u6709\u8BEF: ${paramError.message}`, "error");
+              return;
+            }
+            const itemName = mode === "reply" ? `\u56DE\u590D\u8BDD\u9898 ${params.topic_id}` : `\u65B0\u8BDD\u9898\u300A${params.title}\u300B`;
+            const ok = await ConfirmationDialog2.show({
+              title: "\u53D1\u5E03\u5230 linux.do",
+              message: mode === "reply" ? `\u5C06\u4EE5\u5F53\u524D\u767B\u5F55\u8EAB\u4EFD\u56DE\u590D\u8BDD\u9898 ${params.topic_id}\uFF08\u6B63\u6587\u7EA6 ${params.raw.length} \u5B57\uFF09\uFF0C\u53D1\u5E03\u540E\u4E0D\u53EF\u7531\u811A\u672C\u64A4\u56DE\uFF0C\u662F\u5426\u7EE7\u7EED\uFF1F` : `\u5C06\u4EE5\u5F53\u524D\u767B\u5F55\u8EAB\u4EFD\u5728 linux.do \u53D1\u5E03\u65B0\u8BDD\u9898\u300A${params.title}\u300B\uFF08\u6B63\u6587\u7EA6 ${params.raw.length} \u5B57\uFF09\uFF0C\u53D1\u5E03\u540E\u4E0D\u53EF\u7531\u811A\u672C\u64A4\u56DE\uFF0C\u662F\u5426\u7EE7\u7EED\uFF1F`,
+              itemName,
+              confirmText: "\u786E\u8BA4\u53D1\u5E03",
+              countdown: 0
+            });
+            if (!ok) {
+              GenericUI2.showStatus("\u5DF2\u53D6\u6D88\u53D1\u5E03", "info");
+              return;
+            }
+            GenericUI2.showStatus(mode === "reply" ? "\u6B63\u5728\u56DE\u590D\u8BDD\u9898..." : "\u6B63\u5728\u53D1\u5E03\u65B0\u8BDD\u9898...", "info");
+            const result = await OperationGuard2.execute("linuxdo.publish", async () => {
+              return mode === "reply" ? LinuxDoAPI2.replyToTopic(params) : LinuxDoAPI2.createTopic(params);
+            }, {
+              itemName,
+              trigger: "user_requested_write",
+              linuxdoTopicId: mode === "reply" ? params.topic_id : "",
+              linuxdoCategory: mode === "topic" ? params.category || "" : ""
+            });
+            try {
+              GenericExporter2.markClipperExported(built.meta || {});
+            } catch (markError) {
+              console.warn("[LD-Notion] \u53D1\u5E16\u8D26\u672C\u6807\u8BB0\u5931\u8D25(\u5E16\u5B50\u5DF2\u53D1\u5E03):", markError);
+            }
+            const link = result.topicId ? `https://linux.do/t/${result.topicId}` : "";
+            GenericUI2.showStatus(link ? `\u53D1\u5E03\u6210\u529F\uFF1A${link}` : "\u53D1\u5E03\u6210\u529F", "success");
+          } catch (error) {
+            GenericUI2.showStatus(`\u53D1\u5E03\u5931\u8D25: ${error.message}`, "error");
+          } finally {
+            GenericUI2.isExporting = false;
+            if (btn) {
+              btn.disabled = false;
+              btn.textContent = "\u{1F4EE} \u53D1\u5E03";
             }
           }
         },

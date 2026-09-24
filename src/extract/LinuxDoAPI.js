@@ -109,6 +109,84 @@ const LinuxDoAPI = {
         return data;
     },
 
+    // —— Discourse 写操作（发布当前页到 linux.do） ——
+    // v3.16.0: 此前 LinuxDoAPI 仅含 GET 抓取，发布链路无 POST 回写能力。
+    // 新话题 POST /posts.json {title, raw, category?, archetype}；回复 POST /posts.json
+    // {topic_id, raw}。同源登录态（credentials:include + CSRF 头）复用 getRequestOpts。
+    // 401/403（未登录/无权限）与 422（服务端校验：标题过短/正文超限/分类非法）转为可行动
+    // 错误原文透出；429 走短路抛错（服务端限流由用户稍后重试，避免批量重试放大）。
+    postJson: async (path, payload, retries = 1) => {
+        const opts = LinuxDoAPI.getRequestOpts();
+        const url = `${window.location.origin}${path}`;
+        let lastErr = null;
+        for (let i = 0; i <= retries; i++) {
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), 15000);
+            try {
+                const res = await fetch(url, {
+                    ...opts,
+                    method: "POST",
+                    headers: { ...opts.headers, "Content-Type": "application/json; charset=utf-8" },
+                    body: JSON.stringify(payload),
+                    signal: ctrl.signal,
+                });
+                if (res.status === 401) throw new Error("HTTP 401：未登录或登录态失效，请先在 linux.do 登录后重试");
+                if (res.status === 403) throw new Error("HTTP 403：无发帖权限（账号等级/分类权限不足）");
+                if (res.status === 429) throw new Error("HTTP 429：发帖过于频繁，请稍后再试");
+                if (res.status === 422) {
+                    let detail = "";
+                    try {
+                        const body = await res.json();
+                        const errs = body?.errors || body?.error || body?.message;
+                        detail = Array.isArray(errs) ? errs.join("；") : String(errs || "");
+                    } catch (_) { /* 422 正文解析失败则用通用文案 */ }
+                    throw new Error(`发帖被站点拒绝(422)${detail ? `：${detail.slice(0, 300)}` : "：标题过短/正文超限/分类非法，请调整后重试"}`);
+                }
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                return await res.json();
+            } catch (e) {
+                lastErr = e;
+                const msg = String(e && e.message || e || "");
+                // 401/403/422/429 为服务端确定性结论，退避重试无意义
+                if (/\bHTTP\s+40[13]\b/.test(msg) || /HTTP 40[13]/.test(msg) || /\bHTTP\s+429\b/.test(msg) || /\(422\)/.test(msg)) throw e;
+                if (i < retries) await Utils.sleep(1000 * Math.pow(2, i));
+            } finally {
+                clearTimeout(timer);
+            }
+        }
+        throw lastErr || new Error("postJson failed");
+    },
+
+    // 发布新话题：params 经 PageFileExporter.buildPublishParams 组装（纯函数已校验）。
+    // 仅在 linux.do 域名下执行（跨站调用被拒绝，防用户在任意站点误发）。
+    createTopic: async (params = {}) => {
+        if (window.location.hostname !== "linux.do" && !window.location.hostname.endsWith(".linux.do")) {
+            throw new Error("发布话题仅可在 linux.do 站点执行");
+        }
+        const title = String(params.title || "").trim();
+        const raw = String(params.raw || "").trim();
+        if (!title || !raw) throw new Error("标题与正文不能为空");
+        const body = { title: title.slice(0, 255), raw, archetype: "regular" };
+        if (params.category) body.category = params.category;
+        const data = await LinuxDoAPI.postJson("/posts.json", body);
+        const topicId = data?.topic_id;
+        return { topicId: topicId ? String(topicId) : "", slug: data?.topic_slug || "", postId: data?.id ?? null, raw: data };
+    },
+
+    // 回复既有话题：params 经 PageFileExporter.buildPublishParams(mode="reply") 组装。
+    // 仅在 linux.do 域名下执行。
+    replyToTopic: async (params = {}) => {
+        if (window.location.hostname !== "linux.do" && !window.location.hostname.endsWith(".linux.do")) {
+            throw new Error("回复话题仅可在 linux.do 站点执行");
+        }
+        const topicId = String(params.topic_id || "").trim();
+        const raw = String(params.raw || "").trim();
+        if (!/^\d+$/.test(topicId)) throw new Error("回复需填写数字话题 ID");
+        if (!raw) throw new Error("回复正文不能为空");
+        const data = await LinuxDoAPI.postJson("/posts.json", { topic_id: topicId, raw });
+        return { topicId, postId: data?.id ?? null, raw: data };
+    },
+
     // 从 bookmark 项解析话题 ID: topic_id 优先(Post/Topic 收藏均有) → bookmarkable_url
     // 尾段数字(/t/slug/123 或 /t/123/45 取话题段) → Topic 收藏的 bookmarkable_id。
     // Post 收藏 bookmarkable_id 为 postId, 不可直接作为话题 ID(旧实现误用致 404)。

@@ -127,6 +127,9 @@ const OperationGuard = {
         // 级仍可写零审计。登记后 writeNote/writeImage 统一经 canExecute 闸门 + auditDenied。
         "obsidian.writeNote": 1,
         "obsidian.writeImage": 1,
+        // v3.16.0: 发布当前页到 linux.do（Discourse POST /posts.json，需站点登录态；
+        // 401/403/422 由 LinuxDoAPI.postJson 转为可行动错误，服务端为最终校验）
+        "linuxdo.publish": 1,
         // 20260914: 浏览器书签整理写回(移动优先零删除; 可逆 move, 不入 DANGEROUS)
         "bookmarks.organize": 2,
         // 多端同步(F-SYNC-05, HIGH-1 共识: 必须 P0 静态注册,接线在后)
@@ -343,6 +346,8 @@ const OperationLog = {
         "sync.state.push": "sync.state.pushed",
         "sync.medium.provision": "sync.medium.provisioned",
         "sync.medium.reset": "sync.medium.reset",
+        // v3.16.0: 发帖审计事件（失败回退 import.failed 会误导为导入失败）
+        "linuxdo.publish": "linuxdo.post.published",
     }),
 
     SENSITIVE_KEY_HINTS: Object.freeze([
@@ -421,6 +426,16 @@ const OperationLog = {
                 type: "notion_comment",
                 id: OperationLog.redactTargetId(context.commentId, redaction),
                 title: context.itemName || "",
+            };
+        }
+        // v3.16.0: linux.do 发帖审计目标（标题可含站外正文片段，仅记标题+话题/分类 ID，
+        // 正文 raw 永不进审计——buildPayload 仅收摘要长度，避免正文落盘）
+        if (context.linuxdoTopicId || context.linuxdoCategory) {
+            return {
+                type: "linuxdo_post",
+                id: context.linuxdoTopicId ? String(context.linuxdoTopicId) : "",
+                title: context.itemName || "",
+                category: context.linuxdoCategory ? String(context.linuxdoCategory) : "",
             };
         }
         return context.itemName ? { type: "generic", title: context.itemName } : null;

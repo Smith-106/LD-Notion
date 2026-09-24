@@ -1,3 +1,11 @@
+## [3.16.0] - 2026-09-24
+
+### feat (当前页面 → 本地文件 + 发布到 linux.do，对齐 LDStatus Pro，通用站可用)
+
+- **本地文件导出**：新增 `src/export/page-file.js`（`PageFileExporter`）：知乎 / linux.do 话题页（`fetchAllPosts` 装配）/ 通用页（`GenericExtractor`）三路由 markdown 装配 + `.md/.html/.json` 文件载荷 + 文件名消毒（Windows 非法字符→`_`，截断 80）+ Blob 本地下载。GenericUI 面板「💾 存文件」（格式下拉）+ 主面板「📄 当前页面」区块；纯本地写不经 Guard，成功落 clipper 账本。
+- **发布到 linux.do**：`LinuxDoAPI.postJson/createTopic/replyToTopic`（新话题/回复；401/403/429 短路，422 原文透出；仅 linux.do 域名）；`linuxdo.publish` 登记 Guard level=1（`execute` 闸门 + 二次确认 + 审计 `linuxdo.post.published`，raw 永不进审计）；正文超限/标题过短客户端前置校验（title≥5、raw 10..60000）。
+- **验证**：新增 `tests/page-file-publish.test.js` 23 项；vitest 111 文件/1856 用例 + legacy 三件套全绿；`verify:build` PASS（root≡dist）。
+
 ## [3.15.1] - 2026-09-24
 
 ### fix (本地账本 vs Notion 快照分歧可视化 + 安全对齐)

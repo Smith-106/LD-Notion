@@ -6,7 +6,7 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![文档站](https://img.shields.io/badge/文档站-GitHub%20Pages-6f42c1?style=for-the-badge&logo=githubpages)](https://smith-106.github.io/LD-Notion/) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前仓库源码版本：`v3.15.1`
+- 当前仓库源码版本：`v3.16.0`
 - 最新 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/latest>
 - 文档站：<https://smith-106.github.io/LD-Notion/>
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
@@ -394,6 +394,12 @@ A: 请检查：
 - 四级权限模型 + `OperationGuard` 统一保护用户触发与 AI 触发的写入入口；危险操作额外确认，撤销窗口只覆盖危险操作
 
 ## 更新日志
+
+### v3.16.0
+
+- **当前页面 → 本地文件（对齐 LDStatus Pro，不经 Notion）**：新增 `src/export/page-file.js`（`PageFileExporter` 内容装配层：知乎 / linux.do 话题页 / 通用页三路由 markdown 装配 + `.md/.html/.json` 文件载荷 + 文件名消毒 + Blob 本地下载触发 + Discourse 发帖参数组装）。知乎/通用站经 GenericUI 面板「💾 存文件」（格式下拉 .md/.html/.json）；linux.do 话题页经主面板「📄 当前页面」区块同样可用。纯本地写不经 Guard（与书签备份/工作区报告下载先例同口径），成功同样落 clipper 账本（避免已存文件又在 Notion 重建页）。
+- **当前页面 → 发布到 linux.do（新话题/回复）**：`LinuxDoAPI` 新增 `postJson`/`createTopic`/`replyToTopic`（同源登录态复用 `getRequestOpts`；401/403/429 短路可行动错误，422 服务端原文透出；仅 linux.do 域名执行防跨站误发）；`linuxdo.publish` 登记 Guard level=1，经 `OperationGuard.execute` 闸门（权限检查 + 用户二次确认 + 审计事件 `linuxdo.post.published`，正文 raw 永不进审计）。站外页面发布按钮直接拒绝并引导先存文件。
+- **验证**：新增 `tests/page-file-publish.test.js` 23 项；`p4conv-round6` 导出锁契约计数 2→4（新增两方法同范式）；vitest 111 文件/1856 用例 + legacy 三件套全绿；`verify:build` PASS（root≡dist）。
 
 ### v3.15.1
 
