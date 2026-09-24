@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.16.0
+// @version      3.16.1
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -81,7 +81,7 @@
       "use strict";
       var CONFIG2 = {
         // Keep in sync with package.json + userscript @version + build.js header.
-        SCRIPT_VERSION: "3.16.0",
+        SCRIPT_VERSION: "3.16.1",
         // 编译期 feature flag: 多端同步。默认关闭——off 时 main.js 不初始化同步引擎、
         // 零网络/零定时器/零 DOM,行为与关闭前字节级一致(F-SYNC-11)。
         MULTI_DEVICE_SYNC_ENABLED: false,
@@ -25617,10 +25617,11 @@ ${systemText}
           tip.textContent = "\u5BFC\u51FA\u72B6\u6001\u4F9D\u636E Notion \u5DE5\u4F5C\u533A\u5FEB\u7167\uFF08\u53EA\u8BFB\u8986\u76D6\uFF0C\u4E0D\u6539\u672C\u5730\u8D26\u672C\uFF09\u3002\u6E05\u7A7A Notion \u540E\u5237\u65B0\u5DE5\u4F5C\u533A\u5373\u53EF\u5168\u90E8\u56DE\u5230\u5F85\u5BFC\u51FA\u3002";
         },
         recomputeExportStatusFromNotion: () => {
-          var _a, _b, _c, _d;
+          var _a, _b, _c, _d, _e, _f;
           UI2().updateExportStatusTip();
           (_b = (_a = UI2()).recomputeExportStats) == null ? void 0 : _b.call(_a);
           (_d = (_c = UI2()).renderBookmarkList) == null ? void 0 : _d.call(_c);
+          (_f = (_e = UI2()).updateSelectCount) == null ? void 0 : _f.call(_e);
           const diff = UI2().computeLedgerSnapshotDiff();
           return {
             source: UI2().getExportStatusSource(),
@@ -25683,7 +25684,7 @@ ${systemText}
         // 安全护栏: ① 无快照/空快照(records 为空)直接拒绝(Notion 被清空≠快照为空, 须先刷新工作区
         // 拿到真实快照); ② 空列表拒绝; ③ 仅动当前列表交集, 不碰未加载源; ④ 调用方负责确认弹窗+审计。
         alignLedgerToSnapshot: (keys) => {
-          var _a, _b, _c, _d, _e;
+          var _a, _b, _c, _d, _e, _f, _g, _h, _i;
           if (!UI2().hasWorkspaceExportSnapshot()) {
             return { ok: false, reason: "no-snapshot", aligned: 0 };
           }
@@ -25720,6 +25721,12 @@ ${systemText}
           if (aligned > 0) {
             (_c = (_b = UI2()).recomputeExportStats) == null ? void 0 : _c.call(_b);
             (_e = (_d = UI2()).renderBookmarkList) == null ? void 0 : _e.call(_d);
+            (_g = (_f = UI2()).updateSelectCount) == null ? void 0 : _g.call(_f);
+            try {
+              const after = UI2().computeLedgerSnapshotDiff();
+              (_i = (_h = UI2()).renderLedgerSnapshotDiffTip) == null ? void 0 : _i.call(_h, after);
+            } catch {
+            }
           }
           return { ok: true, reason: "ok", aligned, alignedKeys };
         },
@@ -30714,7 +30721,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           };
           if (refs.alignLedgerToSnapshotBtn) {
             refs.alignLedgerToSnapshotBtn.onclick = async () => {
-              var _a2, _b, _c, _d;
+              var _a2, _b, _c, _d, _e;
               const diff = UI2.computeLedgerSnapshotDiff();
               (_a2 = UI2.renderLedgerSnapshotDiffTip) == null ? void 0 : _a2.call(UI2, diff);
               if (!diff.hasSnapshot) {
@@ -30761,7 +30768,11 @@ ${preview}${more}
                 (_c = OperationLog2 == null ? void 0 : OperationLog2.add) == null ? void 0 : _c.call(OperationLog2, { action: "ledger.align", aligned: res.aligned, keys: (res.alignedKeys || []).slice(0, 50), actor: "user" });
               } catch {
               }
-              (_d = UI2.renderLedgerSnapshotDiffTip) == null ? void 0 : _d.call(UI2);
+              try {
+                (_d = UI2.updateSelectCount) == null ? void 0 : _d.call(UI2);
+              } catch {
+              }
+              (_e = UI2.renderLedgerSnapshotDiffTip) == null ? void 0 : _e.call(UI2);
               UI2.showStatus(`\u5DF2\u5BF9\u9F50 ${res.aligned} \u9879\uFF1A\u672C\u5730\u6B8B\u7559\u6807\u8BB0\u5DF2\u79FB\u9664\uFF0C\u5BF9\u5E94\u6761\u76EE\u56DE\u5230\u5F85\u5BFC\u51FA`, "success");
             };
           }

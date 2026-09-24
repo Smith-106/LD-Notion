@@ -744,6 +744,9 @@ const UIEvents = {
                     return;
                 }
                 try { OperationLog?.add?.({ action: "ledger.align", aligned: res.aligned, keys: (res.alignedKeys || []).slice(0, 50), actor: "user" }); } catch { /* 审计落盘失败不阻断对齐结果展示 */ }
+                // v3.16.1: align 内已重算计数/重渲染/刷新分歧条，此处再显式同步计数文案
+                // （renderBookmarkList 分块 rAF 晚到时文案不被旧帧覆盖）。
+                try { UI.updateSelectCount?.(); } catch { /* 忽略 */ }
                 UI.renderLedgerSnapshotDiffTip?.();
                 UI.showStatus(`已对齐 ${res.aligned} 项：本地残留标记已移除，对应条目回到待导出`, "success");
             };

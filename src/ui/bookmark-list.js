@@ -277,8 +277,10 @@ const BookmarkList = {
         UI().updateExportStatusTip();
         UI().recomputeExportStats?.();
         UI().renderBookmarkList?.();
-        // P3 共识(dsf+glm): renderBookmarkList 内部已调 updateSelectCount → renderVisualSummary,
-        // 原实现再显式调用造成同轮双渲染。
+        // v3.16.1: renderBookmarkList 内 updateSelectCount 随分块 rAF 行徽标晚到；
+        // 模式切换/刷新快照后计数文案须同轮一致，显式补一次（renderVisualSummary 仍只走
+        // updateSelectCount 末尾微任务合并，不直调，避免 P3 同轮双渲染回退）。
+        UI().updateSelectCount?.();
         const diff = UI().computeLedgerSnapshotDiff();
         return {
             source: UI().getExportStatusSource(),
@@ -377,8 +379,18 @@ const BookmarkList = {
             if (removed) { aligned++; alignedKeys.push(k); }
         }
         if (aligned > 0) {
+            // v3.16.1: 对齐后计数/列表/分歧条强制同步刷新 —— renderBookmarkList 内首帧即调
+            // updateSelectCount，但分块 rAF 异步行徽标晚到；此处显式重算计数 + 重渲染列表 +
+            // 重算分歧透出，保证「已加载/待导出」与行徽标同轮一致（拒绝路径不触计数）。
             UI().recomputeExportStats?.();
             UI().renderBookmarkList?.();
+            UI().updateSelectCount?.();
+            try {
+                const after = UI().computeLedgerSnapshotDiff();
+                // renderLedgerSnapshotDiffTip 由 events.js 绑定期挂载（非 BookmarkList 成员），
+                // 此处经可选调用兼容单测/无面板环境。
+                UI().renderLedgerSnapshotDiffTip?.(after);
+            } catch { /* 分歧条刷新失败不阻断对齐结果 */ }
         }
         return { ok: true, reason: "ok", aligned, alignedKeys };
     },

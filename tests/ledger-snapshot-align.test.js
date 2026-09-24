@@ -117,6 +117,55 @@ describe("v3.15.1 ledger-snapshot align", () => {
         expect(Storage.isTopicExported("303")).toBe(true);
     });
 
+    it("v3.16.1: 对齐后计数同步更新（本地模式 497/228 类场景）", () => {
+        // 497 项已加载全选，其中 283 项账本残留 → 对齐后待导出应回到 497
+        UI.bookmarks = Array.from({ length: 497 }, (_, i) => ({ topic_id: String(1000 + i), title: `t${i}` }));
+        UI.selectedBookmarks = new Set(UI.bookmarks.map((b) => UI.getBookmarkKey(b)));
+        UI.workspaceVisualSnapshot = {
+            databases: [], pages: [],
+            scannedAt: Date.now(), maxPages: 100,
+            records: [{ sourceUrl: "https://linux.do/t/9999" }],
+        };
+        for (let i = 0; i < 283; i++) Storage.markTopicExported(String(1000 + i));
+        UI.recomputeExportStats();
+        expect(UI.totalUnexportedCount).toBe(497 - 283);
+        expect(UI.selectedUnexportedCount).toBe(497 - 283);
+        let diffTipCalls = 0;
+        UI.renderLedgerSnapshotDiffTip = () => { diffTipCalls++; };
+        let selectCountCalls = 0;
+        const origUpdateSelectCount = UI.updateSelectCount;
+        UI.updateSelectCount = () => { selectCountCalls++; };
+        try {
+            const res = UI.alignLedgerToSnapshot();
+            expect(res.ok).toBe(true);
+            expect(res.aligned).toBe(283);
+            // 计数同轮同步刷新（非仅依赖 renderBookmarkList 分块 rAF）
+            expect(UI.totalUnexportedCount).toBe(497);
+            expect(UI.selectedUnexportedCount).toBe(497);
+            expect(selectCountCalls).toBeGreaterThanOrEqual(1);
+            expect(diffTipCalls).toBeGreaterThanOrEqual(1);
+            // 对齐后分歧归零
+            const after = UI.computeLedgerSnapshotDiff();
+            expect(after.ledgerOnly).toEqual([]);
+        } finally {
+            UI.updateSelectCount = origUpdateSelectCount;
+            delete UI.renderLedgerSnapshotDiffTip;
+        }
+    });
+
+    it("v3.16.1: 拒绝路径不改计数", () => {
+        UI.bookmarks = [{ topic_id: 101, title: "a" }];
+        UI.selectedBookmarks = new Set(["101"]);
+        Storage.markTopicExported("101");
+        UI.recomputeExportStats();
+        const before = UI.totalUnexportedCount;
+        UI.workspaceVisualSnapshot = { databases: [], pages: [], records: [], scannedAt: 0, maxPages: 0 };
+        const res = UI.alignLedgerToSnapshot();
+        expect(res.ok).toBe(false);
+        expect(UI.totalUnexportedCount).toBe(before);
+        expect(Storage.isTopicExported("101")).toBe(true);
+    });
+
     it("recomputeExportStatusFromNotion 透出分歧计数", () => {
         Storage.markTopicExported("101");
         UI.workspaceVisualSnapshot = {

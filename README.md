@@ -6,7 +6,7 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![文档站](https://img.shields.io/badge/文档站-GitHub%20Pages-6f42c1?style=for-the-badge&logo=githubpages)](https://smith-106.github.io/LD-Notion/) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前仓库源码版本：`v3.16.0`
+- 当前仓库源码版本：`v3.16.1`
 - 最新 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/latest>
 - 文档站：<https://smith-106.github.io/LD-Notion/>
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
@@ -394,6 +394,11 @@ A: 请检查：
 - 四级权限模型 + `OperationGuard` 统一保护用户触发与 AI 触发的写入入口；危险操作额外确认，撤销窗口只覆盖危险操作
 
 ## 更新日志
+
+### v3.16.1
+
+- **对齐后计数同步更新**：`alignLedgerToSnapshot` 成功路径追加 `updateSelectCount` + 分歧条刷新（`renderBookmarkList` 分块 rAF 行徽标晚到时，「已加载/待导出」与行徽标同轮一致）；`recomputeExportStatusFromNotion`（模式切换/刷新快照）同样显式补一次计数刷新（`renderVisualSummary` 仍只走微任务合并，不直调）；events 对齐处理追加计数同步。拒绝路径（无快照/空快照/空列表）不改计数、不改账本。
+- **验证**：`ledger-snapshot-align` +2 项（497/283 场景对齐后待导出 214→497、分歧归零、拒绝路径不动）；`p3-bookmark-list` 重算契约更新（允许 recompute 体内恰一次计数直调）；vitest 全绿 + legacy 三件套全绿；`verify:build`/`verify:delivery` 全链通过。
 
 ### v3.16.0
 

@@ -1,3 +1,11 @@
+## [3.16.1] - 2026-09-24
+
+### fix (对齐后「已加载/待导出」计数同步更新)
+
+- **问题**：按快照对齐本地账本成功后，「已加载 497 个，待导出 228 个（本地）」计数与列表徽标未同步更新 —— `renderBookmarkList` 分块 rAF 行徽标晚到，计数文案停留旧值。
+- **修复**：`alignLedgerToSnapshot` 成功路径追加 `updateSelectCount` + 分歧条刷新；`recomputeExportStatusFromNotion` 同样显式补一次计数刷新；拒绝路径不改计数不改账本。
+- **验证**：`ledger-snapshot-align` +2 项；vitest 全绿 + legacy 三件套全绿；`verify:build`/`verify:delivery` 全链通过。
+
 ## [3.16.0] - 2026-09-24
 
 ### feat (当前页面 → 本地文件 + 发布到 linux.do，对齐 LDStatus Pro，通用站可用)
