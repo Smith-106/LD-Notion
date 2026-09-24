@@ -66,6 +66,12 @@ check('R5: pending/slow_down keep user code', aiBindings.indexOf('currentUserCod
     && aiBindings.indexOf("phase === 'pending' || phase === 'slow_down'") !== -1);
 check('R5: clipboard grant + helper', buildSrc.indexOf('GM_setClipboard') !== -1
     && oauth.indexOf('copyUserCode') !== -1);
+// R5b (审查P1-2回归): execCommand 分支 body 守卫 + finally 清理 textarea
+check('R5b: execCommand body guard + finally cleanup', oauth.indexOf('document.body && typeof document.body.appendChild') !== -1
+    && oauth.indexOf('if (added) ta.remove()') !== -1);
+// R5c (收敛复审B1): 同码重复渲染仅首次写剪贴板(pending/slow_down 不覆盖用户剪贴板)
+check('R5c: clipboard write-once guard', oauth.indexOf('_lastCopiedCode') !== -1
+    && oauth.indexOf('GitHubOAuth._lastCopiedCode !== code') !== -1);
 
 if (failures.length) { console.log(`RESULT: FAIL (${failures.length})`); process.exit(1); }
 console.log("RESULT: all passed");

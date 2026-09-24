@@ -208,8 +208,14 @@ const GitHubOAuth = {
                 statusEl.appendChild(doc.createTextNode(' —— ' + phaseTip));
             }
         } catch (_) { return 'no-el'; }
-        // 设备码自动复制剪贴板(静默降级: GM → Clipboard API → execCommand)
-        try { GitHubOAuth.copyUserCode(code); } catch (_) { /* 复制失败不阻断授权 */ }
+        // 设备码自动复制剪贴板(仅首次下发同码时写一次 —— 后续 pending/slow_down 重渲染
+        // 只更新 DOM，不重复覆盖用户剪贴板；静默降级: GM → Clipboard API → execCommand)
+        try {
+            if (GitHubOAuth._lastCopiedCode !== code) {
+                GitHubOAuth._lastCopiedCode = code;
+                GitHubOAuth.copyUserCode(code);
+            }
+        } catch (_) { /* 复制失败不阻断授权 */ }
         const safeUrl = String(verificationUri || '');
         if (!safeUrl.startsWith('https://github.com/login/device')) return 'text-only';
         try {
@@ -227,8 +233,10 @@ const GitHubOAuth = {
         return 'link';
     },
 
-    // v3.16.6: 设备码剪贴板写入(静默, 失败不抛)—— GM_setClipboard → navigator.clipboard → execCommand。
-    // 返回 true(已复制)/false(不可用或被拒); 同步路径能用则同步, 异步 Clipboard API 走 fire-and-forget。
+    // v3.16.6: 设备码剪贴板写入(静默尽力, 失败不抛、不阻断授权 —— 状态行已常驻显示设备码)。
+    // GM_setClipboard → navigator.clipboard → execCommand 三级降级。
+    // 返回 true(已由某一级接管写入)/false(无可用写入通道或同步复制失败);
+    // 注意 navigator.clipboard.writeText 为异步 fire-and-forget, true 仅表示“已发起”而非“已成功”。
     copyUserCode: (userCode) => {
         const code = String(userCode || '');
         if (!code) return false;
@@ -245,17 +253,23 @@ const GitHubOAuth = {
             }
         } catch (_) { /* 降级 */ }
         try {
-            if (typeof document !== 'undefined' && typeof document.execCommand === 'function') {
+            if (typeof document !== 'undefined' && typeof document.execCommand === 'function'
+                && document.body && typeof document.body.appendChild === 'function') {
                 const ta = document.createElement('textarea');
-                ta.value = code;
-                ta.setAttribute('readonly', 'readonly');
-                ta.style.position = 'fixed';
-                ta.style.opacity = '0';
-                document.body.appendChild(ta);
-                ta.select();
-                const ok = !!document.execCommand('copy');
-                ta.remove();
-                return ok;
+                let added = false;
+                try {
+                    ta.value = code;
+                    ta.setAttribute('readonly', 'readonly');
+                    ta.style.position = 'fixed';
+                    ta.style.opacity = '0';
+                    document.body.appendChild(ta);
+                    added = true;
+                    ta.select();
+                    if (!!document.execCommand('copy')) return true;
+                } finally {
+                    // P1-2: 抛错/select 失败时 textarea 必清理, 不泄漏 DOM
+                    try { if (added) ta.remove(); } catch (_) { /* 忽略 */ }
+                }
             }
         } catch (_) { /* 忽略 */ }
         return false;

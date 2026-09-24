@@ -300,6 +300,67 @@ describe('GitHubOAuth renderUserCodeStatus', () => {
         }
     });
 
+    // 审查 P1-2 回归: execCommand 分支 body 缺失不抛错返回 false; 抛错时 textarea 必清理
+    it('copyUserCode body缺失时返回false不抛错', async () => {
+        const savedDoc = globalThis.document;
+        const savedNav = globalThis.navigator;
+        const savedGM = globalThis.GM_setClipboard;
+        try {
+            delete globalThis.GM_setClipboard;
+            delete globalThis.navigator;
+            globalThis.document = { execCommand: () => true, createElement: () => ({ value: '', style: {}, setAttribute() {}, select() {}, remove() {} }) };
+            expect(GitHubOAuth.copyUserCode('ABCD-1234')).toBe(false);
+        } finally {
+            globalThis.document = savedDoc;
+            globalThis.navigator = savedNav;
+            if (savedGM !== undefined) globalThis.GM_setClipboard = savedGM;
+        }
+    });
+
+    it('copyUserCode execCommand抛错时清理textarea并返回false', async () => {
+        const savedDoc = globalThis.document;
+        const savedNav = globalThis.navigator;
+        const savedGM = globalThis.GM_setClipboard;
+        try {
+            delete globalThis.GM_setClipboard;
+            delete globalThis.navigator;
+            let removed = 0;
+            globalThis.document = {
+                execCommand: () => { throw new Error('denied'); },
+                createElement: () => ({ value: '', style: {}, setAttribute() {}, select() {}, remove() { removed += 1; } }),
+                body: { appendChild() {} },
+            };
+            expect(GitHubOAuth.copyUserCode('ABCD-1234')).toBe(false);
+            expect(removed).toBe(1);
+        } finally {
+            globalThis.document = savedDoc;
+            globalThis.navigator = savedNav;
+            if (savedGM !== undefined) globalThis.GM_setClipboard = savedGM;
+        }
+    });
+
+    // 收敛复审 B1 回归: 同码重复渲染只写一次剪贴板(不覆盖用户后续复制内容)
+    it('同码重复渲染仅首次写剪贴板', async () => {
+        const { saved } = fakeDoc();
+        try {
+            GitHubOAuth._lastCopiedCode = undefined;
+            let writes = 0;
+            const origCopy = GitHubOAuth.copyUserCode;
+            const spy = (...a) => { writes += 1; return origCopy(...a); };
+            GitHubOAuth.copyUserCode = spy;
+            try {
+                const el = makeRealEl();
+                GitHubOAuth.renderUserCodeStatus(el, 'ONCE-1111', 'https://github.com/login/device');
+                GitHubOAuth.renderUserCodeStatus(el, 'ONCE-1111', 'https://github.com/login/device', 'pending');
+                GitHubOAuth.renderUserCodeStatus(el, 'ONCE-1111', 'https://github.com/login/device', 'slow_down');
+                expect(writes).toBe(1);
+                // 新码再次写入一次
+                GitHubOAuth.renderUserCodeStatus(el, 'NEW2-2222', 'https://github.com/login/device');
+                expect(writes).toBe(2);
+            } finally { GitHubOAuth.copyUserCode = origCopy; }
+        } finally { globalThis.document = saved; }
+    });
+
     it('copyUserCode 经 GM_setClipboard 复制返回 true', async () => {
         const savedGM = globalThis.GM_setClipboard;
         try {

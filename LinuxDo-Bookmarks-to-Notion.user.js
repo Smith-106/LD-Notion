@@ -2279,7 +2279,10 @@
             return "no-el";
           }
           try {
-            GitHubOAuth.copyUserCode(code);
+            if (GitHubOAuth._lastCopiedCode !== code) {
+              GitHubOAuth._lastCopiedCode = code;
+              GitHubOAuth.copyUserCode(code);
+            }
           } catch (_) {
           }
           const safeUrl = String(verificationUri || "");
@@ -2300,8 +2303,10 @@
           }
           return "link";
         },
-        // v3.16.6: 设备码剪贴板写入(静默, 失败不抛)—— GM_setClipboard → navigator.clipboard → execCommand。
-        // 返回 true(已复制)/false(不可用或被拒); 同步路径能用则同步, 异步 Clipboard API 走 fire-and-forget。
+        // v3.16.6: 设备码剪贴板写入(静默尽力, 失败不抛、不阻断授权 —— 状态行已常驻显示设备码)。
+        // GM_setClipboard → navigator.clipboard → execCommand 三级降级。
+        // 返回 true(已由某一级接管写入)/false(无可用写入通道或同步复制失败);
+        // 注意 navigator.clipboard.writeText 为异步 fire-and-forget, true 仅表示“已发起”而非“已成功”。
         copyUserCode: (userCode) => {
           const code = String(userCode || "");
           if (!code) return false;
@@ -2321,17 +2326,24 @@
           } catch (_) {
           }
           try {
-            if (typeof document !== "undefined" && typeof document.execCommand === "function") {
+            if (typeof document !== "undefined" && typeof document.execCommand === "function" && document.body && typeof document.body.appendChild === "function") {
               const ta = document.createElement("textarea");
-              ta.value = code;
-              ta.setAttribute("readonly", "readonly");
-              ta.style.position = "fixed";
-              ta.style.opacity = "0";
-              document.body.appendChild(ta);
-              ta.select();
-              const ok = !!document.execCommand("copy");
-              ta.remove();
-              return ok;
+              let added = false;
+              try {
+                ta.value = code;
+                ta.setAttribute("readonly", "readonly");
+                ta.style.position = "fixed";
+                ta.style.opacity = "0";
+                document.body.appendChild(ta);
+                added = true;
+                ta.select();
+                if (!!document.execCommand("copy")) return true;
+              } finally {
+                try {
+                  if (added) ta.remove();
+                } catch (_) {
+                }
+              }
             }
           } catch (_) {
           }
