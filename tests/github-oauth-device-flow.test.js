@@ -185,7 +185,8 @@ describe('GitHubOAuth renderUserCodeStatus', () => {
         const created = [];
         globalThis.document = {
             createElement: (tag) => {
-                const el = { tag, href: '', target: '', rel: '', textContent: '', style: {} };
+                const el = { tag, href: '', target: '', rel: '', textContent: '', style: {},
+                    setAttribute() {}, select() {}, appendChild() {}, remove() {} };
                 created.push(el);
                 return el;
             },
@@ -193,42 +194,123 @@ describe('GitHubOAuth renderUserCodeStatus', () => {
         };
         return { saved, created };
     };
+    const makeRealEl = () => {
+        // 接近真实 DOM 的 stub: firstChild/removeChild/children 联动, textContent 可读写
+        const kids = [];
+        return {
+            textContent: '',
+            get firstChild() { return kids.length ? kids[0] : null; },
+            removeChild(n) { const i = kids.indexOf(n); if (i >= 0) kids.splice(i, 1); return n; },
+            appendChild(n) { kids.push(n); return n; },
+            get childNodes() { return kids.slice(); },
+        };
+    };
     it('正常渲染: 代码文本 + 官方直达链接', async () => {
         const { saved, created } = fakeDoc();
         try {
-            const el = makeEl();
+            const el = makeRealEl();
             const ret = GitHubOAuth.renderUserCodeStatus(el, 'ABCD-1234', 'https://github.com/login/device');
-            expect(el.textContent).toContain('ABCD-1234');
             expect(ret).toBe('link');
-            expect(created.length).toBe(1);
-            expect(created[0].href).toBe('https://github.com/login/device');
-            expect(created[0].target).toBe('_blank');
+            expect(JSON.stringify(el.childNodes)).toContain('ABCD-1234');
+            const link = created.find((n) => n.tag === 'a');
+            expect(link.href).toBe('https://github.com/login/device');
+            expect(link.target).toBe('_blank');
         } finally { globalThis.document = saved; }
     });
 
     it('恶意 user_code 不执行 HTML(纯文本赋值)', async () => {
-        const { saved } = fakeDoc();
+        const { saved, created } = fakeDoc();
         try {
-            const el = makeEl();
+            const el = makeRealEl();
             GitHubOAuth.renderUserCodeStatus(el, '<img src=x onerror=alert(1)>', 'https://github.com/login/device');
-            expect(el.textContent).toContain('<img src=x onerror=alert(1)>');
-            expect(el.children.length).toBe(2); // 仅空格文本 + 链接, 无注入节点
+            const dump = JSON.stringify(el.childNodes);
+            expect(dump).toContain('<img src=x onerror=alert(1)>');
+            // 无注入节点: 只有文本节点 + strong 高亮 + 链接, 无额外元素
+            expect(created.every((n) => n.tag === 'strong' || n.tag === 'a')).toBe(true);
         } finally { globalThis.document = saved; }
     });
 
     it('verification_uri 非官方域时降级纯文本(防劫持)', async () => {
         const { saved, created } = fakeDoc();
         try {
-            const el = makeEl();
+            const el = makeRealEl();
             const ret = GitHubOAuth.renderUserCodeStatus(el, 'ABCD-1234', 'https://evil.example.com/login/device');
             expect(ret).toBe('text-only');
-            expect(created.length).toBe(0);
-            expect(el.textContent).toContain('ABCD-1234');
+            expect(created.some((n) => n.tag === 'a')).toBe(false);
+            expect(JSON.stringify(el.childNodes)).toContain('ABCD-1234');
         } finally { globalThis.document = saved; }
     });
 
     it('无状态行元素时返回 no-el 不抛错', async () => {
         expect(GitHubOAuth.renderUserCodeStatus(null, 'ABCD-1234', 'https://github.com/login/device')).toBe('no-el');
+    });
+
+    // v3.16.6: pending/slow_down 阶段状态行仍保留设备码(根因回归: 轮询回调不再裸覆盖丢码)
+    it('pending 阶段保留设备码 + phase 提示', async () => {
+        const { saved, created } = fakeDoc();
+        try {
+            const el = makeRealEl();
+            const ret = GitHubOAuth.renderUserCodeStatus(el, 'WXYZ-9999', 'https://github.com/login/device', 'pending');
+            expect(ret).toBe('link');
+            const dump = JSON.stringify(el.childNodes);
+            expect(dump).toContain('WXYZ-9999');
+            expect(dump).toContain('等待你在 GitHub 页面确认授权');
+            expect(created.some((n) => n.tag === 'strong')).toBe(true);
+        } finally { globalThis.document = saved; }
+    });
+
+    it('slow_down 阶段保留设备码 + 降速提示', async () => {
+        const { saved } = fakeDoc();
+        try {
+            const el = makeRealEl();
+            GitHubOAuth.renderUserCodeStatus(el, 'WXYZ-9999', 'https://github.com/login/device', 'slow_down');
+            const dump = JSON.stringify(el.childNodes);
+            expect(dump).toContain('WXYZ-9999');
+            expect(dump).toContain('已自动降速');
+        } finally { globalThis.document = saved; }
+    });
+
+    it('重复渲染不堆积旧节点(清空后重建)', async () => {
+        const { saved } = fakeDoc();
+        try {
+            const el = makeRealEl();
+            GitHubOAuth.renderUserCodeStatus(el, 'AAAA-1111', 'https://github.com/login/device');
+            const first = el.childNodes.length;
+            GitHubOAuth.renderUserCodeStatus(el, 'AAAA-1111', 'https://github.com/login/device', 'pending');
+            expect(el.childNodes.length).toBeLessThanOrEqual(first + 1);
+            expect(JSON.stringify(el.childNodes)).toContain('AAAA-1111');
+        } finally { globalThis.document = saved; }
+    });
+
+    // v3.16.6: copyUserCode 静默降级
+    it('copyUserCode 无剪贴板环境返回 false 不抛错', async () => {
+        const savedDoc = globalThis.document;
+        const savedNav = globalThis.navigator;
+        const savedGM = globalThis.GM_setClipboard;
+        try {
+            delete globalThis.document;
+            delete globalThis.navigator;
+            delete globalThis.GM_setClipboard;
+            expect(GitHubOAuth.copyUserCode('ABCD-1234')).toBe(false);
+            expect(GitHubOAuth.copyUserCode('')).toBe(false);
+        } finally {
+            globalThis.document = savedDoc;
+            globalThis.navigator = savedNav;
+            if (savedGM !== undefined) globalThis.GM_setClipboard = savedGM;
+        }
+    });
+
+    it('copyUserCode 经 GM_setClipboard 复制返回 true', async () => {
+        const savedGM = globalThis.GM_setClipboard;
+        try {
+            let seen = '';
+            globalThis.GM_setClipboard = (t) => { seen = String(t); };
+            expect(GitHubOAuth.copyUserCode('ABCD-1234')).toBe(true);
+            expect(seen).toBe('ABCD-1234');
+        } finally {
+            if (savedGM === undefined) delete globalThis.GM_setClipboard;
+            else globalThis.GM_setClipboard = savedGM;
+        }
     });
 });
 });

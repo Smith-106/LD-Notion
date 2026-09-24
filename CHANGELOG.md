@@ -1,3 +1,11 @@
+## [3.16.6] - 2026-09-25
+
+### fix (设备码常驻 + 自动复制)
+
+- **根因**：v3.16.5 的 `onUserCode` 显示设备码正确，但进入轮询后第一次 `onStatus(pending)` 即裸 `setStatus` 覆盖状态行，设备码一闪即失；`slow_down` 同理。用户截图正处 pending 阶段（Device Activation 页已开但面板无码）。
+- **修复**：`ai-bindings.js` 闭包保留 `currentUserCode/currentVerificationUri`，pending/slow_down 经 `renderUserCodeStatus(..., phase)` 带码重渲染；helper 新增 `<strong>` 高亮 + 自动复制剪贴板（三级静默降级）；`build.js` 补 `@grant GM_setClipboard`；面板 + docs 文案同步。
+- **验证**：`verify:github-no-callback` 12 项通过（R5 新增）；device-flow 单测 16 项 + events-deep 7 项通过；全量 + delivery 全链通过。
+
 ## [3.16.5] - 2026-09-24
 
 ### fix (设备码可点击直达)

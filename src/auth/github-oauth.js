@@ -173,16 +173,43 @@ const GitHubOAuth = {
         return result.accessToken;
     },
 
-    // v3.16.5: 设备码状态行渲染 —— user_code 来自 GitHub 接口(不可信输入),
-    // textContent 赋值防注入; href 白名单限定 https://github.com/login/device 前缀,
-    // 否则降级纯文本(防 verification_uri 被劫持为钓鱼地址)。
+    // v3.16.6: 设备码状态行渲染 —— user_code 来自 GitHub 接口(不可信输入)。
+    // ① 主码行经 textContent 赋值(防注入); ② href 白名单限定
+    // https://github.com/login/device 前缀, 否则降级纯文本(防 verification_uri 劫持);
+    // ③ phase 为 pending/slow_down 时状态行仍保留设备码(轮询回调不再裸 setStatus 覆盖);
+    // ④ 设备码自动复制剪贴板(GM_setClipboard → navigator.clipboard → execCommand 降级, 全部静默)。
+    // codeEl 优先使用 <strong> 高亮(选中即复制, 无需手动全选); 不可用时降级纯文本。
     // 返回 'link' | 'text-only' | 'no-el', 供单测断言。
-    renderUserCodeStatus: (statusEl, userCode, verificationUri) => {
+    renderUserCodeStatus: (statusEl, userCode, verificationUri, phase) => {
         const code = String(userCode || '');
         if (!statusEl) return 'no-el';
+        const phaseTip = phase === 'slow_down'
+            ? 'GitHub 限流提示, 已自动降速继续等待…'
+            : '等待你在 GitHub 页面确认授权…';
         try {
-            statusEl.textContent = '请在已打开的 GitHub 页面输入代码: ' + code;
+            // 清空后重建: prefix 文本 + strong 高亮码 + phase 提示(均为 textContent, 无 innerHTML)
+            while (statusEl.firstChild) statusEl.removeChild(statusEl.firstChild);
+            const doc = (typeof document !== 'undefined') ? document : null;
+            if (!doc || typeof doc.createElement !== 'function' || typeof doc.createTextNode !== 'function') {
+                statusEl.textContent = '请在已打开的 GitHub 页面输入代码: ' + code + ' —— ' + phaseTip;
+            } else {
+                statusEl.appendChild(doc.createTextNode('请在已打开的 GitHub 页面输入代码: '));
+                let codeEl = null;
+                try {
+                    codeEl = doc.createElement('strong');
+                    codeEl.textContent = code;
+                    codeEl.style.userSelect = 'all';
+                    codeEl.style.fontSize = '1.2em';
+                    codeEl.style.letterSpacing = '2px';
+                    statusEl.appendChild(codeEl);
+                } catch (_) {
+                    statusEl.appendChild(doc.createTextNode(code));
+                }
+                statusEl.appendChild(doc.createTextNode(' —— ' + phaseTip));
+            }
         } catch (_) { return 'no-el'; }
+        // 设备码自动复制剪贴板(静默降级: GM → Clipboard API → execCommand)
+        try { GitHubOAuth.copyUserCode(code); } catch (_) { /* 复制失败不阻断授权 */ }
         const safeUrl = String(verificationUri || '');
         if (!safeUrl.startsWith('https://github.com/login/device')) return 'text-only';
         try {
@@ -198,6 +225,40 @@ const GitHubOAuth = {
             statusEl.appendChild(link);
         } catch (_) { return 'text-only'; }
         return 'link';
+    },
+
+    // v3.16.6: 设备码剪贴板写入(静默, 失败不抛)—— GM_setClipboard → navigator.clipboard → execCommand。
+    // 返回 true(已复制)/false(不可用或被拒); 同步路径能用则同步, 异步 Clipboard API 走 fire-and-forget。
+    copyUserCode: (userCode) => {
+        const code = String(userCode || '');
+        if (!code) return false;
+        try {
+            if (typeof GM_setClipboard !== 'undefined' && GM_setClipboard) {
+                GM_setClipboard(code);
+                return true;
+            }
+        } catch (_) { /* 降级 */ }
+        try {
+            if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+                navigator.clipboard.writeText(code).catch(() => {});
+                return true;
+            }
+        } catch (_) { /* 降级 */ }
+        try {
+            if (typeof document !== 'undefined' && typeof document.execCommand === 'function') {
+                const ta = document.createElement('textarea');
+                ta.value = code;
+                ta.setAttribute('readonly', 'readonly');
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.select();
+                const ok = !!document.execCommand('copy');
+                ta.remove();
+                return ok;
+            }
+        } catch (_) { /* 忽略 */ }
+        return false;
     },
 
     // UI 取消按钮调用; 正在进行的轮询在下一个检查点抛 cancelled

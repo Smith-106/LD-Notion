@@ -6,7 +6,7 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![文档站](https://img.shields.io/badge/文档站-GitHub%20Pages-6f42c1?style=for-the-badge&logo=githubpages)](https://smith-106.github.io/LD-Notion/) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前仓库源码版本：`v3.16.5`
+- 当前仓库源码版本：`v3.16.6`
 - 最新 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/latest>
 - 文档站：<https://smith-106.github.io/LD-Notion/>
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
@@ -394,6 +394,11 @@ A: 请检查：
 - 四级权限模型 + `OperationGuard` 统一保护用户触发与 AI 触发的写入入口；危险操作额外确认，撤销窗口只覆盖危险操作
 
 ## 更新日志
+
+### v3.16.6
+
+- **设备码常驻 + 自动复制**：v3.16.5 根因——`onStatus(pending/slow_down)` 裸 `setStatus` 覆盖状态行，设备码显示一闪即失（用户截图正处 pending 阶段）。`ai-bindings.js` 闭包保留 `currentUserCode/currentVerificationUri`，轮询阶段经 `renderUserCodeStatus(..., phase)` 带码重渲染；helper 支持 `phase`（pending/slow_down 提示）、`<strong>` 大字高亮（`userSelect:all` 点即全选）、设备码自动复制剪贴板（`GM_setClipboard → navigator.clipboard → execCommand` 三级静默降级，`build.js` 补 `@grant GM_setClipboard`）。面板 tip + `docs/integrations/github.md` 同步说明。
+- **验证**：`verify:github-no-callback` 12 项通过（新增 R5 保码/剪贴板断言）；`github-oauth-device-flow` 16 项 + `events-deep` 7 项通过；vitest 全量见下；`verify:build`/`verify:delivery` 全链通过。
 
 ### v3.16.5
 

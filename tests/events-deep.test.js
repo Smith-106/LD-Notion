@@ -54,33 +54,42 @@ describe("深度: events/ai-bindings bindAISection", () => {
         expect(UI.updateAIModelOptions).toHaveBeenCalled();
     });
 
-    it("githubOAuthBtn.onclick → onUserCode 时状态行显示设备码 + 直达链接", async () => {
-        // 回归: 用户反馈"收不到设备码/没有页面" —— 状态行必须同屏显示 user_code，
-        // 且 window.open 被拦截时仍有可点击的官方直达链接。
+    it("githubOAuthBtn.onclick → onUserCode 后 pending 仍保留设备码(v3.16.6 根因回归)", async () => {
+        // 根因: v3.16.5 的 onStatus(pending/slow_down)裸 setStatus 覆盖状态行, 设备码一闪即失。
+        // v3.16.6: 闭包保留 currentUserCode, 轮询阶段经 renderUserCodeStatus 带码重渲染。
         const refs = makeRefs();
         refs.githubOauthClientIdInput.value = "Ov23.test";
-        // 状态行 stub 需支持 appendChild 挂链接
-        const appended = [];
-        refs.githubOAuthStatus.appendChild = (n) => { appended.push(n); return n; };
+        // 状态行 stub 需支持 DOM 重建(firstChild/removeChild/appendChild 联动)
+        const kids = [];
+        refs.githubOAuthStatus.firstChild = null;
+        Object.defineProperty(refs.githubOAuthStatus, 'firstChild', { get: () => kids[0] || null, configurable: true });
+        refs.githubOAuthStatus.removeChild = (n) => { const i = kids.indexOf(n); if (i >= 0) kids.splice(i, 1); return n; };
+        refs.githubOAuthStatus.appendChild = (n) => { kids.push(n); return n; };
         bindAISection(ctx(refs));
         const { GitHubOAuth } = require("../src/auth/github-oauth");
+        // 模拟真实时序: onUserCode → onStatus(pending) → 成功返回
         const flowSpy = vi.spyOn(GitHubOAuth, "startDeviceFlow").mockImplementation(async (opts = {}) => {
             opts.onUserCode?.({ userCode: "ABCD-1234", verificationUri: "https://github.com/login/device" });
+            opts.onStatus?.({ phase: "pending" });
+            opts.onStatus?.({ phase: "slow_down" });
             return { accessToken: "gho_x", tokenType: "bearer", scope: "repo gist" };
         });
         const applySpy = vi.spyOn(GitHubOAuth, "applyTokenResponse").mockResolvedValue("gho_x");
-        // onUserCode 回调内同步断言(授权成功后状态行会被成功文案覆盖)
-        let seenCode = "";
+        // 记录每次 render 的 code/phase, 断言 pending/slow_down 仍带码
+        const seen = [];
         const origRender = GitHubOAuth.renderUserCodeStatus;
-        const renderSpy = vi.spyOn(GitHubOAuth, "renderUserCodeStatus").mockImplementation((el, code, uri) => {
-            seenCode = String(code || "");
-            return origRender(el, code, uri);
+        const renderSpy = vi.spyOn(GitHubOAuth, "renderUserCodeStatus").mockImplementation((el, code, uri, phase) => {
+            seen.push({ code: String(code || ''), phase: phase || 'initial' });
+            return origRender(el, code, uri, phase);
         });
         await refs.githubOAuthBtn.onclick();
         expect(flowSpy).toHaveBeenCalled();
-        expect(seenCode).toBe("ABCD-1234");
+        expect(seen.length).toBeGreaterThanOrEqual(3); // initial + pending + slow_down
+        expect(seen[0].code).toBe("ABCD-1234");
+        expect(seen.filter((r) => r.code === "ABCD-1234").length).toBe(seen.length); // 每次都带码, 无裸覆盖
+        expect(seen.map((r) => r.phase)).toContain("pending");
+        expect(seen.map((r) => r.phase)).toContain("slow_down");
         expect(renderSpy).toHaveBeenCalled();
-        expect(appended.length).toBeGreaterThan(0);
         expect(refs.githubOAuthStatus.textContent).toBe("✅ GitHub 授权成功，Token 已自动填入");
         expect(applySpy).toHaveBeenCalled();
         expect(refs.githubOAuthBtn.disabled).toBe(false);

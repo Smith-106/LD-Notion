@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.16.5
+// @version      3.16.6
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -38,6 +38,7 @@
 // @grant        GM_xmlhttpRequest
 // @grant        GM_notification
 // @grant        GM_addValueChangeListener
+// @grant        GM_setClipboard
 // @connect      api.notion.com
 // @connect      linux.do
 // @connect      *.amazonaws.com
@@ -85,7 +86,7 @@
       "use strict";
       var CONFIG2 = {
         // Keep in sync with package.json + userscript @version + build.js header.
-        SCRIPT_VERSION: "3.16.5",
+        SCRIPT_VERSION: "3.16.6",
         // 编译期 feature flag: 多端同步。默认关闭——off 时 main.js 不初始化同步引擎、
         // 零网络/零定时器/零 DOM,行为与关闭前字节级一致(F-SYNC-11)。
         MULTI_DEVICE_SYNC_ENABLED: false,
@@ -2243,17 +2244,43 @@
           Storage2.set(CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, result.accessToken);
           return result.accessToken;
         },
-        // v3.16.5: 设备码状态行渲染 —— user_code 来自 GitHub 接口(不可信输入),
-        // textContent 赋值防注入; href 白名单限定 https://github.com/login/device 前缀,
-        // 否则降级纯文本(防 verification_uri 被劫持为钓鱼地址)。
+        // v3.16.6: 设备码状态行渲染 —— user_code 来自 GitHub 接口(不可信输入)。
+        // ① 主码行经 textContent 赋值(防注入); ② href 白名单限定
+        // https://github.com/login/device 前缀, 否则降级纯文本(防 verification_uri 劫持);
+        // ③ phase 为 pending/slow_down 时状态行仍保留设备码(轮询回调不再裸 setStatus 覆盖);
+        // ④ 设备码自动复制剪贴板(GM_setClipboard → navigator.clipboard → execCommand 降级, 全部静默)。
+        // codeEl 优先使用 <strong> 高亮(选中即复制, 无需手动全选); 不可用时降级纯文本。
         // 返回 'link' | 'text-only' | 'no-el', 供单测断言。
-        renderUserCodeStatus: (statusEl, userCode, verificationUri) => {
+        renderUserCodeStatus: (statusEl, userCode, verificationUri, phase) => {
           const code = String(userCode || "");
           if (!statusEl) return "no-el";
+          const phaseTip = phase === "slow_down" ? "GitHub \u9650\u6D41\u63D0\u793A, \u5DF2\u81EA\u52A8\u964D\u901F\u7EE7\u7EED\u7B49\u5F85\u2026" : "\u7B49\u5F85\u4F60\u5728 GitHub \u9875\u9762\u786E\u8BA4\u6388\u6743\u2026";
           try {
-            statusEl.textContent = "\u8BF7\u5728\u5DF2\u6253\u5F00\u7684 GitHub \u9875\u9762\u8F93\u5165\u4EE3\u7801: " + code;
+            while (statusEl.firstChild) statusEl.removeChild(statusEl.firstChild);
+            const doc = typeof document !== "undefined" ? document : null;
+            if (!doc || typeof doc.createElement !== "function" || typeof doc.createTextNode !== "function") {
+              statusEl.textContent = "\u8BF7\u5728\u5DF2\u6253\u5F00\u7684 GitHub \u9875\u9762\u8F93\u5165\u4EE3\u7801: " + code + " \u2014\u2014 " + phaseTip;
+            } else {
+              statusEl.appendChild(doc.createTextNode("\u8BF7\u5728\u5DF2\u6253\u5F00\u7684 GitHub \u9875\u9762\u8F93\u5165\u4EE3\u7801: "));
+              let codeEl = null;
+              try {
+                codeEl = doc.createElement("strong");
+                codeEl.textContent = code;
+                codeEl.style.userSelect = "all";
+                codeEl.style.fontSize = "1.2em";
+                codeEl.style.letterSpacing = "2px";
+                statusEl.appendChild(codeEl);
+              } catch (_) {
+                statusEl.appendChild(doc.createTextNode(code));
+              }
+              statusEl.appendChild(doc.createTextNode(" \u2014\u2014 " + phaseTip));
+            }
           } catch (_) {
             return "no-el";
+          }
+          try {
+            GitHubOAuth.copyUserCode(code);
+          } catch (_) {
           }
           const safeUrl = String(verificationUri || "");
           if (!safeUrl.startsWith("https://github.com/login/device")) return "text-only";
@@ -2272,6 +2299,43 @@
             return "text-only";
           }
           return "link";
+        },
+        // v3.16.6: 设备码剪贴板写入(静默, 失败不抛)—— GM_setClipboard → navigator.clipboard → execCommand。
+        // 返回 true(已复制)/false(不可用或被拒); 同步路径能用则同步, 异步 Clipboard API 走 fire-and-forget。
+        copyUserCode: (userCode) => {
+          const code = String(userCode || "");
+          if (!code) return false;
+          try {
+            if (typeof GM_setClipboard !== "undefined" && GM_setClipboard) {
+              GM_setClipboard(code);
+              return true;
+            }
+          } catch (_) {
+          }
+          try {
+            if (typeof navigator !== "undefined" && navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+              navigator.clipboard.writeText(code).catch(() => {
+              });
+              return true;
+            }
+          } catch (_) {
+          }
+          try {
+            if (typeof document !== "undefined" && typeof document.execCommand === "function") {
+              const ta = document.createElement("textarea");
+              ta.value = code;
+              ta.setAttribute("readonly", "readonly");
+              ta.style.position = "fixed";
+              ta.style.opacity = "0";
+              document.body.appendChild(ta);
+              ta.select();
+              const ok = !!document.execCommand("copy");
+              ta.remove();
+              return ok;
+            }
+          } catch (_) {
+          }
+          return false;
         },
         // UI 取消按钮调用; 正在进行的轮询在下一个检查点抛 cancelled
         cancelPolling: () => {
@@ -24755,7 +24819,7 @@ ${systemText}
                                     <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-github-oauth-btn">\u{1F517} \u901A\u8FC7 GitHub \u6388\u6743</button>
                                     <span id="ldb-github-oauth-status" class="ldb-tip" style="flex: 1;"></span>
                                 </div>
-                                <div class="ldb-tip">\u9996\u6B21\u4F7F\u7528\u9700\u5728\u4E0B\u65B9\u586B\u5165 Client ID\uFF08github.com/settings/developers \u521B\u5EFA OAuth App \u5373\u53EF\uFF0C\u516C\u5F00\u4FE1\u606F\u65E0\u9700\u4FDD\u5BC6\uFF1B\u521B\u5EFA\u65F6 Authorization callback URL \u968F\u4FBF\u586B\u4E00\u4E2A https \u5730\u5740\u5373\u53EF\uFF08\u5982 https://smith-106.github.io/LD-Notion/\uFF0CGitHub \u8868\u5355\u8981\u6C42\u975E\u7A7A\uFF0C\u4F46 Device Flow \u4E0D\u8D70\u56DE\u8C03\uFF09\u2014\u2014\u4E0E Notion OAuth \u4E0D\u540C\uFF0C\u65E0\u9700\u767B\u8BB0\u771F\u5B9E\u56DE\u8C03\u5730\u5740\uFF0C\u4E5F\u4E0D\u4F1A\u51FA\u73B0\u53CC\u56DE\u8C03\u7A97\u53E3\uFF09\uFF1B\u6388\u6743\u540E Token \u81EA\u52A8\u586B\u5165\u4E0B\u65B9\u8F93\u5165\u6846\uFF0C\u65E0\u9700\u624B\u52A8\u53BB GitHub \u751F\u6210</div>
+                                <div class="ldb-tip">\u9996\u6B21\u4F7F\u7528\u9700\u5728\u4E0B\u65B9\u586B\u5165 Client ID\uFF08github.com/settings/developers \u521B\u5EFA OAuth App \u5373\u53EF\uFF0C\u516C\u5F00\u4FE1\u606F\u65E0\u9700\u4FDD\u5BC6\uFF1B\u521B\u5EFA\u65F6 Authorization callback URL \u968F\u4FBF\u586B\u4E00\u4E2A https \u5730\u5740\u5373\u53EF\uFF08\u5982 https://smith-106.github.io/LD-Notion/\uFF0CGitHub \u8868\u5355\u8981\u6C42\u975E\u7A7A\uFF0C\u4F46 Device Flow \u4E0D\u8D70\u56DE\u8C03\uFF09\u2014\u2014\u4E0E Notion OAuth \u4E0D\u540C\uFF0C\u65E0\u9700\u767B\u8BB0\u771F\u5B9E\u56DE\u8C03\u5730\u5740\uFF0C\u4E5F\u4E0D\u4F1A\u51FA\u73B0\u53CC\u56DE\u8C03\u7A97\u53E3\uFF09\uFF1B\u70B9\u6388\u6743\u540E\u8BBE\u5907\u7801\u663E\u793A\u5728\u6309\u94AE\u65C1\u5E76\u81EA\u52A8\u590D\u5236\uFF0C\u76F4\u63A5\u53BB GitHub \u9875\u7C98\u8D34\uFF1B\u6388\u6743\u540E Token \u81EA\u52A8\u586B\u5165\u4E0B\u65B9\u8F93\u5165\u6846\uFF0C\u65E0\u9700\u624B\u52A8\u53BB GitHub \u751F\u6210</div>
                             </div>
                             <div class="ldb-input-group">
                                 <label class="ldb-label">GitHub OAuth Client ID\uFF08\u6388\u6743\u7528\uFF0C\u53EF\u9009\uFF09</label>
@@ -29940,20 +30004,25 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             const setStatus = (text) => {
               if (refs.githubOAuthStatus) refs.githubOAuthStatus.textContent = text;
             };
+            let currentUserCode = "";
+            let currentVerificationUri = "";
             try {
               refs.githubOAuthBtn.disabled = true;
               setStatus("\u6B63\u5728\u7533\u8BF7\u8BBE\u5907\u7801\u2026");
               const result = await GitHubOAuth.startDeviceFlow({
                 onUserCode: ({ userCode, verificationUri }) => {
+                  currentUserCode = String(userCode || "");
+                  currentVerificationUri = String(verificationUri || "");
                   try {
-                    window.open(verificationUri, "_blank");
+                    window.open(currentVerificationUri, "_blank");
                   } catch (_) {
                   }
-                  GitHubOAuth.renderUserCodeStatus(refs.githubOAuthStatus, userCode, verificationUri);
+                  GitHubOAuth.renderUserCodeStatus(refs.githubOAuthStatus, currentUserCode, currentVerificationUri);
                 },
                 onStatus: ({ phase }) => {
-                  if (phase === "pending") setStatus("\u7B49\u5F85\u4F60\u5728 GitHub \u9875\u9762\u786E\u8BA4\u6388\u6743\u2026");
-                  else if (phase === "slow_down") setStatus("GitHub \u9650\u6D41\u63D0\u793A\uFF0C\u5DF2\u81EA\u52A8\u964D\u901F\u7EE7\u7EED\u7B49\u5F85\u2026");
+                  if (phase === "pending" || phase === "slow_down") {
+                    GitHubOAuth.renderUserCodeStatus(refs.githubOAuthStatus, currentUserCode, currentVerificationUri, phase);
+                  }
                 }
               });
               await GitHubOAuth.applyTokenResponse(result);

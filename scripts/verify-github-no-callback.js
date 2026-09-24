@@ -38,7 +38,10 @@ const notionAuth = read("src/auth/index.js");
 check("R2: notion double-window fix comment", /双授权窗口修复/.test(notionAuth));
 check("R2: notion shared callback", notionAuth.includes("LD-Notion/oauth-callback"));
 const aiBindings = read("src/ui/events/ai-bindings.js");
-const ghOpenIdx = aiBindings.indexOf("window.open(verificationUri");
+// v3.16.6: onUserCode 内闭包保留设备码, window.open 改用 currentVerificationUri
+const ghOpenIdx = aiBindings.indexOf("window.open(verificationUri") !== -1
+    ? aiBindings.indexOf("window.open(verificationUri")
+    : aiBindings.indexOf("window.open(currentVerificationUri");
 check("R2: github single window.open, no fallback", ghOpenIdx !== -1
     && !/window\.location\.href\s*=\s*authUrl/.test(aiBindings));
 
@@ -56,6 +59,13 @@ check("R3: docs copy", doc.includes("Callback URL 随便填")
 check('R4: renderUserCodeStatus + device whitelist', oauth.indexOf('renderUserCodeStatus') !== -1
     && oauth.indexOf('github.com/login/device') !== -1
     && read('src/ui/events/ai-bindings.js').indexOf('renderUserCodeStatus(refs.githubOAuthStatus') !== -1);
+
+// R5 (v3.16.6): 状态行保留设备码 —— pending/slow_down 经 helper 带码重渲染(不再裸 setStatus 覆盖);
+// 设备码自动复制剪贴板(GM_setClipboard 授权 + copyUserCode 三级降级); onerror 仍保留错误提示。
+check('R5: pending/slow_down keep user code', aiBindings.indexOf('currentUserCode') !== -1
+    && aiBindings.indexOf("phase === 'pending' || phase === 'slow_down'") !== -1);
+check('R5: clipboard grant + helper', buildSrc.indexOf('GM_setClipboard') !== -1
+    && oauth.indexOf('copyUserCode') !== -1);
 
 if (failures.length) { console.log(`RESULT: FAIL (${failures.length})`); process.exit(1); }
 console.log("RESULT: all passed");

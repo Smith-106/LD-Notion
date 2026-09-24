@@ -10,7 +10,7 @@ GitHub adapter 负责读取 Stars、Repos、Forks 和 Gists，并将仓库元信
 
 1. 在 `github.com/settings/developers` 创建一个 OAuth App（**Callback URL 随便填一个 https 地址即可**（如 `https://smith-106.github.io/LD-Notion/`）：GitHub 表单要求非空，但 Device Flow 不发送 `redirect_uri`、不走回调页——与 Notion OAuth 需要登记共享回调不同，也不会出现双回调窗口），复制 **Client ID**——它是公开信息，不含密钥。
 2. 面板「🐙 GitHub 导入」→「GitHub OAuth Client ID」填入该 Client ID。
-3. 点击「🔗 通过 GitHub 授权」，浏览器打开 `https://github.com/login/device` 并显示一次性用户代码，在页面中确认授权。
+3. 点击「🔗 通过 GitHub 授权」，设备码显示在按钮旁（大字高亮、点即全选）并自动复制剪贴板，直接去 `https://github.com/login/device` 粘贴确认；等待期间状态行保留设备码，不会被轮询提示覆盖。
 4. 授权成功后 Token 自动回填到「GitHub Token」输入框，无需再手动生成 PAT。
 
 请求 scope 为 `repo gist`，设备码有效期 15 分钟，超时后重新发起即可。整个流程不使用 Client Secret——纯前端分发脚本内嵌 secret 等同于公开泄漏，Device Flow 只依赖公开的 client_id。

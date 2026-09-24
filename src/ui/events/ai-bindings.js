@@ -93,21 +93,27 @@ const bindAISection = (ctx) => {
                     // textContent 赋值(非 innerHTML 插值): user_code/错误文案均不可信输入
                     if (refs.githubOAuthStatus) refs.githubOAuthStatus.textContent = text;
                 };
+                // v3.16.6: 闭包保留设备码(pending/slow_down 复用, 防状态行覆盖丢码)
+                let currentUserCode = '';
+                let currentVerificationUri = '';
                 try {
                     refs.githubOAuthBtn.disabled = true;
                     setStatus("正在申请设备码…");
                     const result = await GitHubOAuth.startDeviceFlow({
                         onUserCode: ({ userCode, verificationUri }) => {
-                            // v3.16.5: 设备码可点击直达 —— 状态行原为纯文本 span, window.open 被拦截后
-                            // 用户无处可点("看不到设备码/没有页面")。改为 setStatus 写代码 + 挂官方直达链接。
-                            // 安全: user_code 经 textContent 赋值; href 白名单限定
-                            // https://github.com/login/device 前缀, 否则降级纯文本(防重定向劫持)。
-                            try { window.open(verificationUri, '_blank'); } catch (_) { /* 拦截时点下方链接 */ }
-                            GitHubOAuth.renderUserCodeStatus(refs.githubOAuthStatus, userCode, verificationUri);
+                            // v3.16.6: 闭包保留设备码 —— 后续 pending/slow_down 轮询回调
+                            // 不再裸 setStatus 覆盖状态行(v3.16.5 根因: 码显示一闪即被覆盖)。
+                            // 设备码自动复制剪贴板(helper 内静默降级); 用户直接去 GitHub 页粘贴即可。
+                            currentUserCode = String(userCode || '');
+                            currentVerificationUri = String(verificationUri || '');
+                            try { window.open(currentVerificationUri, '_blank'); } catch (_) { /* 拦截时点下方链接 */ }
+                            GitHubOAuth.renderUserCodeStatus(refs.githubOAuthStatus, currentUserCode, currentVerificationUri);
                         },
                         onStatus: ({ phase }) => {
-                            if (phase === "pending") setStatus("等待你在 GitHub 页面确认授权…");
-                            else if (phase === "slow_down") setStatus("GitHub 限流提示，已自动降速继续等待…");
+                            // v3.16.6: 轮询阶段状态行仍保留设备码(带 phase 提示), 不再裸覆盖丢码。
+                            if (phase === 'pending' || phase === 'slow_down') {
+                                GitHubOAuth.renderUserCodeStatus(refs.githubOAuthStatus, currentUserCode, currentVerificationUri, phase);
+                            }
                         },
                     });
                     await GitHubOAuth.applyTokenResponse(result);
