@@ -1,3 +1,11 @@
+## [3.16.4] - 2026-09-24
+
+### fix (GitHub Device Flow @connect 白名单补 github.com)
+
+- **问题**：Device Flow 直连 `github.com/login/device/code` + `/login/oauth/access_token`（主域），旧白名单仅 `api.github.com`（数据接口），Tampermonkey 拦截报 `not part of @connect list`。
+- **修复**：`build.js` 补 `// @connect github.com`；`scripts/build-extension.js` 双 profile 补 `https://github.com/*`；验收脚本新增 R0 断言。background `ALLOWED_HOSTS` 早已含 `github.com`，不动。
+- **验证**：`verify:github-no-callback` 9 项通过；vitest 全量 111 文件/1858 用例全绿；`verify:build`/`verify:delivery` 全链通过。
+
 ## [3.16.3] - 2026-09-24
 
 ### docs (GitHub OAuth Callback URL 随便填修正)

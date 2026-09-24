@@ -13,7 +13,7 @@ const path = require("path");
 const USERSCRIPT_HEADER = `// ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.16.3
+// @version      3.16.4
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -58,6 +58,10 @@ const USERSCRIPT_HEADER = `// ==UserScript==
 // @connect      api.anthropic.com
 // @connect      generativelanguage.googleapis.com
 // @connect      api.github.com
+// @connect      github.com
+// v3.16.4: GitHub OAuth Device Flow 需直连 github.com/login/device/code 与
+// /login/oauth/access_token —— GM_xmlhttpRequest 受 @connect 白名单约束,
+// 缺此行时授权报 "not part of @connect list"(api.github.com 仅覆盖数据接口)。
 // @connect      zhihu.com
 // @connect      zhuanlan.zhihu.com
 // v3.14.6 (AUD-ARCH-13): Obsidian 本地导出需 127.0.0.1/localhost —— 缺白名单时

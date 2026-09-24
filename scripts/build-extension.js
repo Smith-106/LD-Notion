@@ -84,6 +84,9 @@ const MANIFEST_PROFILE_PRESETS = Object.freeze({
             "https://api.anthropic.com/*",
             "https://generativelanguage.googleapis.com/*",
             "https://api.github.com/*",
+            // v3.16.4: GitHub OAuth Device Flow 直连 github.com(/login/device/code + /login/oauth/access_token)
+            // MV3 SW fetch 无授权会失败, 与 userscript @connect github.com 对称。
+            "https://github.com/*",
             // Obsidian Local REST API(全盘审计修复): background 白名单允许 localhost/127.0.0.1
             // 但 manifest 缺 host_permissions → MV3 SW fetch 无授权, Obsidian 导出失败
             "http://127.0.0.1/*",
@@ -102,6 +105,8 @@ const MANIFEST_PROFILE_PRESETS = Object.freeze({
             "https://api.anthropic.com/*",
             "https://generativelanguage.googleapis.com/*",
             "https://api.github.com/*",
+            // v3.16.4: Device Flow 直连 github.com(见 default profile 同注释)。
+            "https://github.com/*",
             "http://127.0.0.1/*",
             "https://127.0.0.1/*",
             "http://localhost/*",

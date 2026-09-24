@@ -25,6 +25,14 @@ check("R1: device flow params", /client_id: clientId/.test(oauth)
     && /dc\.device_code/.test(oauth) && /dc\.user_code/.test(oauth)
     && /grant-type:device_code/.test(oauth));
 
+// R0 (v3.16.4): @connect / host_permissions 必须覆盖 github.com(Device Flow 直连
+// github.com/login/device/code + /login/oauth/access_token; 仅 api.github.com 时
+// GM_xmlhttpRequest 报 "not part of @connect list")。
+const buildSrc = read("build.js");
+check("R0: userscript @connect github.com", /^\/\/ @connect\s+github\.com$/m.test(buildSrc));
+const extSrc = read("scripts/build-extension.js");
+check("R0: extension host_permissions github.com", /"https:\/\/github\.com\/\*"/.test(extSrc));
+
 // R2
 const notionAuth = read("src/auth/index.js");
 check("R2: notion double-window fix comment", /双授权窗口修复/.test(notionAuth));
