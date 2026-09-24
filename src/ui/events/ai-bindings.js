@@ -98,8 +98,12 @@ const bindAISection = (ctx) => {
                     setStatus("正在申请设备码…");
                     const result = await GitHubOAuth.startDeviceFlow({
                         onUserCode: ({ userCode, verificationUri }) => {
-                            try { window.open(verificationUri, "_blank"); } catch (_) { /* 弹窗拦截时用户手动打开 */ }
-                            setStatus(`请在已打开的 GitHub 页面输入代码: ${userCode}`);
+                            // v3.16.5: 设备码可点击直达 —— 状态行原为纯文本 span, window.open 被拦截后
+                            // 用户无处可点("看不到设备码/没有页面")。改为 setStatus 写代码 + 挂官方直达链接。
+                            // 安全: user_code 经 textContent 赋值; href 白名单限定
+                            // https://github.com/login/device 前缀, 否则降级纯文本(防重定向劫持)。
+                            try { window.open(verificationUri, '_blank'); } catch (_) { /* 拦截时点下方链接 */ }
+                            GitHubOAuth.renderUserCodeStatus(refs.githubOAuthStatus, userCode, verificationUri);
                         },
                         onStatus: ({ phase }) => {
                             if (phase === "pending") setStatus("等待你在 GitHub 页面确认授权…");

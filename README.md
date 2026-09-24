@@ -6,7 +6,7 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![文档站](https://img.shields.io/badge/文档站-GitHub%20Pages-6f42c1?style=for-the-badge&logo=githubpages)](https://smith-106.github.io/LD-Notion/) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前仓库源码版本：`v3.16.4`
+- 当前仓库源码版本：`v3.16.5`
 - 最新 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/latest>
 - 文档站：<https://smith-106.github.io/LD-Notion/>
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
@@ -394,6 +394,11 @@ A: 请检查：
 - 四级权限模型 + `OperationGuard` 统一保护用户触发与 AI 触发的写入入口；危险操作额外确认，撤销窗口只覆盖危险操作
 
 ## 更新日志
+
+### v3.16.5
+
+- **设备码可点击直达**：`window.open` 被拦截时用户"看不到设备码/没有页面"。新增 `GitHubOAuth.renderUserCodeStatus`——状态行写代码（textContent 防注入）+ 挂 GitHub 官方直达链接（href 白名单限定 `github.com/login/device` 前缀，非官方域降级纯文本防劫持）；`ai-bindings.js` 的 `onUserCode` 改调该 helper。单测 +4 项（正常渲染/注入纯文本/劫持降级/无元素）。验收脚本新增 R4 断言。
+- **验证**：`verify:github-no-callback` 10 项通过；`github-oauth-device-flow` 11 项通过；vitest 全量 111 文件/1862 用例全绿；`verify:build`/`verify:delivery` 全链通过。
 
 ### v3.16.4
 

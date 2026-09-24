@@ -1,6 +1,6 @@
 "use strict";
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 // 20260914: GitHub OAuth Device Flow 单测。
 // 约定: 跨模块 stub 用 require()(ESM import 命名空间不落 CJS 模块内);
@@ -167,4 +167,68 @@ describe("GitHubOAuth device flow — expires_in 死线绑定(回归)", () => {
         ).rejects.toMatchObject({ code: "expired_token" });
         expect(Date.now() - startedAt).toBeLessThan(5000);
     });
+
+// 20260924 v3.16.5: 设备码状态行渲染 —— user_code 不可信输入 textContent 防注入;
+// href 白名单限定 github.com/login/device 前缀, 劫持降级纯文本。
+describe('GitHubOAuth renderUserCodeStatus', () => {
+    const makeEl = () => {
+        const el = {
+            textContent: '',
+            children: [],
+            style: {},
+            appendChild(child) { this.children.push(child); return child; },
+        };
+        return el;
+    };
+    const fakeDoc = () => {
+        const saved = globalThis.document;
+        const created = [];
+        globalThis.document = {
+            createElement: (tag) => {
+                const el = { tag, href: '', target: '', rel: '', textContent: '', style: {} };
+                created.push(el);
+                return el;
+            },
+            createTextNode: (t) => ({ text: t }),
+        };
+        return { saved, created };
+    };
+    it('正常渲染: 代码文本 + 官方直达链接', async () => {
+        const { saved, created } = fakeDoc();
+        try {
+            const el = makeEl();
+            const ret = GitHubOAuth.renderUserCodeStatus(el, 'ABCD-1234', 'https://github.com/login/device');
+            expect(el.textContent).toContain('ABCD-1234');
+            expect(ret).toBe('link');
+            expect(created.length).toBe(1);
+            expect(created[0].href).toBe('https://github.com/login/device');
+            expect(created[0].target).toBe('_blank');
+        } finally { globalThis.document = saved; }
+    });
+
+    it('恶意 user_code 不执行 HTML(纯文本赋值)', async () => {
+        const { saved } = fakeDoc();
+        try {
+            const el = makeEl();
+            GitHubOAuth.renderUserCodeStatus(el, '<img src=x onerror=alert(1)>', 'https://github.com/login/device');
+            expect(el.textContent).toContain('<img src=x onerror=alert(1)>');
+            expect(el.children.length).toBe(2); // 仅空格文本 + 链接, 无注入节点
+        } finally { globalThis.document = saved; }
+    });
+
+    it('verification_uri 非官方域时降级纯文本(防劫持)', async () => {
+        const { saved, created } = fakeDoc();
+        try {
+            const el = makeEl();
+            const ret = GitHubOAuth.renderUserCodeStatus(el, 'ABCD-1234', 'https://evil.example.com/login/device');
+            expect(ret).toBe('text-only');
+            expect(created.length).toBe(0);
+            expect(el.textContent).toContain('ABCD-1234');
+        } finally { globalThis.document = saved; }
+    });
+
+    it('无状态行元素时返回 no-el 不抛错', async () => {
+        expect(GitHubOAuth.renderUserCodeStatus(null, 'ABCD-1234', 'https://github.com/login/device')).toBe('no-el');
+    });
+});
 });

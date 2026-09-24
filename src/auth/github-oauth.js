@@ -173,6 +173,33 @@ const GitHubOAuth = {
         return result.accessToken;
     },
 
+    // v3.16.5: 设备码状态行渲染 —— user_code 来自 GitHub 接口(不可信输入),
+    // textContent 赋值防注入; href 白名单限定 https://github.com/login/device 前缀,
+    // 否则降级纯文本(防 verification_uri 被劫持为钓鱼地址)。
+    // 返回 'link' | 'text-only' | 'no-el', 供单测断言。
+    renderUserCodeStatus: (statusEl, userCode, verificationUri) => {
+        const code = String(userCode || '');
+        if (!statusEl) return 'no-el';
+        try {
+            statusEl.textContent = '请在已打开的 GitHub 页面输入代码: ' + code;
+        } catch (_) { return 'no-el'; }
+        const safeUrl = String(verificationUri || '');
+        if (!safeUrl.startsWith('https://github.com/login/device')) return 'text-only';
+        try {
+            const doc = (typeof document !== 'undefined') ? document : null;
+            if (!doc || typeof doc.createElement !== 'function') return 'text-only';
+            const link = doc.createElement('a');
+            link.href = safeUrl;
+            link.target = '_blank';
+            link.rel = 'noopener';
+            link.textContent = '👉 打不开？点我手动打开授权页';
+            link.style.marginLeft = '8px';
+            statusEl.appendChild(doc.createTextNode(' '));
+            statusEl.appendChild(link);
+        } catch (_) { return 'text-only'; }
+        return 'link';
+    },
+
     // UI 取消按钮调用; 正在进行的轮询在下一个检查点抛 cancelled
     cancelPolling: () => {
         GitHubOAuth._pollCancelled = true;

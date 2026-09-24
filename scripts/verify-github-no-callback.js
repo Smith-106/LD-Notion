@@ -50,5 +50,11 @@ const doc = read("docs/integrations/github.md");
 check("R3: docs copy", doc.includes("Callback URL 随便填")
     && /不发送 `redirect_uri`/.test(doc));
 
+
+ // R4 (v3.16.5): 设备码可点击直达 —— renderUserCodeStatus 存在 + href 白名单限定 device 前缀
+check('R4: renderUserCodeStatus + device whitelist', oauth.indexOf('renderUserCodeStatus') !== -1
+    && oauth.indexOf('github.com/login/device') !== -1
+    && read('src/ui/events/ai-bindings.js').indexOf('renderUserCodeStatus(refs.githubOAuthStatus') !== -1);
+
 if (failures.length) { console.log(`RESULT: FAIL (${failures.length})`); process.exit(1); }
 console.log("RESULT: all passed");

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.16.4
+// @version      3.16.5
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -85,7 +85,7 @@
       "use strict";
       var CONFIG2 = {
         // Keep in sync with package.json + userscript @version + build.js header.
-        SCRIPT_VERSION: "3.16.4",
+        SCRIPT_VERSION: "3.16.5",
         // 编译期 feature flag: 多端同步。默认关闭——off 时 main.js 不初始化同步引擎、
         // 零网络/零定时器/零 DOM,行为与关闭前字节级一致(F-SYNC-11)。
         MULTI_DEVICE_SYNC_ENABLED: false,
@@ -2242,6 +2242,36 @@
           if (!(result == null ? void 0 : result.accessToken)) throw new Error("GitHub OAuth \u672A\u8FD4\u56DE access_token");
           Storage2.set(CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, result.accessToken);
           return result.accessToken;
+        },
+        // v3.16.5: 设备码状态行渲染 —— user_code 来自 GitHub 接口(不可信输入),
+        // textContent 赋值防注入; href 白名单限定 https://github.com/login/device 前缀,
+        // 否则降级纯文本(防 verification_uri 被劫持为钓鱼地址)。
+        // 返回 'link' | 'text-only' | 'no-el', 供单测断言。
+        renderUserCodeStatus: (statusEl, userCode, verificationUri) => {
+          const code = String(userCode || "");
+          if (!statusEl) return "no-el";
+          try {
+            statusEl.textContent = "\u8BF7\u5728\u5DF2\u6253\u5F00\u7684 GitHub \u9875\u9762\u8F93\u5165\u4EE3\u7801: " + code;
+          } catch (_) {
+            return "no-el";
+          }
+          const safeUrl = String(verificationUri || "");
+          if (!safeUrl.startsWith("https://github.com/login/device")) return "text-only";
+          try {
+            const doc = typeof document !== "undefined" ? document : null;
+            if (!doc || typeof doc.createElement !== "function") return "text-only";
+            const link = doc.createElement("a");
+            link.href = safeUrl;
+            link.target = "_blank";
+            link.rel = "noopener";
+            link.textContent = "\u{1F449} \u6253\u4E0D\u5F00\uFF1F\u70B9\u6211\u624B\u52A8\u6253\u5F00\u6388\u6743\u9875";
+            link.style.marginLeft = "8px";
+            statusEl.appendChild(doc.createTextNode(" "));
+            statusEl.appendChild(link);
+          } catch (_) {
+            return "text-only";
+          }
+          return "link";
         },
         // UI 取消按钮调用; 正在进行的轮询在下一个检查点抛 cancelled
         cancelPolling: () => {
@@ -29919,7 +29949,7 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
                     window.open(verificationUri, "_blank");
                   } catch (_) {
                   }
-                  setStatus(`\u8BF7\u5728\u5DF2\u6253\u5F00\u7684 GitHub \u9875\u9762\u8F93\u5165\u4EE3\u7801: ${userCode}`);
+                  GitHubOAuth.renderUserCodeStatus(refs.githubOAuthStatus, userCode, verificationUri);
                 },
                 onStatus: ({ phase }) => {
                   if (phase === "pending") setStatus("\u7B49\u5F85\u4F60\u5728 GitHub \u9875\u9762\u786E\u8BA4\u6388\u6743\u2026");

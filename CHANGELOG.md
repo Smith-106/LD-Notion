@@ -1,3 +1,11 @@
+## [3.16.5] - 2026-09-24
+
+### fix (设备码可点击直达)
+
+- **问题**：`window.open` 被拦截时用户看不到设备码、没有授权页面入口。
+- **修复**：新增 `GitHubOAuth.renderUserCodeStatus`（`src/auth/github-oauth.js`）——代码 textContent 赋值 + 官方直达链接（href 白名单 `github.com/login/device` 前缀）；`ai-bindings.js` 改调 helper；单测 +4 项；验收脚本新增 R4。
+- **验证**：`verify:github-no-callback` 10 项通过；vitest 全量 111 文件/1862 用例全绿；`verify:build`/`verify:delivery` 全链通过。
+
 ## [3.16.4] - 2026-09-24
 
 ### fix (GitHub Device Flow @connect 白名单补 github.com)
