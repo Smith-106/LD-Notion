@@ -696,7 +696,7 @@ function renderPanel(personaName) {
                                     <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-github-oauth-btn">🔗 通过 GitHub 授权</button>
                                     <span id="ldb-github-oauth-status" class="ldb-tip" style="flex: 1;"></span>
                                 </div>
-                                <div class="ldb-tip">首次使用需在下方填入 Client ID（github.com/settings/developers 创建 OAuth App 即可，公开信息无需保密）；授权后 Token 自动填入下方输入框，无需手动去 GitHub 生成</div>
+                                <div class="ldb-tip">首次使用需在下方填入 Client ID（github.com/settings/developers 创建 OAuth App 即可，公开信息无需保密；创建时无需填写 Authorization callback URL，Device Flow 不走回调——与 Notion OAuth 不同，无需登记回调地址，也不会出现双回调窗口）；授权后 Token 自动填入下方输入框，无需手动去 GitHub 生成</div>
                             </div>
                             <div class="ldb-input-group">
                                 <label class="ldb-label">GitHub OAuth Client ID（授权用，可选）</label>

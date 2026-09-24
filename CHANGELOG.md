@@ -1,3 +1,11 @@
+## [3.16.2] - 2026-09-24
+
+### docs (GitHub OAuth 无需回调地址答疑)
+
+- **结论**：GitHub Device Flow 全程不发送 `redirect_uri`（源码 `src/auth/github-oauth.js` 全文件零 redirect 出现：device_code 申请 + user_code 展示 + 轮询换 token 三步），创建 OAuth App 时无需填写 Authorization callback URL；与 Notion OAuth（Authorization Code + 共享回调 `oauth-callback`）不同，不会出现双回调窗口（Notion 双窗口根因为 `window.open` 返回 null 误判再开一窗，v3.14.0 已修 `src/auth/index.js:850`）。
+- **改动**：面板提示文案（`src/ui/panel-template.js`，静态字面量）+ `docs/integrations/github.md` 第 1 步同步说明。
+- **验证**：`github-oauth-device-flow` 7 项通过；vitest 全量 111 文件/1858 用例 + legacy 三件套全绿；`verify:build`/`verify:delivery` 全链通过。
+
 ## [3.16.1] - 2026-09-24
 
 ### fix (对齐后「已加载/待导出」计数同步更新)
