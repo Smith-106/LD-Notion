@@ -52,6 +52,7 @@ check("R3: docs copy", doc.includes("Callback URL 随便填")
 
 
  // R4 (v3.16.5): 设备码可点击直达 —— renderUserCodeStatus 存在 + href 白名单限定 device 前缀
+// + ai-bindings onUserCode 经 helper 渲染(单测 events-deep 覆盖状态行显示设备码)。
 check('R4: renderUserCodeStatus + device whitelist', oauth.indexOf('renderUserCodeStatus') !== -1
     && oauth.indexOf('github.com/login/device') !== -1
     && read('src/ui/events/ai-bindings.js').indexOf('renderUserCodeStatus(refs.githubOAuthStatus') !== -1);

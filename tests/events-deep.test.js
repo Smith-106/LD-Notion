@@ -54,6 +54,38 @@ describe("深度: events/ai-bindings bindAISection", () => {
         expect(UI.updateAIModelOptions).toHaveBeenCalled();
     });
 
+    it("githubOAuthBtn.onclick → onUserCode 时状态行显示设备码 + 直达链接", async () => {
+        // 回归: 用户反馈"收不到设备码/没有页面" —— 状态行必须同屏显示 user_code，
+        // 且 window.open 被拦截时仍有可点击的官方直达链接。
+        const refs = makeRefs();
+        refs.githubOauthClientIdInput.value = "Ov23.test";
+        // 状态行 stub 需支持 appendChild 挂链接
+        const appended = [];
+        refs.githubOAuthStatus.appendChild = (n) => { appended.push(n); return n; };
+        bindAISection(ctx(refs));
+        const { GitHubOAuth } = require("../src/auth/github-oauth");
+        const flowSpy = vi.spyOn(GitHubOAuth, "startDeviceFlow").mockImplementation(async (opts = {}) => {
+            opts.onUserCode?.({ userCode: "ABCD-1234", verificationUri: "https://github.com/login/device" });
+            return { accessToken: "gho_x", tokenType: "bearer", scope: "repo gist" };
+        });
+        const applySpy = vi.spyOn(GitHubOAuth, "applyTokenResponse").mockResolvedValue("gho_x");
+        // onUserCode 回调内同步断言(授权成功后状态行会被成功文案覆盖)
+        let seenCode = "";
+        const origRender = GitHubOAuth.renderUserCodeStatus;
+        const renderSpy = vi.spyOn(GitHubOAuth, "renderUserCodeStatus").mockImplementation((el, code, uri) => {
+            seenCode = String(code || "");
+            return origRender(el, code, uri);
+        });
+        await refs.githubOAuthBtn.onclick();
+        expect(flowSpy).toHaveBeenCalled();
+        expect(seenCode).toBe("ABCD-1234");
+        expect(renderSpy).toHaveBeenCalled();
+        expect(appended.length).toBeGreaterThan(0);
+        expect(refs.githubOAuthStatus.textContent).toBe("✅ GitHub 授权成功，Token 已自动填入");
+        expect(applySpy).toHaveBeenCalled();
+        expect(refs.githubOAuthBtn.disabled).toBe(false);
+    });
+
     it("aiApiKeyInput.onchange → persistSensitiveInput 被调", async () => {
         const refs = makeRefs();
         const persist = vi.fn().mockResolvedValue(undefined);
