@@ -6,7 +6,7 @@
 //       且 Device Flow 三步参数齐备(client_id/device_code/user_code/grant_type device_code);
 //   R2: Notion 双窗口修复注释存在(src/auth/index.js)+ 共享回调 oauth-callback 存在,
 //       GitHub 侧仅单次 window.open(verificationUri) 且无 location 跳转 fallback;
-//   R3: 面板答疑文案(src/ui/panel-template.js)+ 文档说明(docs/integrations/github.md)均包含"无需填写"回调表述。
+//   R3: 面板答疑文案(src/ui/panel-template.js)+ 文档说明(docs/integrations/github.md)均包含"随便填"回调表述。
 const fs = require("fs");
 const path = require("path");
 
@@ -36,10 +36,10 @@ check("R2: github single window.open, no fallback", ghOpenIdx !== -1
 
 // R3
 const panel = read("src/ui/panel-template.js");
-check("R3: panel copy", panel.includes("无需填写 Authorization callback URL")
+check("R3: panel copy", panel.includes("随便填一个 https 地址")
     && panel.includes("不会出现双回调窗口"));
 const doc = read("docs/integrations/github.md");
-check("R3: docs copy", doc.includes("无需填写 Callback URL")
+check("R3: docs copy", doc.includes("Callback URL 随便填")
     && /不发送 `redirect_uri`/.test(doc));
 
 if (failures.length) { console.log(`RESULT: FAIL (${failures.length})`); process.exit(1); }

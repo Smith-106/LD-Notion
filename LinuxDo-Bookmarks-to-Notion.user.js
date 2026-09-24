@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.16.2
+// @version      3.16.3
 // @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
@@ -81,7 +81,7 @@
       "use strict";
       var CONFIG2 = {
         // Keep in sync with package.json + userscript @version + build.js header.
-        SCRIPT_VERSION: "3.16.2",
+        SCRIPT_VERSION: "3.16.3",
         // 编译期 feature flag: 多端同步。默认关闭——off 时 main.js 不初始化同步引擎、
         // 零网络/零定时器/零 DOM,行为与关闭前字节级一致(F-SYNC-11)。
         MULTI_DEVICE_SYNC_ENABLED: false,
@@ -2160,7 +2160,7 @@
         startDeviceFlow: async (options = {}) => {
           const clientId = String(options.clientId || GitHubOAuth.getClientId()).trim();
           if (!clientId) {
-            const error = new Error("\u7F3A\u5C11 GitHub OAuth Client ID \u2014\u2014 \u524D\u5F80 github.com/settings/developers \u521B\u5EFA OAuth App\uFF08\u65E0\u9700\u586B Callback URL\uFF09\uFF0C\u628A Client ID \u7C98\u8D34\u5230\u4E0B\u65B9\u8F93\u5165\u6846");
+            const error = new Error("\u7F3A\u5C11 GitHub OAuth Client ID \u2014\u2014 \u524D\u5F80 github.com/settings/developers \u521B\u5EFA OAuth App\uFF08Callback URL \u968F\u4FBF\u586B\u4E00\u4E2A https \u5730\u5740\u5373\u53EF\uFF0C\u5982 https://smith-106.github.io/LD-Notion/\uFF0CDevice Flow \u4E0D\u7528\u5B83\uFF09\uFF0C\u628A Client ID \u7C98\u8D34\u5230\u4E0B\u65B9\u8F93\u5165\u6846");
             error.code = "missing_client_id";
             throw error;
           }
@@ -24721,7 +24721,7 @@ ${systemText}
                                     <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-github-oauth-btn">\u{1F517} \u901A\u8FC7 GitHub \u6388\u6743</button>
                                     <span id="ldb-github-oauth-status" class="ldb-tip" style="flex: 1;"></span>
                                 </div>
-                                <div class="ldb-tip">\u9996\u6B21\u4F7F\u7528\u9700\u5728\u4E0B\u65B9\u586B\u5165 Client ID\uFF08github.com/settings/developers \u521B\u5EFA OAuth App \u5373\u53EF\uFF0C\u516C\u5F00\u4FE1\u606F\u65E0\u9700\u4FDD\u5BC6\uFF1B\u521B\u5EFA\u65F6\u65E0\u9700\u586B\u5199 Authorization callback URL\uFF0CDevice Flow \u4E0D\u8D70\u56DE\u8C03\u2014\u2014\u4E0E Notion OAuth \u4E0D\u540C\uFF0C\u65E0\u9700\u767B\u8BB0\u56DE\u8C03\u5730\u5740\uFF0C\u4E5F\u4E0D\u4F1A\u51FA\u73B0\u53CC\u56DE\u8C03\u7A97\u53E3\uFF09\uFF1B\u6388\u6743\u540E Token \u81EA\u52A8\u586B\u5165\u4E0B\u65B9\u8F93\u5165\u6846\uFF0C\u65E0\u9700\u624B\u52A8\u53BB GitHub \u751F\u6210</div>
+                                <div class="ldb-tip">\u9996\u6B21\u4F7F\u7528\u9700\u5728\u4E0B\u65B9\u586B\u5165 Client ID\uFF08github.com/settings/developers \u521B\u5EFA OAuth App \u5373\u53EF\uFF0C\u516C\u5F00\u4FE1\u606F\u65E0\u9700\u4FDD\u5BC6\uFF1B\u521B\u5EFA\u65F6 Authorization callback URL \u968F\u4FBF\u586B\u4E00\u4E2A https \u5730\u5740\u5373\u53EF\uFF08\u5982 https://smith-106.github.io/LD-Notion/\uFF0CGitHub \u8868\u5355\u8981\u6C42\u975E\u7A7A\uFF0C\u4F46 Device Flow \u4E0D\u8D70\u56DE\u8C03\uFF09\u2014\u2014\u4E0E Notion OAuth \u4E0D\u540C\uFF0C\u65E0\u9700\u767B\u8BB0\u771F\u5B9E\u56DE\u8C03\u5730\u5740\uFF0C\u4E5F\u4E0D\u4F1A\u51FA\u73B0\u53CC\u56DE\u8C03\u7A97\u53E3\uFF09\uFF1B\u6388\u6743\u540E Token \u81EA\u52A8\u586B\u5165\u4E0B\u65B9\u8F93\u5165\u6846\uFF0C\u65E0\u9700\u624B\u52A8\u53BB GitHub \u751F\u6210</div>
                             </div>
                             <div class="ldb-input-group">
                                 <label class="ldb-label">GitHub OAuth Client ID\uFF08\u6388\u6743\u7528\uFF0C\u53EF\u9009\uFF09</label>

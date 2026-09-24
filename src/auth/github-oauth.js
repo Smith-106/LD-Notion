@@ -84,7 +84,7 @@ const GitHubOAuth = {
     startDeviceFlow: async (options = {}) => {
         const clientId = String(options.clientId || GitHubOAuth.getClientId()).trim();
         if (!clientId) {
-            const error = new Error("缺少 GitHub OAuth Client ID —— 前往 github.com/settings/developers 创建 OAuth App（无需填 Callback URL），把 Client ID 粘贴到下方输入框");
+            const error = new Error("缺少 GitHub OAuth Client ID —— 前往 github.com/settings/developers 创建 OAuth App（Callback URL 随便填一个 https 地址即可，如 https://smith-106.github.io/LD-Notion/，Device Flow 不用它），把 Client ID 粘贴到下方输入框");
             error.code = "missing_client_id";
             throw error;
         }

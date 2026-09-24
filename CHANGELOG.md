@@ -1,3 +1,11 @@
+## [3.16.3] - 2026-09-24
+
+### docs (GitHub OAuth Callback URL 随便填修正)
+
+- **修正**：GitHub 表单要求 Callback URL 非空——随便填一个 https 地址即可（如 `https://smith-106.github.io/LD-Notion/`），Device Flow 全程不发送 `redirect_uri`、不用它；与 Notion OAuth（需登记真实共享回调 `oauth-callback`）不同，不会出现双回调窗口。修正 v3.16.2「无需填写」的错误说法。
+- **改动**：`src/auth/github-oauth.js` 缺 Client ID 错误文案 + `src/ui/panel-template.js` 面板提示 + `docs/integrations/github.md` + README + `scripts/verify-github-no-callback.js` R3 断言。
+- **验证**：`verify:github-no-callback` 7 项通过；vitest 全量 111 文件/1858 用例全绿；`verify:build` 全链通过。
+
 ## [3.16.2] - 2026-09-24
 
 ### docs (GitHub OAuth 无需回调地址答疑)

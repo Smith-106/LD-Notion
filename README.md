@@ -6,7 +6,7 @@
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![文档站](https://img.shields.io/badge/文档站-GitHub%20Pages-6f42c1?style=for-the-badge&logo=githubpages)](https://smith-106.github.io/LD-Notion/) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前仓库源码版本：`v3.16.2`
+- 当前仓库源码版本：`v3.16.3`
 - 最新 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/latest>
 - 文档站：<https://smith-106.github.io/LD-Notion/>
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
@@ -304,7 +304,7 @@ https://www.notion.so/xxx/32位数据库ID?v=xxx
 
 1. 在设置面板中填写 GitHub 用户名
 2. 授权（二选一）：
-   - 推荐：「🔗 通过 GitHub 授权」OAuth Device Flow——先在面板填入公开的 OAuth App Client ID（github.com/settings/developers 创建，无需 Callback URL），点击授权后在 GitHub 页面输入一次性代码，Token 自动回填，不必手动创建 PAT
+   - 推荐：「🔗 通过 GitHub 授权」OAuth Device Flow——先在面板填入公开的 OAuth App Client ID（github.com/settings/developers 创建，Callback URL 随便填一个 https 地址即可，Device Flow 不用它），点击授权后在 GitHub 页面输入一次性代码，Token 自动回填，不必手动创建 PAT
    - 兜底：手动粘贴 GitHub Token（提高速率限制到 5000 次/小时）
 3. 勾选需要导入的类型（Stars / Repos / Forks / Gists）
 4. 在 AI 对话中输入「导入 GitHub 收藏」或点击快捷按钮 🐙 GitHub
@@ -394,6 +394,11 @@ A: 请检查：
 - 四级权限模型 + `OperationGuard` 统一保护用户触发与 AI 触发的写入入口；危险操作额外确认，撤销窗口只覆盖危险操作
 
 ## 更新日志
+
+### v3.16.3
+
+- **GitHub OAuth 答疑修正（Callback URL 随便填）**：GitHub 表单要求 Callback URL 非空，但 Device Flow 全程不发送 `redirect_uri`、不用它——随便填一个 https 地址即可（如 `https://smith-106.github.io/LD-Notion/`）；与 Notion OAuth（需登记真实共享回调）不同，不会出现双回调窗口。修正此前「无需填写」的错误说法，同步面板提示 / 错误文案 / 文档 / README。
+- **验证**：`verify:github-no-callback` 7 项通过；`github-oauth-device-flow` 7 项通过；vitest 全量 111 文件/1858 用例全绿；`verify:build` 全链通过。
 
 ### v3.16.2
 
