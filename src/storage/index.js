@@ -75,7 +75,7 @@ const Storage = {
                 Storage._exportedTopicsCache = null;
             });
             // 派生键族(每个 sourceType 一个桶)同样监听,迁移/清除跨 tab 生效
-            for (const sourceType of ["linuxdo", "bookmark", "github-stars", "github-repos", "github-forks", "github-gists", "zhihu", "generic"]) {
+            for (const sourceType of ["linuxdo", "bookmark", "zhihu", "generic"]) {
                 GM_addValueChangeListener(
                     `${CONFIG.STORAGE_KEYS.EXPORTED_TOPICS}:${sourceType}`,
                     () => { Storage._exportedTopicsCache = null; }
@@ -197,6 +197,8 @@ const SyncState = {
     getLinuxDoState: () => SyncStateV2.getSourceState("linuxdo"),
     updateLinuxDoState: (patch) => SyncStateV2.updateSourceState("linuxdo", patch),
 
+    // v3.17 GitHub 收藏源已移除: 仅保留兼容壳供旧测试/旧数据静默降级(通用 get/set 透传,
+    // 不再有预置 github-* 源, _load 会剪枝存量; 同步白名单亦不再含 github-*, 不会参与多端同步)
     getGitHubState: (type) => SyncStateV2.getSourceState(`github-${type}`),
     updateGitHubState: (type, patch) => SyncStateV2.updateSourceState(`github-${type}`, patch),
     getGitHubMeta: () => SyncStateV2.getSourceState("github-meta"),

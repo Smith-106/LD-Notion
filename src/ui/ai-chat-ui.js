@@ -17,15 +17,14 @@ const AIAssistant = () => AI().AIAssistant;
 const AIClassifier = () => AI().AIClassifier;
 
 const AI_WELCOME_ENTRY_POINTS = Object.freeze({
-    subtitle: "稳定支持：数据库 / 页面检索、跨源搜索、批量分类、GitHub / 书签导入、页面摘要；更多能力看「帮助」",
-    inputPlaceholder: "输入指令，如「列出所有数据库」或「导入GitHub收藏」...",
+    subtitle: "稳定支持：数据库 / 页面检索、跨源搜索、批量分类、书签导入、页面摘要；更多能力看「帮助」",
+    inputPlaceholder: "输入指令，如「列出所有数据库」或「导入浏览器书签」...",
     chips: Object.freeze([
         { command: "帮助", label: "💡 帮助" },
         { command: "列出所有数据库", label: "🗂️ 数据库" },
         { command: "在工作区搜索所有页面", label: "📄 页面" },
         { command: "跨源搜索最近收藏的帖子", label: "🔍 跨源搜索" },
         { command: "自动分类所有未分类的帖子", label: "🏷️ 分类" },
-        { command: "导入GitHub收藏", label: "🐙 GitHub" },
         { command: "导入浏览器书签", label: "📖 书签" }
     ]),
 });

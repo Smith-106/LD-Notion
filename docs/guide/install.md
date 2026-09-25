@@ -11,7 +11,6 @@
 3. 打开以下页面之一验证入口：
    - `https://linux.do/u/你的用户名/activity/bookmarks`
    - `https://www.notion.so/`
-   - `https://github.com/`
 4. 如需读取浏览器书签，继续安装 `chrome-extension-full/` 桥接扩展。
 
 ### 书签桥接扩展
@@ -57,7 +56,6 @@ npm run build:extension
 | --- | --- | --- |
 | Linux.do 导出 | 支持 | 支持 |
 | Notion 站点 AI 面板 | 支持 | 支持 |
-| GitHub 导入 | 支持 | 支持 |
 | 浏览器书签导入 | 需要桥接扩展 | 内置 |
 | 更新方式 | Tampermonkey 更新通道 | ZIP / 解压目录手动更新 |
 | 扩展 Popup | 无 | 有 |
@@ -66,6 +64,5 @@ npm run build:extension
 
 - Linux.do 页面出现侧边工具面板。
 - Notion 页面右下角出现 AI 浮动按钮。
-- GitHub 页面可进入来源分区并加载内容。
 - 通用网页右下角出现剪藏按钮。
 - 书签导入入口能识别桥接扩展或独立扩展能力。

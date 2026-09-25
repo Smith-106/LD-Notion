@@ -22,7 +22,7 @@ OperationGuard 不替代 Notion 权限，也不绕过 Integration 的连接范�
 
 默认使用标准权限。只读权限适合初次体验；高级和管理员权限应短期开启，用完后降回标准或只读。
 
-> v3.14.7：Obsidian 写笔记/写图片（`obsidian.writeNote`、`obsidian.writeImage`）已登记 `OPERATION_LEVELS` level=1；所有写入统一经 OperationGuard 闸门（`canExecute` + `auditDenied`），禁止裸调绕过（含 UI、GitHub 自动导入与站点面板）。
+> v3.14.7：Obsidian 写笔记/写图片（`obsidian.writeNote`、`obsidian.writeImage`）已登记 `OPERATION_LEVELS` level=1；所有写入统一经 OperationGuard 闸门（`canExecute` + `auditDenied`），禁止裸调绕过（含 UI、自动导入与站点面板）。
 >
 > v3.16.0：发布当前页到 linux.do（`linuxdo.publish`）登记 level=1，经 `OperationGuard.execute` 闸门（前置权限检查 + 用户二次确认 + 审计事件 `linuxdo.post.published`，正文 raw 永不进审计）；本地文件下载为纯本地写，不经 Guard（与书签备份/工作区报告下载先例同口径）。
 
@@ -109,6 +109,6 @@ AI 触发的写入操作除了经过 OperationGuard 权限检查外，还受到 
 
 ## Audit contract
 
-每次受控写入都应生成 audit event，至少包含 actor、source、operation、target、decision、result 和 redaction 信息。Token、OAuth Client Secret、AI API Key、GitHub Token 与 Obsidian API Key 必须被脱敏。
+每次受控写入都应生成 audit event，至少包含 actor、source、operation、target、decision、result 和 redaction 信息。Token、OAuth Client Secret、AI API Key 与 Obsidian API Key 必须被脱敏。
 
 更多事件格式见 [Audit Events](/reference/audit-events)。

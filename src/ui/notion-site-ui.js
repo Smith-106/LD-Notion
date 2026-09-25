@@ -11,7 +11,7 @@ const { OperationGuard, UndoManager, OperationLog, ConfirmationDialog } = requir
 const { ZhihuAPI, GenericExtractor, WorkspaceService } = require("../extract");
 const { UICommandService } = require("../coordination/UICommandService");
 const { Exporter, LinuxDoAPI, GenericExporter } = require("../export");
-const { AutoImporter, UpdateChecker, GitHubAutoImporter, GitHubAPI, GitHubExporter } = require("../import");
+const { AutoImporter, UpdateChecker } = require("../import");
 const { BookmarkBridge } = require("../bridge");
 const { StyleManager } = require("./style-manager");
 const { AIAssistant, AIService, AIWelcomeUI, ChatState, ChatUI } = require("../ai");
@@ -378,35 +378,7 @@ const NotionSiteUI = {
                         <label class="ldb-label">自定义指令 (可选)</label>
                         <textarea class="ldb-input" id="ldb-notion-persona-instructions" rows="2" placeholder="额外的行为指令..." style="resize: vertical;"></textarea>
                     </div>
-                    <div class="ldb-section-divider">
-                        <span class="ldb-hint">🐙 GitHub 收藏导入</span>
-                    </div>
-                    <div class="ldb-input-group ldb-mt-8">
-                        <label class="ldb-label">GitHub 用户名</label>
-                        <input type="text" class="ldb-input" id="ldb-notion-github-username" placeholder="your-username">
-                    </div>
-                    <div class="ldb-input-group">
-                        <label class="ldb-label">GitHub Token (可选，提高速率限制)</label>
-                        <input type="password" class="ldb-input" id="ldb-notion-github-token" placeholder="ghp_xxx...">
-                        <div class="ldb-tip">不填写也可使用，但有 60 次/小时限制</div>
-                    </div>
-                    <div class="ldb-input-group">
-                        <label class="ldb-label">导入类型</label>
-                        <div class="ldb-checkbox-group" style="margin-top: var(--ldb-ui-spacing-xs);">
-                            <label class="ldb-checkbox-item">
-                                <input type="checkbox" class="ldb-notion-github-type" value="stars" checked> ⭐ Stars
-                            </label>
-                            <label class="ldb-checkbox-item">
-                                <input type="checkbox" class="ldb-notion-github-type" value="repos"> 📦 Repos
-                            </label>
-                            <label class="ldb-checkbox-item">
-                                <input type="checkbox" class="ldb-notion-github-type" value="forks"> 🍴 Forks
-                            </label>
-                            <label class="ldb-checkbox-item">
-                                <input type="checkbox" class="ldb-notion-github-type" value="gists"> 📝 Gists
-                            </label>
-                        </div>
-                    </div>
+                    <!-- v3.17: GitHub 收藏源已移除,以下历史 GitHub 收藏导入设置区删除。 -->
                     <div class="ldb-section-divider">
                         <span class="ldb-hint">📖 浏览器书签导入</span>
                         <div id="ldb-notion-bookmark-status" style="font-size: var(--ldb-ui-font-size-xs); margin-top: var(--ldb-ui-spacing-xs);"></div>
@@ -578,28 +550,18 @@ const NotionSiteUI = {
                     personaTone: panel.querySelector("#ldb-notion-persona-tone").value,
                     personaExpertise: panel.querySelector("#ldb-notion-persona-expertise").value.trim() || CONFIG.DEFAULTS.agentPersonaExpertise,
                     personaInstructions: panel.querySelector("#ldb-notion-persona-instructions").value.trim(),
-                    githubUsername: panel.querySelector("#ldb-notion-github-username").value.trim(),
-                    // P4 收敛(c07): 与 API Key 同构 —— 未编辑时传 undefined(保留已存值),
-                    // 否则面板加载即置空的输入框会在保存时 Storage.remove 掉已存 token
-                    githubToken: panel.querySelector("#ldb-notion-github-token").dataset.touched === "true"
-                        ? panel.querySelector("#ldb-notion-github-token").value.trim()
-                        : undefined,
-                    githubImportTypes: [...panel.querySelectorAll(".ldb-notion-github-type:checked")].map(cb => cb.value),
                     auditEnabled: panel.querySelector("#ldb-notion-audit-enabled").checked,
                 });
                 NotionOAuth.syncApiKeyInputs();
                 CredentialVault.syncSensitiveInput(panel.querySelector("#ldb-notion-ai-api-key"), CONFIG.STORAGE_KEYS.AI_API_KEY, "AI 服务的 API Key");
-                CredentialVault.syncSensitiveInput(panel.querySelector("#ldb-notion-github-token"), CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
                 NotionSiteUI.showStatus('设置已保存', 'success');
             } catch (error) {
                 NotionSiteUI.showStatus(`设置保存失败：${error.message}`, "error");
             } finally {
-                // v3.14.7: 保存后重置显式编辑标记(syncApiKeyInputs 的程序性清空不算用户编辑)
-                // P4 收敛(c16): 三处 touched 均须复位 —— syncSensitiveInput 会程序性清空
-                // AI Key/GitHub Token 输入框, 遗留 touched="true" 使下一次保存把空值当显式清除
+                // P4 收敛(c16): 两处 touched 均须复位 —— syncSensitiveInput 会程序性清空
+                // AI Key 输入框, 遗留 touched="true" 使下一次保存把空值当显式清除
                 panel.querySelector("#ldb-notion-api-key").dataset.touched = "false";
                 panel.querySelector("#ldb-notion-ai-api-key").dataset.touched = "false";
-                panel.querySelector("#ldb-notion-github-token").dataset.touched = "false";
                 saveBtn.textContent = originalText;
                 saveBtn.disabled = false;
             }
@@ -746,7 +708,6 @@ const NotionSiteUI = {
         });
         NotionOAuth.syncApiKeyInputs();
         CredentialVault.syncSensitiveInput(panel.querySelector("#ldb-notion-ai-api-key"), CONFIG.STORAGE_KEYS.AI_API_KEY, "AI 服务的 API Key");
-        CredentialVault.syncSensitiveInput(panel.querySelector("#ldb-notion-github-token"), CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
     },
 
     // 加载配置
@@ -761,7 +722,7 @@ const NotionSiteUI = {
         };
         panel.querySelector("#ldb-notion-ai-service").value = Storage.get(CONFIG.STORAGE_KEYS.AI_SERVICE, CONFIG.DEFAULTS.aiService);
         panel.querySelector("#ldb-notion-ai-api-key").value = "";
-        // P4 收敛(c07): 显式编辑标记 —— 保存时仅 touched 才写/清 AI Key 与 GitHub Token
+        // P4 收敛(c07): 显式编辑标记 —— 保存时仅 touched 才写/清 AI Key
         panel.querySelector("#ldb-notion-ai-api-key").dataset.touched = "false";
         panel.querySelector("#ldb-notion-ai-api-key").oninput = () => {
             panel.querySelector("#ldb-notion-ai-api-key").dataset.touched = "true";
@@ -776,18 +737,7 @@ const NotionSiteUI = {
         panel.querySelector("#ldb-notion-persona-expertise").value = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_EXPERTISE, CONFIG.DEFAULTS.agentPersonaExpertise);
         panel.querySelector("#ldb-notion-persona-instructions").value = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_INSTRUCTIONS, CONFIG.DEFAULTS.agentPersonaInstructions);
 
-        // 加载 GitHub 设置
-        panel.querySelector("#ldb-notion-github-username").value = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "");
-        panel.querySelector("#ldb-notion-github-token").value = "";
-        panel.querySelector("#ldb-notion-github-token").dataset.touched = "false";
-        panel.querySelector("#ldb-notion-github-token").oninput = () => {
-            panel.querySelector("#ldb-notion-github-token").dataset.touched = "true";
-        };
-        // 加载 GitHub 导入类型
-        const savedGHTypes = GitHubAPI.getImportTypes();
-        panel.querySelectorAll(".ldb-notion-github-type").forEach(cb => {
-            cb.checked = savedGHTypes.includes(cb.value);
-        });
+        // v3.17: GitHub 收藏源已移除,以下历史 GitHub 设置加载段删除。
 
         // F-UI-07:权限级别只读指示 + 审计开关回填
         const permEl = panel.querySelector("#ldb-notion-permission-level");
@@ -863,7 +813,6 @@ const NotionSiteUI = {
 
         NotionOAuth.syncApiKeyInputs();
         CredentialVault.syncSensitiveInput(panel.querySelector("#ldb-notion-ai-api-key"), CONFIG.STORAGE_KEYS.AI_API_KEY, "AI 服务的 API Key");
-        CredentialVault.syncSensitiveInput(panel.querySelector("#ldb-notion-github-token"), CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
 
     },
 

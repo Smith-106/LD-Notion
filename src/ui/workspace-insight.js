@@ -7,7 +7,7 @@ const { NotionOAuth, TargetState } = require("../auth");
 const { NotionAPI } = require("../api");
 const { ConfirmationDialog } = require("../security");
 const { WorkspaceService } = require("../extract");
-const { AutoImporter, GitHubAutoImporter, GitHubAPI } = require("../import");
+const { AutoImporter } = require("../import");
 const { BookmarkAutoImporter } = require("../bridge");
 const { AIAssistant, AIService, ChatUI, getAISettings } = require("../ai");
 const { AISchema } = require("../ai/schema");
@@ -543,6 +543,7 @@ const WorkspaceInsight = {
             if (!stats.scanned && !stats.pending && !stats.success && !stats.failed) return "暂无统计";
             return `扫描 ${stats.scanned || 0}，待处理 ${stats.pending || 0}，成功 ${stats.success || 0}${stats.failed ? `，失败 ${stats.failed}` : ""}`;
         }
+        // v3.17: GitHub 收藏源已移除,github 分支保留作历史统计文本兼容(无调用方传入)。
         if (sourceKey === "github") {
             if (!stats.enabledTypes && !stats.exported && !stats.failed && !stats.syncErrors) return "暂无统计";
             return `启用 ${stats.enabledTypes || 0} 类，成功 ${stats.exported || 0}${stats.failed ? `，失败 ${stats.failed}` : ""}${stats.syncErrors ? `，异常 ${stats.syncErrors}` : ""}`;
@@ -555,22 +556,8 @@ const WorkspaceInsight = {
     },
 
     buildUnifiedSyncModel: () => {
-        // P4 收敛(c17): 无原型对象 —— 存储/导入的 githubImportTypes 可含 constructor/__proto__
-        // 等原型键, 直接取值会把函数源码或 [object Object] 显示到同步中心文案
-        const githubTypeLabelMap = Object.assign(Object.create(null), {
-            stars: "Stars",
-            repos: "Repos",
-            forks: "Forks",
-            gists: "Gists",
-        });
+        // v3.17: GitHub 收藏源已移除,同步中心仅保留 Linux.do 与浏览器书签两源。
         const linuxdoState = SyncState.getLinuxDoState();
-        const githubMeta = SyncState.getGitHubMeta();
-        const githubTypes = Array.from(new Set((GitHubAPI.getImportTypes() || []).filter(Boolean)));
-        const githubStates = githubTypes.map((type) => ({
-            type,
-            label: githubTypeLabelMap[type] || type,
-            state: SyncState.getGitHubState(type),
-        }));
         const bookmarkState = SyncState.getBookmarkState();
 
         const sourceRows = [
@@ -587,22 +574,6 @@ const WorkspaceInsight = {
                 statsLabel: UI().buildSyncStatsText("linuxdo", linuxdoState.lastStats),
                 scheduleLabel: "定时轮询导入 Linux.do 新收藏",
                 detailLabel: "增量基线来自最近收藏时间 + 边界 ID",
-            },
-            {
-                key: "github",
-                label: "GitHub",
-                enabled: !!Storage.get(CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED, CONFIG.DEFAULTS.githubAutoImportEnabled),
-                intervalMinutes: parseInt(Storage.get(CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL, CONFIG.DEFAULTS.githubAutoImportInterval), 10) || 0,
-                outcome: githubMeta.lastOutcome,
-                lastSuccessAt: githubMeta.lastSuccessAt || 0,
-                lastAttemptAt: githubMeta.lastAttemptAt || 0,
-                lastError: githubMeta.lastError || "",
-                watermarkLabel: githubStates.length > 0
-                    ? githubStates.map((item) => `${item.label}：${UI().formatSyncWatermarkLabel(item.state.watermark)}`).join("；")
-                    : "未选择导入类型",
-                statsLabel: UI().buildSyncStatsText("github", githubMeta.lastStats),
-                scheduleLabel: githubTypes.length > 0 ? `启用类型：${githubTypes.map((type) => githubTypeLabelMap[type] || type).join(" / ")}` : "未选择导入类型",
-                detailLabel: "每种 GitHub 类型都维护独立增量基线",
             },
             {
                 key: "bookmarks",
@@ -724,23 +695,18 @@ const WorkspaceInsight = {
             </div>
         `;
 
-        // F-04 修复：重置基线按钮事件委托（gitHub 子类型独立基线，按子类型逐个重置）
+        // F-04 修复：重置基线按钮事件委托
         container.querySelectorAll("[data-reset-baseline]").forEach((btn) => {
             btn.onclick = () => {
                 const sourceKey = btn.getAttribute("data-reset-baseline");
-                const sourceLabel = sourceKey === "github" ? "GitHub" : sourceKey;
+                const sourceLabel = sourceKey;
                 // P2:原生 confirm 统一为 ConfirmationDialog
                 ConfirmationDialog.show({
                     title: `重置「${sourceLabel}」增量基线`,
                     message: `确定重置「${sourceLabel}」的增量同步基线吗？\n重置后下次同步将重新全量扫描。`,
                     confirmText: "重置基线",
                     onConfirm: () => {
-                        if (sourceKey === "github") {
-                            const githubTypes = Array.from(new Set((GitHubAPI.getImportTypes() || []).filter(Boolean)));
-                            githubTypes.forEach((type) => SyncState.resetSourceState(`github-${type}`));
-                        } else {
-                            SyncState.resetSourceState(sourceKey === "bookmarks" ? "bookmark" : sourceKey);
-                        }
+                        SyncState.resetSourceState(sourceKey === "bookmarks" ? "bookmark" : sourceKey);
                         WorkspaceInsight.renderSyncCenterSummary();
                         UI().showStatus(`已重置「${sourceLabel}」增量基线，下次同步将全量扫描`, "success");
                     },
@@ -756,9 +722,6 @@ const WorkspaceInsight = {
 
         if (Storage.get(CONFIG.STORAGE_KEYS.AUTO_IMPORT_ENABLED, CONFIG.DEFAULTS.autoImportEnabled)) {
             tasks.push({ label: "Linux.do", run: () => AutoImporter.run() });
-        }
-        if (Storage.get(CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED, CONFIG.DEFAULTS.githubAutoImportEnabled)) {
-            tasks.push({ label: "GitHub", run: () => GitHubAutoImporter.run() });
         }
         if (Storage.get(CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED, CONFIG.DEFAULTS.bookmarkAutoImportEnabled)) {
             tasks.push({ label: "浏览器书签", run: () => BookmarkAutoImporter.run() });
@@ -825,7 +788,7 @@ const WorkspaceInsight = {
     // 旧实现 bookmark?.url 恒 undefined → LinuxDo 对账永不命中(死代码); 改按 topic_id 构造规范 URL
     // https://linux.do/t/{topicId}(与 LinuxDoAdapter.normalize 及导出写入“链接”属性同法, 无 slug)。
     // Notion 侧若存带 slug 的链接, normalizeWorkspaceInsightUrl 会归一到 /t/{id} 再匹配。
-    // ② 数据源改 getCombinedVisualBookmarks() 覆盖 LinuxDo+GitHub 两源(旧实现只查当前激活源)。
+    // ② 数据源改 getCombinedVisualBookmarks() 覆盖多源快照(旧实现只查当前激活源)。
     // ③ 回填后调 renderBookmarkList() 刷新行内徽标, 与状态提示一致。
     // ④ 循环内仅 mutate 账本缓存, 循环末单次 flush(消除写侧 O(N²), 见 AGENTS.md 禁令)。
     reconcileExportedFromWorkspace: (records = []) => {
@@ -840,16 +803,11 @@ const WorkspaceInsight = {
             return 0;
         }
         // 本地已加载项 → 归一化 URL 索引。
-        // GitHub 项用 raw.html_url(与导出写入同串); LinuxDo 项按 topic_id 构造无 slug 规范 URL。
+        // v3.17: GitHub 收藏源已移除,恒按 LinuxDo 项 topic_id 构造无 slug 规范 URL。
         const urlToBookmark = new Map();
         bookmarks.forEach((bookmark) => {
-            let rawUrl = "";
-            if (bookmark?.source === "github") {
-                rawUrl = bookmark?.raw?.html_url;
-            } else {
-                const topicId = String(bookmark?.topic_id || bookmark?.bookmarkable_id || "");
-                if (topicId) rawUrl = `https://linux.do/t/${topicId}`;
-            }
+            const topicId = String(bookmark?.topic_id || bookmark?.bookmarkable_id || "");
+            const rawUrl = topicId ? `https://linux.do/t/${topicId}` : "";
             const url = UI().normalizeWorkspaceInsightUrl(rawUrl || "");
             if (url && !urlToBookmark.has(url)) urlToBookmark.set(url, bookmark);
         });
@@ -857,7 +815,6 @@ const WorkspaceInsight = {
 
         const strictMode = Utils.isLinuxDoDedupStrict();
         let matched = 0;
-        let githubDirty = false;
         // LinuxDo 账本用 DedupStore batch 模式: 循环内 markSeen 仅 mutate 内存缓存,
         // 循环末 endBatch 单次写回(消除逐条全账本序列化的写侧 O(N²), 与 SyncCoordinator 同模式)
         // v3.14.11: 无论是否命中 LinuxDo 回填, beginBatch 后必须 endBatch。
@@ -878,19 +835,7 @@ const WorkspaceInsight = {
             const bookmark = urlToBookmark.get(recordUrl);
             if (!bookmark) return;
 
-            if (bookmark?.source === "github") {
-                const itemKey = bookmark.itemKey;
-                if (!itemKey) return;
-                if (bookmark.sourceType === "gists") {
-                    if (GitHubAPI.isGistExported(itemKey)) return;
-                    GitHubAPI.markGistExported(itemKey);
-                } else {
-                    if (GitHubAPI.isExported(itemKey)) return;
-                    GitHubAPI.markExported(itemKey);
-                }
-                githubDirty = true;
-                matched++;
-            } else if (strictMode) {
+            if (strictMode) {
                 const topicId = String(bookmark?.topic_id || bookmark?.bookmarkable_id || "");
                 if (!topicId) return;
                 if (Storage.isTopicExported(topicId)) return;
@@ -907,11 +852,7 @@ const WorkspaceInsight = {
                 Storage._exportedTopicsCache = null;
             }
         }
-        // 循环末单次持久化(与 GitHubExporter/批量导出同模式): 避免逐条 flush 的写侧 O(N²)
-        if (githubDirty) {
-            GitHubAPI.flushExported();
-            GitHubAPI.flushGistsExported();
-        }
+        // v3.17: GitHub 收藏源已移除,GitHubExporter 落账分支删除。
         if (matched > 0) {
             UI().recomputeExportStats();
             UI().updateSelectCount();
@@ -1729,14 +1670,14 @@ const WorkspaceInsight = {
         if (subtitle) {
             subtitle.textContent = model.loadedSources.length > 0
                 ? `这里继续展示本轮已加载的 ${model.loadedSources.join(" + ")} 列表摘要；工作区总览需要点击上方按钮单独刷新。`
-                : "这里继续展示当前已加载的 Linux.do / GitHub 列表摘要，不会主动读取 Notion 工作区。";
+                : "这里继续展示当前已加载的 Linux.do 列表摘要，不会主动读取 Notion 工作区。";
         }
 
         if (model.total === 0) {
             container.innerHTML = `
                 <div class="ldb-view-empty">
                     <div class="ldb-view-empty-title">视图还没有数据</div>
-                    <div class="ldb-view-empty-text">先加载 Linux.do 或 GitHub 收藏，这里会展示来源分布、导出状态和时间线摘要。</div>
+                    <div class="ldb-view-empty-text">先加载 Linux.do 收藏，这里会展示来源分布、导出状态和时间线摘要。</div>
                 </div>
             `;
             return;

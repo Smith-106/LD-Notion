@@ -83,44 +83,37 @@ describe("v3.14.8 audit follow-ups", () => {
     await expect(p2).resolves.toBe(false);
   });
 
-  it("exportGitHubSelectedToNotion honors cancel control", async () => {
-    const { exportGitHubSelectedToNotion } = require("../src/import/github-obsidian-service");
-    const { GitHubExporter } = require("../src/import/GitHubExporter");
-    const { NotionAPI } = require("../src/api");
+  // v3.17: GitHub 收藏源已移除,exportGitHubSelectedToNotion 已删除。
+  // 同构语义(取消控制)由 Exporter.cancel/isCancelled 承载,见 export 取消用例。
+  it("Exporter 取消控制: cancel 后 exportBookmarks 剩余进 skipped", async () => {
+    const { Exporter } = require("../src/export");
+    const { SyncLock } = require("../src/sync-lock");
     const { OperationGuard } = require("../src/security");
-    const origSetup = GitHubExporter.setupDatabaseProperties;
-    const origEnrich = GitHubExporter.enrichRepo;
-    const origProps = GitHubExporter.buildRepoProperties;
-    const origAudit = GitHubExporter._auditExport;
-    const origCan = OperationGuard.canExecute;
-    const origReq = NotionAPI.request;
-    GitHubExporter.setupDatabaseProperties = async () => ({ success: true });
-    GitHubExporter.enrichRepo = async (b) => b;
-    GitHubExporter.buildRepoProperties = () => ({ title: "x" });
-    GitHubExporter._auditExport = () => {};
+    const origCanExecute = OperationGuard.canExecute;
     OperationGuard.canExecute = () => true;
-    let calls = 0;
-    NotionAPI.request = async () => { calls++; return { id: "p" + calls }; };
-    const control = { isCancelled: false, isPaused: false };
+    const origExportTopic = Exporter.exportTopic;
+    Exporter.exportTopic = async () => ({ id: "page-ok" });
+    const origLease = SyncLock.acquireLease;
+    const origRelease = SyncLock.releaseLease;
+    SyncLock.acquireLease = async () => ({ owner: "test", ts: Date.now() });
+    SyncLock.releaseLease = () => {};
+    // Exporter.reset() 在 exportBookmarks 入口执行 —— 预置 cancel 会被清掉,
+    // 取消语义为运行中取消: 首个 onProgress 即取消, 首项已开工完成, 剩余进 skipped。
     try {
-      const items = [
-        { itemKey: "a/b1", title: "1", sourceType: "repos", raw: { html_url: "https://github.com/a/b1" } },
-        { itemKey: "a/b2", title: "2", sourceType: "repos", raw: { html_url: "https://github.com/a/b2" } },
-        { itemKey: "a/b3", title: "3", sourceType: "repos", raw: { html_url: "https://github.com/a/b3" } },
-      ];
-      // cancel before any item
-      control.isCancelled = true;
-      const result = await exportGitHubSelectedToNotion(items, { apiKey: "k", databaseId: "db" }, null, control);
-      expect(calls).toBe(0);
-      expect(result.skipped.length).toBe(3);
-      expect(result.success.length).toBe(0);
+      const result = await Exporter.exportBookmarks(
+        [{ id: 1, title: "T1" }, { id: 2, title: "T2" }, { id: 3, title: "T3" }],
+        { apiKey: "secret", liveApiKey: "secret", concurrency: 1 },
+        () => { Exporter.cancel(); }
+      );
+      expect(result.success.length).toBe(1);
+      expect(result.skipped.length).toBe(2);
     } finally {
-      GitHubExporter.setupDatabaseProperties = origSetup;
-      GitHubExporter.enrichRepo = origEnrich;
-      GitHubExporter.buildRepoProperties = origProps;
-      GitHubExporter._auditExport = origAudit;
-      OperationGuard.canExecute = origCan;
-      NotionAPI.request = origReq;
+      Exporter.reset();
+      OperationGuard.canExecute = origCanExecute;
+      Exporter.exportTopic = origExportTopic;
+      SyncLock.acquireLease = origLease;
+      SyncLock.releaseLease = origRelease;
+      SyncLock.isExporting = false;
     }
   });
 
@@ -249,21 +242,23 @@ describe("P1 三模型共识修复守卫(异步/定时器/禁用绕过)", () => 
     });
 });
 
-describe("P1 共识第三轮守卫(GitHub 互斥/定时器/续约健壮性)", () => {
-    it("GitHubAutoImporter 必须与其余导入器同构: 取租约 + 占互斥 + finally 释放", () => {
-        const src = fs.readFileSync("src/import/GitHubAutoImporter.js", "utf8");
+// v3.17: GitHub 收藏源已移除,GitHubAutoImporter.js 已删除。
+// 互斥/定时器/续约健壮性由存活的导入器 + 导出路径承载(与 BookmarkAutoImporter 同构)。
+describe("P1 共识第三轮守卫(导入器互斥/定时器/续约健壮性)", () => {
+    it("AutoImporter 必须同构: 取租约 + 占互斥 + finally 释放 + init 定时器可清理", () => {
+        const src = fs.readFileSync("src/import/index.js", "utf8");
         expect(src).toContain("SyncLock.acquireLease");
         expect(src).toContain("SyncLock.isExporting = true");
         expect(src).toContain("SyncLock.releaseLease");
         expect(src).toContain("clearInterval(renewTimer)");
-        // init 延迟定时器可被 stopPolling 清理
-        expect(src).toContain("initTimerId");
+        // init 延迟定时器可被 stopPolling 清理(字段名 _initTimer)
+        expect(src).toContain("_initTimer");
         const stopBody = src.slice(src.indexOf("stopPolling: () =>"), src.indexOf("init: () =>"));
         expect(stopBody).toContain("clearTimeout(");
-        expect(stopBody).toContain("deferredWhileHidden = false");
+        expect(stopBody).toContain("_initTimer = null");
     });
-    it("三个导入器 + 导出路径的续约回调必须捕获异常并视为失租", () => {
-        for (const f of ["src/bridge/BookmarkAutoImporter.js", "src/import/GitHubAutoImporter.js", "src/export/index.js"]) {
+    it("存活导入器 + 导出路径的续约回调必须捕获异常并视为失租", () => {
+        for (const f of ["src/bridge/BookmarkAutoImporter.js", "src/import/index.js", "src/export/index.js"]) {
             const src = fs.readFileSync(f, "utf8");
             const i = src.indexOf("renewTimer = setInterval");
             const block = src.slice(i, src.indexOf("}, 30000)", i));
@@ -272,17 +267,17 @@ describe("P1 共识第三轮守卫(GitHub 互斥/定时器/续约健壮性)", ()
             expect(block).toContain("leaseLost = true");
         }
     });
-    it("visibilitychange 排队的 idle 回调必须复核启用态(两个导入器)", () => {
-        const pairs = [
-            ["src/bridge/BookmarkAutoImporter.js", "BOOKMARK_AUTO_IMPORT_ENABLED"],
-            ["src/import/GitHubAutoImporter.js", "GITHUB_AUTO_IMPORT_ENABLED"],
-        ];
-        for (const [f, key] of pairs) {
-            const src = fs.readFileSync(f, "utf8");
-            const i = src.indexOf("visibilitychange");
-            const block = src.slice(i, src.indexOf("visibilityListenerBound = true", i));
-            expect(block).toContain(key);
-        }
+    it("visibilitychange 排队的 idle 回调必须复核启用态(存活导入器)", () => {
+        // BookmarkAutoImporter: 回调内直查存储键
+        const bkm = fs.readFileSync("src/bridge/BookmarkAutoImporter.js", "utf8");
+        const bi = bkm.indexOf("visibilitychange");
+        expect(bkm.slice(bi, bkm.indexOf("visibilityListenerBound = true", bi))).toContain("BOOKMARK_AUTO_IMPORT_ENABLED");
+        // AutoImporter: 经 canStart() 复核(含 AUTO_IMPORT_ENABLED + token + 目标检查), 直接 + idle 双重复核
+        const src = fs.readFileSync("src/import/index.js", "utf8");
+        const i = src.indexOf("visibilitychange");
+        const block = src.slice(i, src.indexOf("visibilityListenerBound = true", i));
+        const hits = block.match(/AutoImporter\.canStart\(\)/g) || [];
+        expect(hits.length).toBeGreaterThanOrEqual(2);
     });
     it("sync-lock 续约写后校验 + releaseLease 未持锁不清标志", () => {
         const src = fs.readFileSync("src/sync-lock.js", "utf8");
@@ -310,14 +305,14 @@ describe("P1 共识第四轮守卫(UpdateChecker / idle 回调复核)", () => {
         expect(fn).toContain("onabort");
         expect(fn).toContain("response?.status");
     });
-    it("两个导入器 init 的 idle 回调内必须复核启用态", () => {
+    it("存活导入器 init 的 idle 回调内必须复核启用态", () => {
         const pairs = [
-            ["src/bridge/BookmarkAutoImporter.js", "BOOKMARK_AUTO_IMPORT_ENABLED"],
-            ["src/import/GitHubAutoImporter.js", "GITHUB_AUTO_IMPORT_ENABLED"],
+            ["src/bridge/BookmarkAutoImporter.js", "initTimerId = setTimeout", "BOOKMARK_AUTO_IMPORT_ENABLED"],
+            ["src/import/index.js", "_initTimer = setTimeout", "AutoImporter.canStart()"],
         ];
-        for (const [f, key] of pairs) {
+        for (const [f, timerMark, key] of pairs) {
             const src = fs.readFileSync(f, "utf8");
-            const i = src.indexOf("initTimerId = setTimeout");
+            const i = src.indexOf(timerMark);
             const block = src.slice(i, src.indexOf("}, 3000)", i));
             // 回调体内(而非仅回调之前)出现启用态检查
             const idleStart = block.indexOf("runWhenBrowserIdle(() => {");
@@ -332,27 +327,28 @@ describe("P1 共识第四轮守卫(UpdateChecker / idle 回调复核)", () => {
     });
 });
 
-describe("P1 共识第五轮守卫(GitHub 批量写页 leaseLost / 误清 isExporting)", () => {
-    const src = fs.readFileSync("src/import/GitHubAutoImporter.js", "utf8");
-    it("租约获取失败路径不得清 isExporting(该路径从未置位)", () => {
+// v3.17: GitHub 收藏源已移除,GitHubAutoImporter.js/github-obsidian-service.js 已删除。
+// 批量写页 leaseLost / 互斥复位语义由 AutoImporter.run(与 GitHub 版同构)承载。
+describe("P1 共识第五轮守卫(自动导入批量写页 leaseLost / 互斥复位)", () => {
+    const src = fs.readFileSync("src/import/index.js", "utf8");
+    it("租约获取失败路径仅复位本次置位的互斥(条件复位, 不误清他人)", () => {
         const start = src.indexOf("} catch (leaseError) {");
-        const block = src.slice(start, src.indexOf("}", start + 25));
-        expect(block).not.toMatch(/SyncLock\.isExporting\s*=/);
+        const block = src.slice(start, src.indexOf("return;", start));
+        expect(block).toContain("if (exportMutexAcquired) SyncLock.isExporting = false;");
     });
     it("批量写页循环内必须逐项复核租约丢失", () => {
-        const i = src.indexOf("for (let i = 0; i < toExport.length; i++) {");
-        const body = src.slice(i, i + 300);
-        expect(body).toContain("_leaseLost) break");
+        expect(src).toContain("if (AutoImporter._leaseLost || autoImportAborted) break;");
     });
     it("run() finally 必须复位 _leaseLost", () => {
-        const i = src.indexOf("} finally {", src.indexOf("GitHubAutoImporter.run = async"));
-        expect(src.slice(i, i + 300)).toContain("GitHubAutoImporter._leaseLost = false");
+        const i = src.indexOf("} finally {", src.indexOf("AutoImporter.run = async"));
+        expect(src.slice(i, i + 300)).toContain("AutoImporter._leaseLost = false");
     });
-    it("github-obsidian-service: 暂停循环/建页前必须复核 leaseLost + 续约抛错视为失租", () => {
-        const obs = fs.readFileSync("src/import/github-obsidian-service.js", "utf8");
-        expect(obs).toContain("if (control.isCancelled || leaseLost) break;");
-        expect(obs).toMatch(/if \(leaseLost\) break;\s+if \(!OperationGuard\.canExecute\("createDatabasePage"\)\)/);
-        const rt = obs.slice(obs.indexOf("const renewTimer = setInterval"), obs.indexOf("}, 30000);"));
+    it("export/index.js: 失租中止批次(剩余进 skipped, 不与他 tab 双写)", () => {
+        const exp = fs.readFileSync("src/export/index.js", "utf8");
+        expect(exp).toContain("abortIfLeaseLost");
+        expect(exp).toContain("Exporter.cancel()");
+        expect(exp).toContain("results.leaseLost = true");
+        const rt = exp.slice(exp.indexOf("const renewTimer = setInterval"), exp.indexOf("}, 30000);"));
         expect(rt).toContain("catch (renewError)");
     });
 });

@@ -225,7 +225,7 @@ const GenericExporter = {
     },
 
     // ISS-20260914-001: Clipper(知乎/通用页)远端对账 —— 远端「链接」索引是 ground truth。
-    // 与 BookmarkExporter/GitHubAutoImporter 同构,但 dedupKey 为 `zhihu:<normUrl>`/`generic:<normUrl>`
+    // 与 BookmarkExporter 同构,但 dedupKey 为 `zhihu:<normUrl>`/`generic:<normUrl>`
     // 形式(非裸 URL),故单独抽 URL 段与远端集合比对,不硬套 URL 索引模板。
     // 返回值三态:
     //   { remote: Set }            → 远端可达, exported 字段以远端为准(本地账本 hit 被覆盖)

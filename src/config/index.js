@@ -5,7 +5,7 @@
 // ===========================================
 const CONFIG = {
     // Keep in sync with package.json + userscript @version + build.js header.
-    SCRIPT_VERSION: "3.16.6",
+    SCRIPT_VERSION: "3.17.0",
 
     // 编译期 feature flag: 多端同步。默认关闭——off 时 main.js 不初始化同步引擎、
     // 零网络/零定时器/零 DOM,行为与关闭前字节级一致(F-SYNC-11)。
@@ -86,7 +86,7 @@ const CONFIG = {
         AGENT_MAX_ITERATIONS: "ldb_agent_max_iterations",
         // AI 输出模板
         AI_TEMPLATES: "ldb_ai_templates",
-        // GitHub 收藏导入
+        // v3.17: GitHub 收藏源已移除 —— 以下 GITHUB_* 键仅为历史存储兼容保留(读到无害), 不再有写入方
         GITHUB_USERNAME: "ldb_github_username",
         GITHUB_TOKEN: "ldb_github_token",
         GITHUB_OAUTH_CLIENT_ID: "ldb_github_oauth_client_id",

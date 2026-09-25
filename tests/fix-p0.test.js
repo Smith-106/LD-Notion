@@ -35,23 +35,27 @@ beforeEach(() => {
     global.__ldNotionResponder = null;
 });
 
-describe("AUD-ARCH-02/08: Notion 分支 githubDirty 声明 + O(N²) 消除", () => {
-    it("认证终态中止: 不抛 ReferenceError, 返回 authAborted, 剩余进 skipped", async () => {
-        const { exportGitHubSelectedToNotion } = require("../src/import/github-obsidian-service");
-        const { GitHubExporter } = require("../src/import/GitHubExporter");
+// v3.17: GitHub 收藏源已移除,github-obsidian-service/GitHubExporter 已删除。
+// AUD-ARCH-02/08 同构语义(认证终态中止/finally 落盘)由 BookmarkExporter.exportBookmarks 承载,见下。
+describe("AUD-ARCH-02/08: 书签导出认证终态中止 + finally 落盘(原 GitHub 分支语义)", () => {
+    it("认证终态中止: 返回 aborted, 剩余进 skipped", async () => {
+        const { BookmarkExporter } = require("../src/bridge/BookmarkExporter");
         const { NotionAPI } = require("../src/api");
         const { OperationGuard } = require("../src/security");
 
-        const origSetup = GitHubExporter.setupDatabaseProperties;
-        const origEnrich = GitHubExporter.enrichRepo;
-        const origProps = GitHubExporter.buildRepoProperties;
-        const origAudit = GitHubExporter._auditExport;
+        const origSetup = BookmarkExporter.setupDatabaseProperties;
+        const origEnrich = BookmarkExporter.enrichBookmark;
+        const origProps = BookmarkExporter.buildProperties;
+        const origAudit = BookmarkExporter._auditExport;
         const origCanExecute = OperationGuard.canExecute;
-        GitHubExporter.setupDatabaseProperties = async () => ({ success: true });
-        GitHubExporter.enrichRepo = async (bookmark) => bookmark;
-        GitHubExporter.buildRepoProperties = () => ({ title: "x" });
-        GitHubExporter._auditExport = () => {};
+        const origCollect = NotionAPI.collectDatabaseUrls;
+        BookmarkExporter.setupDatabaseProperties = async () => ({ success: true });
+        BookmarkExporter.enrichBookmark = async (bookmark) => bookmark;
+        BookmarkExporter.buildProperties = () => ({ title: "x" });
+        BookmarkExporter._auditExport = () => {};
         OperationGuard.canExecute = () => true;
+        // 远端对账降级为账本路径: 查询抛错 → remoteUrls=null → 走本地账本过滤
+        NotionAPI.collectDatabaseUrls = async () => { throw new Error("mock query fail"); };
 
         let requestCalls = 0;
         const origRequest = NotionAPI.request;
@@ -64,112 +68,134 @@ describe("AUD-ARCH-02/08: Notion 分支 githubDirty 声明 + O(N²) 消除", () 
         };
 
         try {
-            const result = await exportGitHubSelectedToNotion(
-                [
-                    { itemKey: "owner/repo1", title: "Repo1", sourceType: "repos", raw: { html_url: "https://github.com/owner/repo1" } },
-                    { itemKey: "owner/repo2", title: "Repo2", sourceType: "repos", raw: { html_url: "https://github.com/owner/repo2" } },
-                    { itemKey: "owner/repo3", title: "Repo3", sourceType: "repos", raw: { html_url: "https://github.com/owner/repo3" } },
-                ],
-                { apiKey: "secret", databaseId: "db-1" }
+            // CONCURRENCY=3: 首批 3 项并发(仅第 1 次请求成功,其余终态失败),
+            // 第 4 项未开工即中止 → skipped。成功项归属与调用次序无关(仅第 1 次调用成功)。
+            const result = await BookmarkExporter.exportBookmarks(
+                {
+                    apiKey: "secret",
+                    databaseId: "db-1",
+                    bookmarks: [
+                        { url: "https://example.com/b1", title: "B1" },
+                        { url: "https://example.com/b2", title: "B2" },
+                        { url: "https://example.com/b3", title: "B3" },
+                        { url: "https://example.com/b4", title: "B4" },
+                    ],
+                }
             );
-            expect(result.authAborted).toBeTruthy();
-            expect(result.success.length).toBe(1);
-            expect(result.failed.length).toBe(1);
-            expect(result.skipped.length).toBe(1);
-            expect(requestCalls).toBe(2); // 第 2 项即中止, 不再逐项 401
+            expect(result.aborted).toBe(true);
+            expect(result.exported).toBe(1);
+            expect(result.failed).toBe(2);
+            expect(result.skipped).toBe(1);
         } finally {
-            GitHubExporter.setupDatabaseProperties = origSetup;
-            GitHubExporter.enrichRepo = origEnrich;
-            GitHubExporter.buildRepoProperties = origProps;
-            GitHubExporter._auditExport = origAudit;
+            BookmarkExporter.setupDatabaseProperties = origSetup;
+            BookmarkExporter.enrichBookmark = origEnrich;
+            BookmarkExporter.buildProperties = origProps;
+            BookmarkExporter._auditExport = origAudit;
             OperationGuard.canExecute = origCanExecute;
             NotionAPI.request = origRequest;
+            NotionAPI.collectDatabaseUrls = origCollect;
         }
     });
 
     it("成功项账本经 finally 落盘(不丢已导出事实)", async () => {
-        const { exportGitHubSelectedToNotion } = require("../src/import/github-obsidian-service");
-        const { GitHubExporter } = require("../src/import/GitHubExporter");
+        const { BookmarkExporter } = require("../src/bridge/BookmarkExporter");
         const { NotionAPI } = require("../src/api");
         const { OperationGuard } = require("../src/security");
 
-        const origSetup = GitHubExporter.setupDatabaseProperties;
-        const origEnrich = GitHubExporter.enrichRepo;
-        const origProps = GitHubExporter.buildRepoProperties;
-        const origAudit = GitHubExporter._auditExport;
+        const origSetup = BookmarkExporter.setupDatabaseProperties;
+        const origEnrich = BookmarkExporter.enrichBookmark;
+        const origProps = BookmarkExporter.buildProperties;
+        const origAudit = BookmarkExporter._auditExport;
         const origCanExecute = OperationGuard.canExecute;
-        GitHubExporter.setupDatabaseProperties = async () => ({ success: true });
-        GitHubExporter.enrichRepo = async (bookmark) => bookmark;
-        GitHubExporter.buildRepoProperties = () => ({ title: "x" });
-        GitHubExporter._auditExport = () => {};
+        const origCollect = NotionAPI.collectDatabaseUrls;
+        BookmarkExporter.setupDatabaseProperties = async () => ({ success: true });
+        BookmarkExporter.enrichBookmark = async (bookmark) => bookmark;
+        BookmarkExporter.buildProperties = () => ({ title: "x" });
+        BookmarkExporter._auditExport = () => {};
         OperationGuard.canExecute = () => true;
+        NotionAPI.collectDatabaseUrls = async () => { throw new Error("mock query fail"); };
         const origRequest = NotionAPI.request;
         NotionAPI.request = async () => ({ id: "page-ok" });
 
         try {
-            const result = await exportGitHubSelectedToNotion(
-                [{ itemKey: "owner/repo1", title: "R1", sourceType: "repos", raw: { html_url: "https://github.com/o/r1" } }],
-                { apiKey: "secret", databaseId: "db-1" }
+            const result = await BookmarkExporter.exportBookmarks(
+                {
+                    apiKey: "secret",
+                    databaseId: "db-1",
+                    bookmarks: [{ url: "https://example.com/r1", title: "R1" }],
+                }
             );
-            expect(result.success.length).toBe(1);
-            const ledger = JSON.parse(store.get(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_REPOS) || "{}");
-            expect(ledger["owner/repo1"]).toBeTruthy();
+            expect(result.exported).toBe(1);
+            expect(BookmarkExporter.isExported("https://example.com/r1")).toBe(true);
         } finally {
-            GitHubExporter.setupDatabaseProperties = origSetup;
-            GitHubExporter.enrichRepo = origEnrich;
-            GitHubExporter.buildRepoProperties = origProps;
-            GitHubExporter._auditExport = origAudit;
+            BookmarkExporter.setupDatabaseProperties = origSetup;
+            BookmarkExporter.enrichBookmark = origEnrich;
+            BookmarkExporter.buildProperties = origProps;
+            BookmarkExporter._auditExport = origAudit;
             OperationGuard.canExecute = origCanExecute;
             NotionAPI.request = origRequest;
+            NotionAPI.collectDatabaseUrls = origCollect;
         }
     });
 });
 
-describe("AUD-ARCH-01: _exportItems 认证终态 fail-fast", () => {
-    it("首项 401 终态 → 立即中止: 仅 1 次请求, flushFn 在 finally 被调, skipped 正确", async () => {
-        const { GitHubExporter } = require("../src/import/GitHubExporter");
+// v3.17: GitHub 收藏源已移除,GitHubExporter 已删除。
+// _exportItems 认证终态 fail-fast 同构语义由 Exporter.isAuthTerminalError 承载,见下。
+describe("AUD-ARCH-01: Exporter 认证终态 fail-fast(原 GitHub _exportItems 语义)", () => {
+    it("isAuthTerminalError 仅信标记: 终态 true, 其余 false", async () => {
+        const { Exporter } = require("../src/export");
+        const terminal = new Error("Notion OAuth 续签失败: invalid_grant");
+        terminal.isAuthTerminal = true;
+        expect(Exporter.isAuthTerminalError(terminal)).toBe(true);
+        expect(Exporter.isAuthTerminalError(new Error("timeout"))).toBe(false);
+        expect(Exporter.isAuthTerminalError(null)).toBe(false);
+        expect(Exporter.isAuthTerminalError({ isAuthTerminal: "yes" })).toBe(false);
+    });
+
+    it("exportBookmarks 首项终态 → 中止批次: 剩余进 skipped", async () => {
+        const { Exporter } = require("../src/export");
         const { NotionAPI } = require("../src/api");
         const { OperationGuard } = require("../src/security");
+        const { SyncLock } = require("../src/sync-lock");
 
         const origCanExecute = OperationGuard.canExecute;
         OperationGuard.canExecute = () => true;
-        const origRequest = NotionAPI.request;
-        let requestCalls = 0;
-        NotionAPI.request = async () => {
-            requestCalls++;
+        const origExportTopic = Exporter.exportTopic;
+        let calls = 0;
+        Exporter.exportTopic = async () => {
+            calls++;
             const err = new Error("Notion OAuth 续签失败: invalid_grant (refresh_token 已使用或已过期)");
             err.isAuthTerminal = true;
             throw err;
         };
-        const origAudit = GitHubExporter._auditExport;
-        GitHubExporter._auditExport = () => {};
-        const origEnrich = GitHubExporter.enrichRepo;
-        GitHubExporter.enrichRepo = async (item) => item;
+        const origLease = SyncLock.acquireLease;
+        const origRelease = SyncLock.releaseLease;
+        const leaseToken = { owner: "test", ts: Date.now() };
+        SyncLock.acquireLease = async () => leaseToken;
+        SyncLock.releaseLease = () => {};
 
         try {
-            const flushFn = vi.fn();
-            const result = await GitHubExporter._exportItems(
-                [{ full_name: "a/1" }, { full_name: "a/2" }, { full_name: "a/3" }],
-                { apiKey: "secret", databaseId: "db-1" },
-                "Star",
-                () => ({}),
-                () => false,
-                () => {},
-                (r) => r.full_name,
-                undefined,
-                flushFn
+            const bookmarks = [
+                { id: 1, title: "T1" },
+                { id: 2, title: "T2" },
+                { id: 3, title: "T3" },
+            ];
+            const result = await Exporter.exportBookmarks(
+                bookmarks,
+                { apiKey: "secret", liveApiKey: "secret", concurrency: 1 },
+                () => {}
             );
             expect(result.authAborted).toBeTruthy();
-            expect(result.exported).toBe(0);
-            expect(result.failed).toBe(0); // 终态中止不计入 failed
-            expect(result.skipped).toBe(3); // newItems - success - failed = 全部剩余项
-            expect(requestCalls).toBe(1);
-            expect(flushFn).toHaveBeenCalledTimes(1);
+            expect(result.success.length).toBe(0);
+            expect(result.failed.length).toBe(1);
+            expect(result.skipped.length).toBe(2);
+            expect(calls).toBe(1);
         } finally {
             OperationGuard.canExecute = origCanExecute;
-            NotionAPI.request = origRequest;
-            GitHubExporter._auditExport = origAudit;
-            GitHubExporter.enrichRepo = origEnrich;
+            Exporter.exportTopic = origExportTopic;
+            SyncLock.acquireLease = origLease;
+            SyncLock.releaseLease = origRelease;
+            SyncLock.isExporting = false;
         }
     });
 });
@@ -438,27 +464,27 @@ describe("AUD-ARCH-09: 终态中止不重插毒项", () => {
 
 describe("odyssey-review(codebase): F1/F2/F3 修复契约", () => {
     it("F3: setup 失败路径不泄漏租约(未持有 AUTO_SYNC_LEASE)", async () => {
-        const { exportGitHubSelectedToNotion } = require("../src/import/github-obsidian-service");
-        const { GitHubExporter } = require("../src/import/GitHubExporter");
-        const origSetup = GitHubExporter.setupDatabaseProperties;
-        GitHubExporter.setupDatabaseProperties = async () => ({ success: false, error: "mock 404" });
+        // v3.17: GitHub 导出器已删除,同构语义由 BookmarkExporter.exportBookmarks 承载
+        // (setup 失败抛错路径: setup 在取任何租约之前, 无租约可泄漏)。
+        const { BookmarkExporter } = require("../src/bridge/BookmarkExporter");
+        const origSetup = BookmarkExporter.setupDatabaseProperties;
+        BookmarkExporter.setupDatabaseProperties = async () => ({ success: false, error: "mock 404" });
         try {
-            await expect(exportGitHubSelectedToNotion(
-                [{ itemKey: "o/r", title: "R", sourceType: "repos", raw: { html_url: "https://github.com/o/r" } }],
-                { apiKey: "secret", databaseId: "db-1" }
+            await expect(BookmarkExporter.exportBookmarks(
+                { apiKey: "secret", databaseId: "db-1", bookmarks: [{ url: "https://example.com/x", title: "X" }] }
             )).rejects.toThrow("数据库配置失败");
             // 修复前: 租约在 setup 前获取且无释放路径 → 60s 泄漏; 修复后: 根本不取
             expect(store.get(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE) || "{}").toBe("{}");
         } finally {
-            GitHubExporter.setupDatabaseProperties = origSetup;
+            BookmarkExporter.setupDatabaseProperties = origSetup;
         }
     });
 
     it("F3b: apiKey 缺失抛错路径同样不取租约", async () => {
-        const { exportGitHubSelectedToNotion } = require("../src/import/github-obsidian-service");
-        await expect(exportGitHubSelectedToNotion(
-            [{ itemKey: "o/r", title: "R", sourceType: "repos", raw: {} }],
-            { apiKey: "", databaseId: "db-1" }
+        // v3.17: GitHub 导出器已删除,同构语义由 BookmarkExporter.exportBookmarks 承载。
+        const { BookmarkExporter } = require("../src/bridge/BookmarkExporter");
+        await expect(BookmarkExporter.exportBookmarks(
+            { apiKey: "", databaseId: "db-1", bookmarks: [{ url: "https://example.com/x", title: "X" }] }
         )).rejects.toThrow("请先配置");
         expect(store.get(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE) || "{}").toBe("{}");
     });

@@ -25,7 +25,6 @@ flowchart TB
 
   subgraph External[External APIs]
     Notion[Notion API]
-    GitHub[GitHub API]
     AI[AI providers]
     Bookmarks[chrome.bookmarks]
   end
@@ -37,7 +36,6 @@ flowchart TB
   Content --> Background
   Popup --> Background
   Background --> Notion
-  Background --> GitHub
   Background --> AI
   Background --> Bookmarks
   Content --> Storage

@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 const { WorkspaceInsight } = require("../src/ui/workspace-insight.js");
 const { UI } = require("../src/ui/main-ui");
 const { Storage, DedupStore } = require("../src/storage");
-const { GitHubAPI } = require("../src/import/GitHubAPI.js");
+// v3.17: GitHub 收藏源已移除, GitHubAPI 已删除。对账回填仅覆盖 linuxdo。
 const { Utils } = require("../src/utils");
 
 describe("AT-006: 对账回填→账本→计数链传播", () => {
@@ -14,21 +14,13 @@ describe("AT-006: 对账回填→账本→计数链传播", () => {
 
     beforeEach(() => {
         saved.strict = Utils.isLinuxDoDedupStrict;
-        saved.getExported = GitHubAPI.getExported;
-        saved.flushExported = GitHubAPI.flushExported;
-        saved.flushGistsExported = GitHubAPI.flushGistsExported;
-        // GitHubAPI 账本为模块级内存缓存, 跨用例残留 → 每用例隔离新鲜账本
-        const ghLedger = {};
-        const ghGistLedger = {};
-        GitHubAPI.getExported = () => ghLedger;
-        GitHubAPI.getExportedGists = () => ghGistLedger;
-        GitHubAPI.flushExported = () => {};
-        GitHubAPI.flushGistsExported = () => {};
         Utils.isLinuxDoDedupStrict = () => true;
         // 内存快照 + 主列表同步数据(真实 getCombinedVisualBookmarks/getBookmarkKey/isExportedForUi/recomputeExportStats)
         UI.visualSnapshots = {
-            linuxdo: [{ source: "linuxdo", topic_id: "42", title: "A" }],
-            github: [{ source: "github", itemKey: "u/repo-1", sourceType: "stars", raw: { html_url: "https://github.com/u/repo-1" } }],
+            linuxdo: [
+                { source: "linuxdo", topic_id: "42", title: "A" },
+                { source: "linuxdo", topic_id: "43", title: "B" },
+            ],
         };
         UI.bookmarks = UI.getCombinedVisualBookmarks();
         UI.selectedBookmarks = new Set(UI.bookmarks.map((b) => UI.getBookmarkKey(b)));
@@ -38,25 +30,21 @@ describe("AT-006: 对账回填→账本→计数链传播", () => {
 
     afterEach(() => {
         Utils.isLinuxDoDedupStrict = saved.strict;
-        GitHubAPI.getExported = saved.getExported;
-        GitHubAPI.getExportedGists = saved.getExportedGists;
-        GitHubAPI.flushExported = saved.flushExported;
-        GitHubAPI.flushGistsExported = saved.flushGistsExported;
     });
 
     it("回填命中 → 账本落账 → recompute 后待导出数下降至 0", () => {
         UI.recomputeExportStats();
-        expect(UI.selectedUnexportedCount).toBe(2); // 初始: linuxdo + github 均待导出
+        expect(UI.selectedUnexportedCount).toBe(2); // 初始: 两 linuxdo 项均待导出
 
         const matched = WorkspaceInsight.reconcileExportedFromWorkspace([
             { sourceUrl: "https://linux.do/t/42" },
-            { sourceUrl: "https://github.com/u/repo-1/" }, // 尾斜杠由归一化处理
+            { sourceUrl: "https://linux.do/t/43/" }, // 尾斜杠由归一化处理
         ]);
         expect(matched).toBe(2);
 
-        // 账本真实落账(Storage→DedupStore linuxdo batch; GitHubAPI→内存缓存+flush)
+        // 账本真实落账(Storage→DedupStore linuxdo batch)
         expect(Storage.isTopicExported("42")).toBe(true);
-        expect(GitHubAPI.isExported("u/repo-1")).toBe(true);
+        expect(Storage.isTopicExported("43")).toBe(true);
 
         UI.recomputeExportStats();
         expect(UI.selectedUnexportedCount).toBe(0);
@@ -72,6 +60,6 @@ describe("AT-006: 对账回填→账本→计数链传播", () => {
         UI.recomputeExportStats();
         expect(UI.selectedUnexportedCount).toBe(2);
         expect(Storage.isTopicExported("42")).toBe(false);
-        expect(GitHubAPI.isExported("u/repo-1")).toBe(false);
+        expect(Storage.isTopicExported("43")).toBe(false);
     });
 });

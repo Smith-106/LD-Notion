@@ -25,7 +25,7 @@ flowchart TD
 
 | Signal | 来源 | 用途 |
 | --- | --- | --- |
-| source type | Linux.do、GitHub、Bookmarks、Zhihu、Generic Web | 决定解析器和详情获取方式。 |
+| source type | Linux.do、Bookmarks、Zhihu、Generic Web | 决定解析器和详情获取方式。 |
 | destination | Notion database、Notion page、Obsidian | 决定 payload 格式和写入 API。 |
 | auth state | OAuth、manual token、missing auth | 决定是否可以访问 Notion 或外部服务。 |
 | AI config | provider、model、enabled、fallback | 决定是否生成摘要、标签、分类或对话式任务结果。 |
@@ -47,7 +47,6 @@ flowchart TD
 | Priority | Input signal | Condition | Route | Guard | Fallback |
 | --- | --- | --- | --- | --- | --- |
 | 1 | 当前页面域名与数据结构 | 匹配 Linux.do 收藏或帖子页面 | 使用 Linux.do 解析与详情获取 | 检查读取来源与导出权限 | 仅保留列表中可读字段并提示详情缺失。 |
-| 2 | GitHub URL 或仓库元信息 | 匹配 repository、issue、discussion 或 README | 使用 GitHubAPI / GitHubExporter | 检查 GitHub 请求限制与目标写入权限 | 保存 URL、标题和基础元数据，跳过深度内容。 |
 | 3 | chrome.bookmarks 可用性 | 浏览器书签桥接扩展或独立扩展可用 | 使用 BookmarkBridge / BookmarkExporter | 检查扩展权限与用户选择范围 | 提示安装桥接扩展或改用手动网页剪藏。 |
 | 4 | Zhihu URL 或页面结构 | 匹配知乎内容页 | 使用 ZhihuAPI 或页面解析 | 检查内容可访问性 | 使用 Generic Web 摘要路径。 |
 | 5 | 通用网页 URL | 扩展已注入，或油猴已添加用户 `@match`，且未匹配专用来源 | 使用 Generic Web 剪藏 | 检查页面可读内容；油猴默认不注入任意网页 | 保存标题、URL 和用户选中文本；无注入时提示改用扩展或添加 `@match`。 |
@@ -69,7 +68,7 @@ flowchart TD
 | 1 | Notion OAuth token | access token 有效 | 使用 OAuth NotionTransport | 检查 workspace 与目标 access | 若 401，尝试刷新或提示重新授权。 |
 | 2 | refresh token | access token 过期且 refresh token 可用 | 刷新凭据后继续 | 检查 state 与本地加密保险箱 / 配置存储一致性 | 刷新失败时进入 missing auth。 |
 | 3 | manual token | 用户配置 integration token | 使用 manual token 写入 | 标记为高级 fallback，需要目标显式授权 | 提示优先使用 OAuth。 |
-| 4 | 外部来源 token | GitHub 或 Obsidian token 可用 | 使用对应来源或目标 API | 检查 token 作用域 | 降级为公开页面或本地预览。 |
+| 4 | 外部目标 token | Obsidian token 可用 | 使用对应目标 API | 检查 token 作用域 | 降级为本地预览。 |
 | 5 | missing auth | 缺少必要凭据 | 阻止远程写入 | OperationGuard 返回 auth_required | 显示配置入口和待写入预览。 |
 
 ### AI routing
@@ -116,7 +115,6 @@ flowchart TD
 | 现象 | 可能原因 | 处理方式 |
 | --- | --- | --- |
 | 页面只能预览不能写入 | missing auth、read-only permission 或目标不可写 | 检查 Notion 授权、目标页面权限和权限等级。 |
-| GitHub 内容只有标题和 URL | API 限制、仓库不可访问或详情获取失败 | 检查 GitHub 访问状态，或接受基础导入结果。 |
 | AI 摘要没有生成 | AI disabled、provider missing、quota 或 timeout | 检查 AI 配置；导入仍会使用基础内容。 |
 | 书签导入不可用 | Tampermonkey 无 chrome.bookmarks 权限 | 安装书签桥接扩展或使用独立 Chrome 扩展。 |
 | 同一内容被跳过 | sourceId 或 URL 命中已导出记录 | 在确认重复后选择更新或更换目标集合。 |

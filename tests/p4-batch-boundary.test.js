@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 const { AIHandlers, AIAssistant, AIService, ChatState } = require("../src/ai/index.js");
 const { NotionAPI } = require("../src/api");
 const { OperationGuard, ConfirmationDialog } = require("../src/security");
-const { GitHubExporter, GitHubAPI } = require("../src/import");
+// v3.17: GitHub 收藏源已移除,GitHubExporter/GitHubAPI 导入删除。
 const { Utils } = require("../src/utils");
 
 describe("P4: batch handler 边界", () => {
@@ -24,8 +24,7 @@ describe("P4: batch handler 边界", () => {
         saved.isolateContent = AIAssistant.isolateContent;
         saved.createPageInPage = NotionAPI.createPageInPage;
         saved.appendBlocks = NotionAPI.appendBlocks;
-        saved.exportAll = GitHubExporter.exportAll;
-        saved.getImportTypes = GitHubAPI.getImportTypes;
+        // v3.17: GitHub 导出器已删除,无须保存/恢复其 stub。
 
         AIAssistant.checkConfig = () => ({ valid: true });
         OperationGuard.canExecute = () => true;
@@ -47,8 +46,7 @@ describe("P4: batch handler 边界", () => {
         AIAssistant.isolateContent = saved.isolateContent;
         NotionAPI.createPageInPage = saved.createPageInPage;
         NotionAPI.appendBlocks = saved.appendBlocks;
-        GitHubExporter.exportAll = saved.exportAll;
-        GitHubAPI.getImportTypes = saved.getImportTypes;
+        // v3.17: GitHub 导出器已删除,无须恢复 stub。
     });
 
     it("批量翻译在结果截断时于确认框提示", async () => {
@@ -128,16 +126,6 @@ describe("P4: batch handler 边界", () => {
         }
     });
 
-    it("GitHub 导入各类型均报错时不显示已是最新状态", async () => {
-        GitHubAPI.getImportTypes = () => ["stars"];
-        GitHubExporter.exportAll = async () => ({ stars: { error: "token 无效" } });
-
-        const result = await AIHandlers.handleGitHubImport(
-            { username: "u" },
-            { notionApiKey: "k", notionDatabaseId: "db" },
-            ""
-        );
-        expect(result).toContain("❌ Stars: token 无效");
-        expect(result).not.toContain("已是最新状态");
-    });
+    // v3.17: GitHub 收藏源已移除,GitHub 导入报错用例删除(handleGitHubImport 已删);
+    // 书签导入空库面覆盖同类“无新增不显示已是最新”语义见 bookmark 相关测试。
 });

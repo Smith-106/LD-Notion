@@ -106,7 +106,7 @@ const BookmarkAutoImporter = {
     // 谁在何时建/更/归档了哪些页面可事后追溯。与归档 canExecute 闸门（3.7.7）互补：
     // 闸门管权限，审计管可观测性。
     // actor/source 经 context 注入以支持用户触发路径复用（ISS-20260724-011：导出路径
-    // 传 actor="user"/source="bookmark-export"|"github-export"）；未传时保持自动同步默认值，
+    // 传 actor="user"/source="bookmark-export"）；未传时保持自动同步默认值，
     // 向后兼容现有调用方。
     _auditAutoSync: (operation, status, context = {}) => {
         try {
@@ -318,7 +318,7 @@ BookmarkAutoImporter.run = async () => {
     } catch (error) {
         BookmarkAutoImporter.isRunning = false;
         // qwen P1 共识: isExporting 在租约成功后才置位(下方), 此路径从未持有 ——
-        // 无条件清 false 会误释放并发导出已置位的互斥(与 GitHubAutoImporter 同型)
+        // 无条件清 false 会误释放并发导出已置位的互斥(与 AutoImporter 同型)
         console.error("[LD-Notion] 浏览器书签自动同步获取租约失败:", error);
         BookmarkAutoImporter.updateStatus("❌ 获取同步租约失败，本轮跳过");
         return;
@@ -792,7 +792,7 @@ BookmarkAutoImporter.run = async () => {
         if (exportMutexAcquired) SyncLock.isExporting = false;
         BookmarkAutoImporter.isRunning = false;
         // 20260914: 补 emit bookmarks:updated —— 收藏列表唯一自动重渲染触发是 bookmarks:updated
-        // (main-ui.js 订阅链), 仅发 sync:center-summary-updated 时计数/徽标冻结(v3.14.7 REV-06 GitHub 路径同款)
+        // (main-ui.js 订阅链), 仅发 sync:center-summary-updated 时计数/徽标冻结
         emit("bookmarks:updated");
         emit("sync:center-summary-updated");
     }

@@ -273,16 +273,16 @@ describe("P4 收敛(c06/c08/c09): 源码级契约锁定", () => {
         expect(read("src/export/index.js")).toContain('const originalCaption = block._fileType === "file" ? block.file?.caption : null;');
     });
 
-    it("手动 GitHub 导出取跨 tab 租约并释放", () => {
-        const src = read("src/import/GitHubExporter.js");
-        expect(src).toContain("lease = await SyncLock.acquireLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE);");
+    // v3.17: GitHub 收藏源已移除, GitHubExporter.js 已删除。手动导出跨 tab 租约语义
+    // 由 LinuxDo Exporter.exportBookmarks 承载(同键 AUTO_SYNC_LEASE)。
+    it("手动 LinuxDo 导出取跨 tab 租约并释放", () => {
+        const src = read("src/export/index.js");
+        expect(src).toContain("const lease = await SyncLock.acquireLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE);");
         expect(src).toContain("SyncLock.releaseLease(CONFIG.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);");
-        expect(src).toContain("const hasMore = response.has_more === true;");
-        expect(src).toContain("还有更多待分类条目，请再次运行以继续");
     });
 
     it("自动导入 finally 仅在本次置位时复位互斥", () => {
-        expect(read("src/import/GitHubAutoImporter.js")).toContain("if (exportMutexAcquired) SyncLock.isExporting = false;");
+        expect(read("src/import/index.js")).toContain("if (exportMutexAcquired) SyncLock.isExporting = false;");
         expect(read("src/bridge/BookmarkAutoImporter.js")).toContain("if (exportMutexAcquired) SyncLock.isExporting = false;");
     });
 
@@ -295,8 +295,10 @@ describe("P4 收敛(c06/c08/c09): 源码级契约锁定", () => {
         expect(src).toContain('const url = Utils.normalizeDedupUrl(String(meta.url ||');
     });
 
-    it("GitHub readme 缓存键含 token 指纹", () => {
-        expect(read("src/import/GitHubAPI.js")).toContain("const cacheKey = `${repoFullName}::${token ? Utils.apiKeyHash(token) : \"anon\"}`;");
+    // v3.17: GitHub 收藏源已移除, GitHubAPI.js 已删除。缓存键 token 指纹语义由
+    // extract 层请求缓存承载(同函数 Utils.apiKeyHash, 防跨 token 缓存串扰)。
+    it("extract 请求缓存键含 token 指纹", () => {
+        expect(read("src/extract/index.js")).toContain("Utils.apiKeyHash(apiKey)");
     });
 
     it("认证重试失败仍走降级清理", () => {

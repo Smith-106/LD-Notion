@@ -27,7 +27,7 @@ export default defineConfig({
         items: [
           { text: '功能地图', link: '/features/' },
           { text: 'Linux.do 导出', link: '/features/linuxdo' },
-          { text: 'GitHub 与书签导入', link: '/features/sources' },
+          { text: '书签导入', link: '/features/sources' },
           { text: 'AI 助手', link: '/features/ai-assistant' },
           { text: '通用网页与 Obsidian', link: '/features/web-obsidian' }
         ]
@@ -51,7 +51,6 @@ export default defineConfig({
         text: 'Integrations / 来源集成',
         items: [
           { text: 'Linux.do Adapter', link: '/integrations/linuxdo' },
-          { text: 'GitHub Adapter', link: '/integrations/github' },
           { text: 'Bookmarks Adapter', link: '/integrations/bookmarks' },
           { text: 'Zhihu Adapter', link: '/integrations/zhihu' },
           { text: 'Web Clipper Adapter', link: '/integrations/web-clipper' }

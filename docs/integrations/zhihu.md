@@ -1,6 +1,6 @@
 # Zhihu Adapter
 
-Zhihu adapter 面向知乎文章、专栏和回答内容导出。相比 Linux.do 与 GitHub，知乎页面结构和登录可见性更容易变化，因此需要更明确的 fallback behavior。
+Zhihu adapter 面向知乎文章、专栏和回答内容导出。相比 Linux.do，知乎页面结构和登录可见性更容易变化，因此需要更明确的 fallback behavior。
 
 ## Extraction rules
 

@@ -3,7 +3,6 @@
 const { SourceAdapter } = require("./SourceAdapter");
 const { AdapterRegistry } = require("./AdapterRegistry");
 const { LinuxDoAdapter } = require("./LinuxDoAdapter");
-const { createGitHubAdapter } = require("./GitHubAdapter");
 const { BookmarkAdapter } = require("./BookmarkAdapter");
 const { ZhihuAdapter } = require("./ZhihuAdapter");
 const { GenericAdapter } = require("./GenericAdapter");
@@ -17,10 +16,8 @@ Object.assign(BookmarkAdapter, { _bridgeAccessor: lazyBridge });
 
 // 注册所有内置适配器
 AdapterRegistry.register(LinuxDoAdapter);
-AdapterRegistry.register(createGitHubAdapter("stars"));
-AdapterRegistry.register(createGitHubAdapter("repos"));
-AdapterRegistry.register(createGitHubAdapter("forks"));
-AdapterRegistry.register(createGitHubAdapter("gists"));
+// v3.17: GitHub 收藏源已移除(仅保留 UpdateChecker 自身更新检查), 不再注册 github-* 适配器;
+// 历史 github-* 定时/状态残留由 SyncScheduler/SyncState 兼容层静默跳过。
 AdapterRegistry.register(BookmarkAdapter);
 AdapterRegistry.register(ZhihuAdapter);
 AdapterRegistry.register(GenericAdapter);

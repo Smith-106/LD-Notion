@@ -1,6 +1,6 @@
 # 通用网页与 Obsidian
 
-LD-Notion 不只运行在 Linux.do、GitHub 和 Notion，也可以在通用网页上提供剪藏入口，并支持导出到 Obsidian。
+LD-Notion 不只运行在 Linux.do 和 Notion，也可以在通用网页上提供剪藏入口，并支持导出到 Obsidian。
 
 ## 通用网页剪藏
 

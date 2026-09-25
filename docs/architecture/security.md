@@ -42,11 +42,11 @@ flowchart TD
 
 - 敏感凭证自 v3.14.2 起统一保存在浏览器本地 **GM 明文存储**：
   - **OAuth 三键**（`Client Secret` / access token / refresh token / manual Integration Token）自 v3.12.0 起已为跨页回调可读改走 GM 明文。
-  - **其它敏感凭证**（AI API Key / Base URL、GitHub Token、Obsidian API Key / URL）v3.14.2 起同样改走 GM 明文。原因是保险箱解锁态为页面内存态，每次页面加载（含脚本更新重载）即锁定，锁定态读空导致“更新后凭证失效”；与 OAuth 三键同根（R1），按同一先例移出。
+  - **其它敏感凭证**（AI API Key / Base URL、Obsidian API Key / URL）v3.14.2 起同样改走 GM 明文。原因是保险箱解锁态为页面内存态，每次页面加载（含脚本更新重载）即锁定，锁定态读空导致“更新后凭证失效”；与 OAuth 三键同根（R1），按同一先例移出。
 - 审计安全：`OperationLog.redactSensitiveFields` 使用 `REDACT_IN_LOGS` 超集（共 8 键），所有敏感凭证在审计日志中一律 `***REDACTED***` 脱敏，明文存储不会泄漏到日志。
 - 非敏感配置仍保存在浏览器本地存储中，例如目标数据库 ID、面板位置、来源偏好和 OAuth 的 `Client ID` / `Redirect URI`。
 - 「断开授权」只清除本地 access token / refresh token，不会撤销 Notion 后台已经批准的授权，也不会自动删除你保留的 OAuth 基础配置。
-- **升级提示**：v3.14.2 之前已迁入加密保险箱的 AI/GitHub/Obsidian 凭据无法自动回读（密文需口令），升级后重新输入一次即可；此后脚本更新不再失效。
+- **升级提示**：v3.14.2 之前已迁入加密保险箱的 AI/Obsidian 凭据无法自动回读（密文需口令），升级后重新输入一次即可；此后脚本更新不再失效。
 
 ## v3.7.0 安全加固
 
@@ -54,8 +54,8 @@ v3.7.0 对用户脚本权限域和 AI 输入链路做了系统性加固：
 
 ### Userscript 权限域收窄
 
-- `@match` 从 `*://*/*` 替换为显式站点模式（linux.do、notion.so、github.com、gist.github.com、zhihu.com）。
-- `@connect` 从 `*` 替换为 9 个显式域名白名单（api.notion.com、linux.do、s3.amazonaws.com、api.openai.com、api.anthropic.com、generativelanguage.googleapis.com、api.github.com、zhihu.com）。
+- `@match` 从 `*://*/*` 替换为显式站点模式（linux.do、notion.so、zhihu.com；v3.17 起 github.com/gist.github.com 随 GitHub 源移除）。
+- `@connect` 从 `*` 替换为显式域名白名单（api.notion.com、linux.do、s3.amazonaws.com、api.openai.com、api.anthropic.com、generativelanguage.googleapis.com、api.github.com、zhihu.com；其中 api.github.com 自 v3.17 起仅供 UpdateChecker 自更新检查，收藏导入已移除）。
 - 曾新增 `@include` 正则白名单 + `@exclude` 排除搜索引擎/邮箱/localhost；**v3.14.8 / 远程审计**：移除油猴 broad `@include` catch-all，仅保留显式 `@match` + `@exclude` 纵深防御（通用网页剪藏改由扩展承担，或用户自添 `@match`）。
 - 这阻止了用户脚本向任意域名发起网络请求（如攻击者控制的 exfil 端点）。
 
@@ -180,6 +180,6 @@ v3.7.2 通过 UI Odyssey 全维度审查修复了 UI 层面的安全问题：
 - 日常使用保持「标准」权限。
 - 危险操作确认保持开启。
 - 只在需要移动、归档、数据库结构操作时临时切到「高级」。
-- 首次保存 AI API Key、GitHub Token、Obsidian 等敏感凭证前，无需初始化保险箱（v3.14.2 起全部敏感键走 GM 明文存储）。
+- 首次保存 AI API Key、Obsidian 等敏感凭证前，无需初始化保险箱（v3.14.2 起全部敏感键走 GM 明文存储）。
 - 不要把共享生产级 OAuth Client Secret 放进前端配置。
 - 在批量操作前先对少量数据试运行。

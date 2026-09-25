@@ -7,7 +7,7 @@
 const { handleQuery, handleSearch, handleWorkspaceSearch } = require("./handlers/query");
 const { handleUpdate, _resolveDatabaseId, _fetchSourcePages, handleMove, handleCopy, handleCompound, handleCreateDatabase } = require("./handlers/pageCrud");
 const { _resolvePageId, _textToBlocks, _extractPageContent, handleWriteContent, handleEditContent, handleTranslateContent, _ensureAIProperty, handleAIAutofill, handleAsk, handleDeepResearch, handleSummarize, handleBrainstorm, handleProofread, handleTemplateOutput } = require("./handlers/content");
-const { handleClassify, handleBatchClassify, handleBatchTranslate, handleExtractToDatabase, handleGeneratePages, handleBatchAnalyze, handleGitHubImport, handleBookmarkImport } = require("./handlers/batch");
+const { handleClassify, handleBatchClassify, handleBatchTranslate, handleExtractToDatabase, handleGeneratePages, handleBatchAnalyze, handleBookmarkImport } = require("./handlers/batch");
 
 const AIHandlers = {
     handleQuery,
@@ -40,7 +40,6 @@ const AIHandlers = {
     handleExtractToDatabase,
     handleGeneratePages,
     handleBatchAnalyze,
-    handleGitHubImport,
     handleBookmarkImport,
 };
 

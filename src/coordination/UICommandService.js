@@ -31,10 +31,9 @@ const UICommandService = Object.freeze({
             "AIAssistant.handleTranslateContent / handleEditContent / handleAIAutofill",
             "AIClassifier.*",
             "GenericExporter.setupDatabaseProperties",
-            "GitHubExporter.setupDatabaseProperties",
             "BookmarkExporter.setupDatabaseProperties",
         ]),
-        note: "M2-P1 收口 UI 事件到 command boundary;遗留 direct NotionAPI 写路径限定在工具执行器与 schema 初始化 helper 内(GenericExporter.setupDatabaseProperties 的 UI 触发路径已加 updateDatabase 非阻塞闸门 + guard.denied 审计;Bookmark/GitHub exporter 已有 canExecute 闸门),不允许继续从 UI 事件直接扩散。",
+        note: "M2-P1 收口 UI 事件到 command boundary;遗留 direct NotionAPI 写路径限定在工具执行器与 schema 初始化 helper 内(GenericExporter.setupDatabaseProperties 的 UI 触发路径已加 updateDatabase 非阻塞闸门 + guard.denied 审计;Bookmark exporter 已有 canExecute 闸门),不允许继续从 UI 事件直接扩散。",
     }),
 
     _persistStorageEntries: async (entries = {}) => {
@@ -49,7 +48,7 @@ const UICommandService = Object.freeze({
 
     _persistProvidedSensitiveEntries: async (entries = {}) => {
         // v3.14.7 (REV-07): SENSITIVE_KEYS 已清空(v3.14.2 保险箱退役, isSensitiveKey 恒 false)
-        // 导致此函数退化为 no-op, AI/GitHub 密钥在站设置/导出会话保存时被静默丢弃。
+        // 导致此函数退化为 no-op, AI 密钥在站设置/导出会话保存时被静默丢弃。
         // 改判 REDACT_IN_LOGS(明文存储方针的脱敏超集): 匹配键直接 GM 明文落盘,
         // 审计日志仍由 REDACT_IN_LOGS 统一脱敏。
         for (const [key, value] of Object.entries(entries)) {
@@ -80,9 +79,6 @@ const UICommandService = Object.freeze({
             personaTone = CONFIG.DEFAULTS.agentPersonaTone,
             personaExpertise = CONFIG.DEFAULTS.agentPersonaExpertise,
             personaInstructions = "",
-            githubUsername = "",
-            githubToken,
-            githubImportTypes = ["stars"],
             auditEnabled = null,
         } = payload;
 
@@ -103,7 +99,6 @@ const UICommandService = Object.freeze({
             [CONFIG.STORAGE_KEYS.AGENT_PERSONA_TONE]: personaTone,
             [CONFIG.STORAGE_KEYS.AGENT_PERSONA_EXPERTISE]: personaExpertise || CONFIG.DEFAULTS.agentPersonaExpertise,
             [CONFIG.STORAGE_KEYS.AGENT_PERSONA_INSTRUCTIONS]: personaInstructions,
-            [CONFIG.STORAGE_KEYS.GITHUB_USERNAME]: githubUsername,
         });
         if (auditEnabled !== null) {
             // F-UI-07:审计开关经命令边界持久化(布尔校验)
@@ -113,9 +108,7 @@ const UICommandService = Object.freeze({
         }
         await UICommandService._persistProvidedSensitiveEntries({
             ...(aiApiKey === undefined ? {} : { [CONFIG.STORAGE_KEYS.AI_API_KEY]: aiApiKey }),
-            ...(githubToken === undefined ? {} : { [CONFIG.STORAGE_KEYS.GITHUB_TOKEN]: githubToken }),
         });
-        (require("../import").GitHubAPI).setImportTypes(Array.isArray(githubImportTypes) && githubImportTypes.length > 0 ? githubImportTypes : ["stars"]);
 
         return {
             aiTargetState: TargetState.getDisplayAITargetState(),

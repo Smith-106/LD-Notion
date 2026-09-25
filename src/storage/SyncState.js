@@ -52,11 +52,7 @@ const SyncStateV2 = {
             version: SyncStateV2.VERSION,
             sources: {
                 linuxdo: this._makeSourceDefault(),
-                "github-stars": this._makeSourceDefault(),
-                "github-repos": this._makeSourceDefault(),
-                "github-forks": this._makeSourceDefault(),
-                "github-gists": this._makeSourceDefault(),
-                "github-meta": this._makeSourceDefault(),
+                // v3.17 GitHub 收藏源已移除: 不再预置 github-* 源(历史残留由 _load 剪枝)
                 bookmark: this._makeSourceDefault(true),
                 zhihu: this._makeSourceDefault(),
                 generic: this._makeSourceDefault(),
@@ -126,14 +122,7 @@ const SyncStateV2 = {
             sources.linuxdo = this.normalizeSyncRecord(v1State.linuxdo);
         }
 
-        // github: meta → 废弃, 子类型扁平化
-        if (v1State.github) {
-            for (const type of ["stars", "repos", "forks", "gists"]) {
-                if (v1State.github[type]) {
-                    sources[`github-${type}`] = this.normalizeSyncRecord(v1State.github[type]);
-                }
-            }
-        }
+        // v3.17 GitHub 收藏源已移除: 历史 github 状态不再迁移(静默丢弃, 与 v3.15 RSS 移除同口径)
 
         // bookmarks
         if (v1State.bookmarks) {
@@ -178,6 +167,15 @@ const SyncStateV2 = {
         // v3.15 RSS 移除: 存量 rss 状态剪枝(防旧水位残留)
         if (parsed.sources && parsed.sources.rss) {
             delete parsed.sources.rss;
+        }
+
+        // v3.17 GitHub 收藏源已移除: 存量 github-* 状态剪枝(防旧水位残留)
+        if (parsed.sources) {
+            for (const key of Object.keys(parsed.sources)) {
+                if (key === "github-meta" || key.startsWith("github-")) {
+                    delete parsed.sources[key];
+                }
+            }
         }
 
         // 确保 sources 存在且每个 key 都有默认值

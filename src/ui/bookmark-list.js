@@ -3,8 +3,6 @@
 const { CONFIG } = require("../config");
 const { Utils } = require("../utils");
 const { Storage } = require("../storage");
-const { SiteDetector } = require("../api");
-const { GitHubAPI } = require("../import");
 const { ChatUI } = require("../ai");
 
 // 因这些函数内部引用了 UI 自身方法与状态（如 UI.refs、UI.selectedBookmarks、
@@ -17,29 +15,31 @@ const UI = () => {
 
 const BookmarkList = {
 
-    isGitHubMode: () => SiteDetector.isGitHub(),
+    // v3.17: GitHub 收藏源已移除,恒为 false(兼容壳,调用方无需改)。
+    isGitHubMode: () => false,
 
     getActiveBookmarkSource: () => {
-        const source = Storage.get(CONFIG.STORAGE_KEYS.BOOKMARK_SOURCE, CONFIG.DEFAULTS.bookmarkSource);
-        return source === "github" ? "github" : "linuxdo";
+        // v3.17: GitHub 收藏源已移除,收藏来源恒为 linuxdo(历史 github 值归一)。
+        return "linuxdo";
     },
 
-    isActiveGitHubSource: () => UI().getActiveBookmarkSource() === "github",
+    // v3.17: GitHub 收藏源已移除,恒为 false(兼容壳,调用方无需改)。
+    isActiveGitHubSource: () => false,
 
     getAutoImportConfigBySource: () => {
-        const isGitHub = UI().isActiveGitHubSource();
+        // v3.17: GitHub 收藏源已移除,恒走 Linux.do 自动导入配置。
         return {
-            isGitHub,
-            enabledKey: isGitHub ? CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED : CONFIG.STORAGE_KEYS.AUTO_IMPORT_ENABLED,
-            intervalKey: isGitHub ? CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL : CONFIG.STORAGE_KEYS.AUTO_IMPORT_INTERVAL,
-            enabledDefault: isGitHub ? CONFIG.DEFAULTS.githubAutoImportEnabled : CONFIG.DEFAULTS.autoImportEnabled,
-            intervalDefault: isGitHub ? CONFIG.DEFAULTS.githubAutoImportInterval : CONFIG.DEFAULTS.autoImportInterval,
+            isGitHub: false,
+            enabledKey: CONFIG.STORAGE_KEYS.AUTO_IMPORT_ENABLED,
+            intervalKey: CONFIG.STORAGE_KEYS.AUTO_IMPORT_INTERVAL,
+            enabledDefault: CONFIG.DEFAULTS.autoImportEnabled,
+            intervalDefault: CONFIG.DEFAULTS.autoImportInterval,
         };
     },
 
     updateVisualSnapshot: (source, bookmarks) => {
-        const key = source === "github" ? "github" : "linuxdo";
-        UI().visualSnapshots[key] = Array.isArray(bookmarks) ? bookmarks.slice() : [];
+        // v3.17: GitHub 收藏源已移除,快照恒写 linuxdo 键。
+        UI().visualSnapshots.linuxdo = Array.isArray(bookmarks) ? bookmarks.slice() : [];
     },
 
     getCombinedVisualBookmarks: () => {
@@ -55,12 +55,14 @@ const BookmarkList = {
 
     getBookmarkVisualTypeLabel: (bookmark) => {
         if (bookmark?.source === "github") {
-            const sourceTypeMap = {
+            // P4 收敛(c17): 无原型对象 —— sourceType 可来自历史脏数据(含 constructor/__proto__
+            // 等原型键), 直接取值会把函数源码显示到标签。v3.17 保留此兼容壳, 语义不变。
+            const sourceTypeMap = Object.assign(Object.create(null), {
                 stars: "Stars",
                 repos: "Repos",
                 forks: "Forks",
                 gists: "Gists",
-            };
+            });
             return sourceTypeMap[bookmark.sourceType] || "GitHub";
         }
         return "帖子";
@@ -93,7 +95,7 @@ const BookmarkList = {
 
     applyBookmarkSourceUI: (source) => {
         const refs = UI().refs || {};
-        const isGitHub = source === "github";
+        // v3.17: GitHub 收藏源已移除,来源恒为 linuxdo,收藏分区按钮恒高亮。
 
         if (refs.bookmarksLabel) {
             refs.bookmarksLabel.textContent = "已加载收藏数量";
@@ -106,14 +108,11 @@ const BookmarkList = {
         }
 
         if (refs.sourceSelectLinuxdo) {
-            refs.sourceSelectLinuxdo.classList.toggle("active", !isGitHub);
+            refs.sourceSelectLinuxdo.classList.toggle("active", true);
             // P2:aria-pressed 同步切换状态
-            refs.sourceSelectLinuxdo.setAttribute("aria-pressed", String(!isGitHub));
+            refs.sourceSelectLinuxdo.setAttribute("aria-pressed", String(true));
         }
-        if (refs.sourceSelectGithub) {
-            refs.sourceSelectGithub.classList.toggle("active", isGitHub);
-            refs.sourceSelectGithub.setAttribute("aria-pressed", String(isGitHub));
-        }
+        // v3.17: GitHub 收藏源已移除,sourceSelectGithub 按钮已随面板删除。
 
         const autoStatus = refs.autoImportStatus || UI().panel?.querySelector("#ldb-auto-import-status");
         if (autoStatus && autoStatus.textContent && !autoStatus.textContent.includes("⚠️")) {
@@ -236,18 +235,11 @@ const BookmarkList = {
 
     isBookmarkKeyExportedLocal: (bookmarkKey) => {
         if (!bookmarkKey) return false;
+        // v3.17: GitHub 收藏源已移除,历史 gh: 键无账本可查,恒判未导出(只读,不抛错)。
+        if (bookmarkKey.startsWith("gh:")) return false;
         const dedupStrict = Utils.isLinuxDoDedupStrict();
-        if (!bookmarkKey.startsWith("gh:")) {
-            if (!dedupStrict) return false;
-            return Storage.isTopicExported(bookmarkKey);
-        }
-        const parts = bookmarkKey.split(":");
-        const sourceType = parts[1] || "";
-        const itemKey = parts.slice(2).join(":");
-        if (sourceType === "gists") {
-            return GitHubAPI.isGistExported(itemKey);
-        }
-        return GitHubAPI.isExported(itemKey);
+        if (!dedupStrict) return false;
+        return Storage.isTopicExported(bookmarkKey);
     },
 
     isBookmarkKeyExported: (bookmarkKey) => {
@@ -297,7 +289,7 @@ const BookmarkList = {
     },
 
     // v3.15.1: 本地账本 vs Notion 快照分歧计算(纯函数, 无快照/空列表时返回空分歧+原因)。
-    // 口径: 仅覆盖当前已加载列表(UI.bookmarks, 含 LinuxDo + GitHub 两源);
+    // 口径: 仅覆盖当前已加载列表(UI.bookmarks);
     // allow_duplicates 下 LinuxDo 项本地恒判待导出, 不纳入 ledgerOnly(与 isExportedForUi 同口径)。
     computeLedgerSnapshotDiff: () => {
         const empty = (reason) => ({
@@ -341,7 +333,7 @@ const BookmarkList = {
     },
 
     // v3.15.1: 按快照对齐本地账本 —— 仅 unmark 当前已加载列表中「账本有记、快照缺失」的
-    // LinuxDo/GitHub 项(逐项经 Storage.unmarkTopicExported / GitHubAPI.unmark*, 双账本对称)。
+    // Linux.do 项(逐项经 Storage.unmarkTopicExported;v3.17 GitHub 移除后 gh: 键直接跳过)。
     // 安全护栏: ① 无快照/空快照(records 为空)直接拒绝(Notion 被清空≠快照为空, 须先刷新工作区
     // 拿到真实快照); ② 空列表拒绝; ③ 仅动当前列表交集, 不碰未加载源; ④ 调用方负责确认弹窗+审计。
     alignLedgerToSnapshot: (keys) => {
@@ -364,18 +356,9 @@ const BookmarkList = {
             const k = String(key);
             if (wanted && !wanted.has(k)) continue;
             if (!inList.has(k)) continue; // 仅动当前列表交集
-            let removed = false;
-            if (k.startsWith("gh:")) {
-                const parts = k.split(":");
-                const sourceType = parts[1] || "";
-                const itemKey = parts.slice(2).join(":");
-                if (!itemKey) continue;
-                removed = sourceType === "gists"
-                    ? GitHubAPI.unmarkGistExported(itemKey)
-                    : GitHubAPI.unmarkExported(itemKey);
-            } else {
-                removed = Storage.unmarkTopicExported(k);
-            }
+            // v3.17: GitHub 收藏源已移除,历史 gh: 键无账本可对齐,仅处理 Linux.do 项。
+            if (k.startsWith("gh:")) continue;
+            const removed = Storage.unmarkTopicExported(k);
             if (removed) { aligned++; alignedKeys.push(k); }
         }
         if (aligned > 0) {
@@ -403,16 +386,13 @@ const BookmarkList = {
         });
     },
 
-    buildBookmarkItemHtml: (bookmark, githubMode = false) => {
+    buildBookmarkItemHtml: (bookmark) => {
         const bookmarkKey = UI().getBookmarkKey(bookmark);
         const title = bookmark.title || bookmark.fancy_title || bookmark.name || `帖子 ${bookmarkKey}`;
         const escapedTitle = Utils.escapeHtml(title);
         const escapedTruncatedTitle = Utils.escapeHtml(Utils.truncateText(title, 35));
         const isExported = UI().isBookmarkKeyExported(bookmarkKey);
         const isSelected = UI().selectedBookmarks?.has(bookmarkKey);
-        const sourceTag = githubMode
-            ? `<span class="status" style="margin-right: var(--ldb-ui-spacing-sm);">${Utils.escapeHtml((bookmark.sourceType || "stars").toUpperCase())}</span>`
-            : "";
         const reexportAction = isExported
             ? `<button type="button" class="ldb-btn ldb-btn-secondary ldb-btn-small" data-bookmark-action="reexport" title="移除该项的导出记录并重新加入待导出列表">重新导出</button>`
             : ``;
@@ -424,7 +404,7 @@ const BookmarkList = {
             <div class="ldb-bookmark-item" data-topic-id="${escapedBookmarkKey}">
                 <input type="checkbox" ${isSelected ? "checked" : ""} ${isExported ? "disabled" : ""} ${isExported ? 'title="已导出到 Notion，无法重复导入"' : ""}>
                 <span class="title" title="${escapedTitle}">${escapedTruncatedTitle}</span>
-                ${sourceTag}${isExported ? '<span class="status exported">已导出</span>' : '<span class="status pending">待导出</span>'}
+                ${isExported ? '<span class="status exported">已导出</span>' : '<span class="status pending">待导出</span>'}
                 ${reexportAction}
             </div>
         `;
@@ -439,32 +419,19 @@ const BookmarkList = {
         UI().renderJobId += 1;
         const renderJobId = UI().renderJobId;
         if (!UI().bookmarks || UI().bookmarks.length === 0) {
-            // F-UI-15:空状态按钮按来源区分(GitHub 来源显示加载 GitHub 收藏,避免动作错配)
-            const isGitHub = UI().isActiveGitHubSource();
-            const emptyLabel = isGitHub ? "📥 加载 GitHub 收藏" : "📥 导入浏览器书签";
+            // v3.17: GitHub 收藏源已移除,空状态恒为浏览器书签导入路径。
             list.innerHTML = `
                 <div style="padding: var(--ldb-ui-spacing-xl); text-align: center; color: var(--ldb-ui-muted);">
                     <p>暂无收藏</p>
-                    <button id="ldb-import-bookmarks-btn" class="ldb-btn ldb-btn-primary" style="margin-top: var(--ldb-ui-spacing-lg);">${emptyLabel}</button>
+                    <button id="ldb-import-bookmarks-btn" class="ldb-btn ldb-btn-primary" style="margin-top: var(--ldb-ui-spacing-lg);">📥 导入浏览器书签</button>
                 </div>
             `;
             // Bind import button event
             setTimeout(() => {
-                // P3 共识(glm+qwen): 晚到绑定须校验渲染代次——否则旧闭包 isGitHub 覆盖新按钮
                 if (renderJobId !== UI().renderJobId) return;
                 const importBtn = list.querySelector("#ldb-import-bookmarks-btn");
                 if (importBtn) {
                     importBtn.onclick = () => {
-                        if (isGitHub) {
-                            // GitHub 来源:直接触发加载 GitHub 收藏(不依赖 AI)
-                            const loadBtn = document.querySelector("#ldb-load-bookmarks");
-                            if (loadBtn) {
-                                loadBtn.click();
-                            } else {
-                                UI().showStatus("请先在收藏区点击「加载收藏列表」", "info");
-                            }
-                            return;
-                        }
                         // F-01 修复:sendMessage 忽略入参,须先注入指令文本再发送
                         const chatInput = document.querySelector("#ldb-chat-input");
                         if (chatInput && ChatUI.sendMessage) {
@@ -481,7 +448,6 @@ const BookmarkList = {
             return;
         }
 
-        const githubMode = UI().isActiveGitHubSource();
         const bookmarks = UI().bookmarks.slice();
         const chunkSize = bookmarks.length > 150 ? 80 : bookmarks.length;
         let cursor = 0;
@@ -489,7 +455,7 @@ const BookmarkList = {
 
         const appendChunk = () => {
             if (UI().renderJobId !== renderJobId) return;
-            const chunk = bookmarks.slice(cursor, cursor + chunkSize).map((bookmark) => UI().buildBookmarkItemHtml(bookmark, githubMode)).join("");
+            const chunk = bookmarks.slice(cursor, cursor + chunkSize).map((bookmark) => UI().buildBookmarkItemHtml(bookmark)).join("");
             list.insertAdjacentHTML("beforeend", chunk);
             cursor += chunkSize;
             if (cursor < bookmarks.length) {
@@ -508,28 +474,10 @@ const BookmarkList = {
 
     requeueLinuxDoBookmark: (bookmarkKey) => {
         if (!bookmarkKey) return false;
-        // v3.14.4: GitHub 项(gh: 前缀 key)同样支持重新导出 —— 修复对账误标后无恢复入口的问题
-        // (共享账本下"已导出"= Notion 或 Obsidian 任一目标, 误标可通过此入口撤销)。
+        // v3.17: GitHub 收藏源已移除,历史 gh: 键无账本可撤销,直接提示。
         if (bookmarkKey.startsWith("gh:")) {
-            const parts = bookmarkKey.split(":");
-            const sourceType = parts[1] || "";
-            const itemKey = parts.slice(2).join(":");
-            if (!itemKey) return false;
-            let removed = false;
-            if (sourceType === "gists") {
-                removed = GitHubAPI.unmarkGistExported(itemKey);
-            } else {
-                removed = GitHubAPI.unmarkExported(itemKey);
-            }
-            if (!removed) {
-                UI().showStatus("该项当前不在已导出记录中。", "info");
-                return false;
-            }
-            UI().selectedBookmarks.add(bookmarkKey);
-            UI().recomputeExportStats();
-            UI().renderBookmarkList();
-            UI().showStatus("已移除该项的导出记录，请重新勾选并导出。", "success");
-            return true;
+            UI().showStatus("该项为历史 GitHub 记录,已不再支持重新导出。", "info");
+            return false;
         }
         if (!Utils.isLinuxDoDedupStrict()) {
             UI().showStatus("当前为允许重复模式，无需重新导出；直接勾选并导出即可。", "info");

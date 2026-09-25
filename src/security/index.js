@@ -122,8 +122,7 @@ const OperationGuard = {
         restorePage: 2,
         createComment: 1,
         agentTask: 2,
-        // v3.14.7 (REV-03 UI-07): Obsidian 写入登记——此前 4 个裸调点(events.js:1335/1380,
-        // github-obsidian-service.js:210, generic-ui.js:704)绕过 OperationGuard, 权限 0 只读
+        // v3.14.7 (REV-03 UI-07): Obsidian 写入登记——此前裸调点(events.js/generic-ui.js 等)绕过 OperationGuard, 权限 0 只读
         // 级仍可写零审计。登记后 writeNote/writeImage 统一经 canExecute 闸门 + auditDenied。
         "obsidian.writeNote": 1,
         "obsidian.writeImage": 1,

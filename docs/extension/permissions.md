@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | 浏览器书签导入 | `bookmarks` | 读取用户书签树和文件夹路径 |
 | Notion 写入 | `api.notion.com` host access | 创建页面、更新属性、读取工作区列表 |
-| GitHub 导入 | `api.github.com` host access | 读取 Stars、Repos、Forks、Gists |
+| 自更新检查 | `api.github.com` host access | 检查 GitHub Releases 获取新版本（仅 UpdateChecker，v3.17 起 GitHub 收藏导入已移除） |
 | AI 助手 | AI provider host access | 调用 OpenAI、Anthropic、Gemini 或自定义端点 |
 | 通用网页剪藏 | host page access | 读取当前页面标题、摘要和 DOM 线索 |
 | 本地配置与保险箱 | extension storage / GM storage | 保存非敏感配置，以及敏感凭证的加密保险箱 payload |
@@ -19,8 +19,8 @@
 
 - `chrome-extension-full/manifest.json` 是书签桥接扩展，只声明 `bookmarks` 权限，并在所有 `http/https` 页面注入 content script。
 - 书签桥接扩展虽然注入范围较宽，但运行时只有在页面上存在活动中的 LD-Notion 根节点时，才会响应书签桥接请求。
-- `scripts/build-extension.js` 生成的 `chrome-extension-full/` 默认使用 `bounded_hosts` profile：跨域网络 `host_permissions` 只覆盖 Linux.do、Notion API、GitHub API、AI provider 与必要的 AWS 资源。
-- 为了保持与 userscript 一致的 GitHub / Zhihu / 通用网页入口，`chrome-extension-full/` 的 `content_scripts.matches` 仍覆盖这些页面，并通过 `exclude_matches` 排除搜索引擎、邮箱与本地开发地址。
+- `scripts/build-extension.js` 生成的 `chrome-extension-full/` 默认使用 `bounded_hosts` profile：跨域网络 `host_permissions` 只覆盖 Linux.do、Notion API、自更新检查（api.github.com）、AI provider 与必要的 AWS 资源。
+- 为了保持与 userscript 一致的 Zhihu / 通用网页入口，`chrome-extension-full/` 的 `content_scripts.matches` 仍覆盖这些页面，并通过 `exclude_matches` 排除搜索引擎、邮箱与本地开发地址。
 - 如果未来进入浏览器商店分发，应继续评估 optional permissions，以进一步降低初始信任成本。
 
 ## Trust boundaries

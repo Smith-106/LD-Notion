@@ -11,29 +11,19 @@ const { SyncStateV2 } = require("../storage/SyncState");
  */
 const SOURCE_INTERVAL_KEYS = {
     linuxdo: CONFIG.STORAGE_KEYS.SYNC_INTERVAL_LINUXDO,
-    "github-stars": CONFIG.STORAGE_KEYS.SYNC_INTERVAL_GITHUB,
-    "github-repos": CONFIG.STORAGE_KEYS.SYNC_INTERVAL_GITHUB,
-    "github-forks": CONFIG.STORAGE_KEYS.SYNC_INTERVAL_GITHUB,
-    "github-gists": CONFIG.STORAGE_KEYS.SYNC_INTERVAL_GITHUB,
     bookmark: CONFIG.STORAGE_KEYS.SYNC_INTERVAL_BOOKMARKS,
+// v3.17: GitHub 收藏源已移除 —— 历史 github-* 键保留在 CONFIG(历史存储兼容),
+// 此处不再映射, 残留定时/状态走默认间隔与 isEnabled=false 静默跳过。
 };
 
 const SOURCE_INTERVAL_DEFAULTS = {
     linuxdo: CONFIG.DEFAULTS.syncIntervalLinuxdo,
-    "github-stars": CONFIG.DEFAULTS.syncIntervalGithub,
-    "github-repos": CONFIG.DEFAULTS.syncIntervalGithub,
-    "github-forks": CONFIG.DEFAULTS.syncIntervalGithub,
-    "github-gists": CONFIG.DEFAULTS.syncIntervalGithub,
     bookmark: CONFIG.DEFAULTS.syncIntervalBookmarks,
 };
 
 // 源类型到自动导入启用键的映射
 const SOURCE_ENABLED_KEYS = {
     linuxdo: CONFIG.STORAGE_KEYS.AUTO_IMPORT_ENABLED,
-    "github-stars": CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED,
-    "github-repos": CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED,
-    "github-forks": CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED,
-    "github-gists": CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED,
     bookmark: CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED,
 };
 
@@ -49,10 +39,6 @@ const MAX_RETRIES = RETRY_DELAYS.length + 2;
 // lazy require 避免加载期耦合(import/bridge 不顶层 require adapter)。
 const SOURCE_RUNNERS = {
     linuxdo: () => require("../import").AutoImporter.run(),
-    "github-stars": () => require("../import").GitHubAutoImporter.run(),
-    "github-repos": () => require("../import").GitHubAutoImporter.run(),
-    "github-forks": () => require("../import").GitHubAutoImporter.run(),
-    "github-gists": () => require("../import").GitHubAutoImporter.run(),
     bookmark: () => require("../bridge").BookmarkAutoImporter.run(),
 };
 

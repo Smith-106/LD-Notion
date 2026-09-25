@@ -2,16 +2,15 @@
 
 // events/ai-bindings.js — AI 对话事件绑定 (M3 events.js 拆分波次)。
 // 提取自 events.js bindEvents Section 2 (~318 LOC): ChatUI 初始化、AI 服务/模型/
-// API Key/目标库绑定、GitHub OAuth 设备流、AI 模板管理。
+// API Key/目标库绑定、AI 模板管理。
 // 共享闭包助手经 ctx 注入(getSensitiveValue/persistSensitiveInput 内部仍调用
 // events.js 顶层定义的 syncSensitiveInputs,行为不变)。
 
 const { CONFIG, MSG } = require("../../config");
 const { Utils } = require("../../utils");
 const { Storage } = require("../../storage");
-const { CredentialVault, NotionOAuth, GitHubOAuth } = require("../../auth");
+const { CredentialVault, NotionOAuth } = require("../../auth");
 const { buildConfiguredTargetWarning } = require("../../auth/target-discovery");
-const { GitHubAPI } = require("../../import");
 const { ConfirmationDialog } = require("../../security");
 const { UICommandService } = require("../../coordination/UICommandService");
 const { ChatUI, AIService } = require("../../ai");
@@ -77,55 +76,7 @@ const bindAISection = (ctx) => {
         refs.agentMaxIterationsSelect.onchange = (e) => {
             Storage.set(CONFIG.STORAGE_KEYS.AGENT_MAX_ITERATIONS, parseInt(e.target.value) || 8);
         };
-        refs.githubUsernameInput.onchange = (e) => {
-            Storage.set(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, e.target.value.trim());
-        };
-        refs.githubTokenInput.onchange = (e) => {
-            persistSensitiveInput(e.target, CONFIG.STORAGE_KEYS.GITHUB_TOKEN).catch((error) => {
-                UI.showStatus(error.message || String(error), "error");
-            });
-        };
-        // 20260914: GitHub OAuth Device Flow —— OAuth 为主 + 手动 PAT 兑底(与 Notion 双路径一致)
-        if (refs.githubOAuthBtn) {
-            refs.githubOAuthBtn.onclick = async () => {
-                GitHubOAuth.setClientId(refs.githubOauthClientIdInput ? refs.githubOauthClientIdInput.value : "");
-                const setStatus = (text) => {
-                    // textContent 赋值(非 innerHTML 插值): user_code/错误文案均不可信输入
-                    if (refs.githubOAuthStatus) refs.githubOAuthStatus.textContent = text;
-                };
-                // v3.16.6: 闭包保留设备码(pending/slow_down 复用, 防状态行覆盖丢码)
-                let currentUserCode = '';
-                let currentVerificationUri = '';
-                try {
-                    refs.githubOAuthBtn.disabled = true;
-                    setStatus("正在申请设备码…");
-                    const result = await GitHubOAuth.startDeviceFlow({
-                        onUserCode: ({ userCode, verificationUri }) => {
-                            // v3.16.6: 闭包保留设备码 —— 后续 pending/slow_down 轮询回调
-                            // 不再裸 setStatus 覆盖状态行(v3.16.5 根因: 码显示一闪即被覆盖)。
-                            // 设备码自动复制剪贴板(helper 内静默降级); 用户直接去 GitHub 页粘贴即可。
-                            currentUserCode = String(userCode || '');
-                            currentVerificationUri = String(verificationUri || '');
-                            try { window.open(currentVerificationUri, '_blank'); } catch (_) { /* 拦截时点下方链接 */ }
-                            GitHubOAuth.renderUserCodeStatus(refs.githubOAuthStatus, currentUserCode, currentVerificationUri);
-                        },
-                        onStatus: ({ phase }) => {
-                            // v3.16.6: 轮询阶段状态行仍保留设备码(带 phase 提示), 不再裸覆盖丢码。
-                            if (phase === 'pending' || phase === 'slow_down') {
-                                GitHubOAuth.renderUserCodeStatus(refs.githubOAuthStatus, currentUserCode, currentVerificationUri, phase);
-                            }
-                        },
-                    });
-                    await GitHubOAuth.applyTokenResponse(result);
-                    CredentialVault.syncSensitiveInput(refs.githubTokenInput, CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
-                    setStatus("✅ GitHub 授权成功，Token 已自动填入");
-                } catch (error) {
-                    setStatus(error.code === "cancelled" ? "已取消授权" : `❌ ${error.message}`);
-                } finally {
-                    refs.githubOAuthBtn.disabled = false;
-                }
-            };
-        }
+        // v3.17: GitHub 收藏源已移除,以下历史 GitHub 用户名/Token/OAuth/导入类型绑定删除。
         // Obsidian 设置变更保存
         refs.obsApiUrlInput.onchange = (e) => {
             Storage.set(CONFIG.STORAGE_KEYS.OBS_API_URL, e.target.value.trim());
@@ -144,18 +95,7 @@ const bindAISection = (ctx) => {
         refs.obsImgDirInput.onchange = (e) => {
             Storage.set(CONFIG.STORAGE_KEYS.OBS_IMG_DIR, e.target.value.trim());
         };
-        // GitHub 导入类型
-        refs.githubTypeCheckboxes.forEach(cb => {
-            cb.onchange = () => {
-                const source = [...refs.githubTypeCheckboxes].filter(c => c.checked);
-                const types = [...source].filter(c => c.checked).map(c => c.value);
-                GitHubAPI.setImportTypes(types.length > 0 ? types : ["stars"]);
-                // 取消全选时同步 UI 状态，避免显示与实际存储不一致
-                if (types.length === 0) {
-                    refs.githubTypeCheckboxes.forEach(c => { c.checked = c.value === "stars"; });
-                }
-            };
-        });
+        // v3.17: GitHub 收藏源已移除,以下历史 GitHub 导入类型复选框绑定删除。
 
         // 刷新 AI 数据库列表
         refs.aiRefreshDbsBtn.onclick = async () => {

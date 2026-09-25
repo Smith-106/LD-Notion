@@ -4,14 +4,14 @@
 const { CONFIG, MSG, getMimeType } = require("../config");
 const { Utils } = require("../utils");
 const { Storage, SyncState, DedupStore } = require("../storage");
-const { CredentialVault, NotionOAuth, TargetState, GitHubOAuth } = require("../auth");
+const { CredentialVault, NotionOAuth, TargetState } = require("../auth");
 const { buildConfiguredTargetWarning } = require("../auth/target-discovery");
 const { NotionAPI, DOMToNotion, SiteDetector, InstallHelper, HTMLToMarkdown, ObsidianAPI, EMOJI_MAP } = require("../api");
 const { OperationGuard, UndoManager, OperationLog, ConfirmationDialog } = require("../security");
 const { ZhihuAPI, GenericExtractor, WorkspaceService } = require("../extract");
 const { UICommandService } = require("../coordination/UICommandService");
 const { Exporter, LinuxDoAPI, GenericExporter } = require("../export");
-const { AutoImporter, UpdateChecker, GitHubAutoImporter, GitHubAPI, GitHubExporter } = require("../import");
+const { AutoImporter, UpdateChecker } = require("../import");
 const { BookmarkBridge, BookmarkAutoImporter, BookmarkExporter, BookmarkOrganizer } = require("../bridge");
 const { AIService, ChatUI, AIClassifier, AgentTrace, ChatState } = require("../ai");
 const { DesignSystem } = require("./design-system");
@@ -49,13 +49,8 @@ const UIEvents = {
         const syncSensitiveInputs = () => {
             NotionOAuth.syncApiKeyInputs();
             CredentialVault.syncSensitiveInput(refs.aiApiKeyInput, CONFIG.STORAGE_KEYS.AI_API_KEY, "AI 服务的 API Key");
-            CredentialVault.syncSensitiveInput(refs.githubTokenInput, CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
             CredentialVault.syncSensitiveInput(refs.obsApiKeyInput, CONFIG.STORAGE_KEYS.OBS_API_KEY, "Obsidian Local REST API Key");
         };
-        // 20260914: GitHub OAuth Client ID 为公开信息, 普通键同步(非敏感)
-        if (refs.githubOauthClientIdInput) {
-            refs.githubOauthClientIdInput.value = GitHubOAuth.getClientId();
-        }
 
         const isUserscriptMode = Utils.isUserscriptMode();
         const hasBridgeMarker = BookmarkBridge.isExtensionAvailable();
@@ -192,7 +187,6 @@ const UIEvents = {
         const collapseSections = [
             { toggle: refs.filterToggle, content: refs.filterContent, arrow: refs.filterArrow, key: "filter" },
             { toggle: refs.aiSettingsToggle, content: refs.aiSettingsContent, arrow: refs.aiSettingsArrow, key: "ai" },
-            { toggle: refs.githubSettingsToggle, content: refs.githubSettingsContent, arrow: refs.githubSettingsArrow, key: "github" },
             { toggle: refs.obsSettingsToggle, content: refs.obsSettingsContent, arrow: refs.obsSettingsArrow, key: "obsidian" },
             { toggle: refs.sourceSettingsToggle, content: refs.sourceSettingsContent, arrow: refs.sourceSettingsArrow, key: "source" },
             { toggle: refs.sourcePartitionsToggle, content: refs.sourcePartitionsContent, arrow: refs.sourcePartitionsArrow, key: "partitions" },
@@ -242,7 +236,7 @@ const UIEvents = {
         // 折叠区域键盘支持（Enter/Space 触发 click）
         // v3.14.7 (REV-20 UI-03): 已删除非持久化 sourceSettings/Partitions toggle handler——
         // 它们覆盖上方 bindCollapse 的持久化版本(丢失 source 两区折叠持久化)。
-        [refs.filterToggle, refs.aiSettingsToggle, refs.githubSettingsToggle,
+        [refs.filterToggle, refs.aiSettingsToggle,
          refs.obsSettingsToggle, refs.sourceSettingsToggle, refs.sourcePartitionsToggle
         ].forEach(el => {
             if (!el) return;
@@ -263,28 +257,7 @@ const UIEvents = {
             UI.switchBookmarkSource("linuxdo");
         };
 
-        refs.sourceSelectGithub.onclick = () => {
-            UI.switchBookmarkSource("github");
-        };
-
-        refs.openGithubSettingsBtn.onclick = () => {
-            const settingsTab = panel.querySelector('.ldb-tab[data-tab="settings"]');
-            if (settingsTab && !settingsTab.classList.contains("active")) {
-                settingsTab.click();
-            }
-            const content = refs.githubSettingsContent
-            const arrow = refs.githubSettingsArrow
-            const tokenInput = refs.githubTokenInput
-            if (content?.classList.contains("collapsed")) {
-                content.classList.remove("collapsed");
-                if (arrow) arrow.textContent = "▼";
-            }
-            if (tokenInput) {
-                tokenInput.scrollIntoView({ block: "center", behavior: "smooth" });
-                tokenInput.focus();
-            }
-            UI.showStatus("已定位到 GitHub Token 设置", "info");
-        };
+        // v3.17: GitHub 收藏源已移除,来源恒为 linuxdo; 历史 sourceSelectGithub 按钮已随面板删除。
 
         refs.selfCheckBtn.onclick = () => {
             UI.renderSelfCheckResult();
@@ -461,33 +434,6 @@ const UIEvents = {
             Storage.set(cfg.enabledKey, enabled);
             refs.autoImportOptions.style.display = enabled ? "block" : "none";
             if (enabled) {
-                if (cfg.isGitHub) {
-                    // v3.14.7 (REV-14 UI-16): 未配置时勾选不再假启用——此前 enabledKey 直接落盘,
-                    // 即使无 GitHub 用户名/token + Notion 目标也显示开启且开始注定失败的轮询。
-                    const githubReady = !!(
-                        Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "").trim()
-                        || Storage.get(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "").trim()
-                    );
-                    const notionReady = !!(
-                        NotionOAuth.getAccessToken(refs.apiKeyInput.value.trim())
-                        && (refs.databaseIdInput.value.trim() || refs.parentPageIdInput.value.trim())
-                    );
-                    if (!githubReady || !notionReady) {
-                        // P4 收敛(c13): 此处是 GitHub 自动导入开关 —— 警告必须写到 GitHub 状态位,
-                        // 写到 Linux.do 状态位会让 GitHub 状态残留旧值
-                        GitHubAutoImporter.updateStatus("⚠️ 请先配置 GitHub 用户名/Token 与 Notion 目标");
-                        e.target.checked = false;
-                        Storage.set(cfg.enabledKey, false);
-                        refs.autoImportOptions.style.display = "none";
-                        return;
-                    }
-                    GitHubAutoImporter.run();
-                    const interval = parseInt(refs.autoImportInterval.value) || 0;
-                    Storage.set(cfg.intervalKey, interval);
-                    if (interval > 0) GitHubAutoImporter.startPolling(interval);
-                    return;
-                }
-
                 // 检查 Notion 配置是否完整
                 const apiKey = NotionOAuth.getAccessToken(refs.apiKeyInput.value.trim());
                 if (!apiKey) {
@@ -518,13 +464,8 @@ const UIEvents = {
                 Storage.set(cfg.intervalKey, interval);
                 if (interval > 0) AutoImporter.startPolling(interval);
             } else {
-                if (cfg.isGitHub) {
-                    GitHubAutoImporter.stopPolling();
-                    GitHubAutoImporter.updateStatus("");
-                } else {
-                    AutoImporter.stopPolling();
-                    AutoImporter.updateStatus("");
-                }
+                AutoImporter.stopPolling();
+                AutoImporter.updateStatus("");
             }
         };
 
@@ -533,16 +474,9 @@ const UIEvents = {
             const cfg = UI.getAutoImportConfigBySource();
 
             Storage.set(cfg.intervalKey, interval);
-            if (cfg.isGitHub) {
-                GitHubAutoImporter.stopPolling();
-                if (interval > 0 && Storage.get(cfg.enabledKey, false)) {
-                    GitHubAutoImporter.startPolling(interval);
-                }
-            } else {
-                AutoImporter.stopPolling();
-                if (interval > 0 && Storage.get(cfg.enabledKey, false)) {
-                    AutoImporter.startPolling(interval);
-                }
+            AutoImporter.stopPolling();
+            if (interval > 0 && Storage.get(cfg.enabledKey, false)) {
+                AutoImporter.startPolling(interval);
             }
         };
 
@@ -620,7 +554,7 @@ const UIEvents = {
                 try {
                     const result = await runner();
                     const count = result?.importedCount ?? result?.count ?? 0;
-                    // odyssey-debug 20260913: runner 内部吞错(如 GitHub 404)经 errors 上抛红显真实原因;
+                    // odyssey-debug 20260913: runner 内部吞错经 errors 上抛红显真实原因;
                     // 其余 runner 未返回 errors 时行为不变。
                     if (Array.isArray(result?.errors) && result.errors.length > 0) {
                         UI.showStatus(`${label}失败：${result.errors[0]}`, "error");
@@ -636,7 +570,6 @@ const UIEvents = {
             };
         };
         bindImportNow(refs.importNowLinuxdoBtn, "Linux.do 导入", () => AutoImporter.run());
-        bindImportNow(refs.importNowGithubBtn, "GitHub 导入", () => GitHubAutoImporter.run());
         bindImportNow(refs.importNowBookmarkBtn, "书签导入", () => BookmarkAutoImporter.run());
 
         refs.linuxdoDedupModeSelect.onchange = (e) => {
@@ -797,7 +730,8 @@ const UIEvents = {
         };
 
         UI.switchBookmarkSource = (source) => {
-            const resolvedSource = source === "github" ? "github" : "linuxdo";
+            // v3.17: GitHub 收藏源已移除,来源恒为 linuxdo(历史 github 值归一)。
+            const resolvedSource = "linuxdo";
             Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_SOURCE, resolvedSource);
             UI.applyBookmarkSourceUI(resolvedSource);
             UI.renderSelfCheckResult();
@@ -838,15 +772,11 @@ const UIEvents = {
                     const item = reexportBtn.closest(".ldb-bookmark-item");
                     const bookmarkKey = String(item?.dataset.topicId || "");
                     if (bookmarkKey) {
-                        const isGitHubKey = bookmarkKey.startsWith("gh:");
                         // Odyssey Review F2(flash+hy3): 恢复破坏性覆盖前的确认弹窗
                         // (随坏内联 onclick 移除而丢失;旧内联因 ConfirmationDialog 非全局本就失效)
-                        // v3.14.4: GitHub 项同供重新导出(对账误标恢复入口)
                         ConfirmationDialog.show({
                             title: "确认重新导出",
-                            message: isGitHubKey
-                                ? "重新导出将移除该项（仓库/Gist）的导出记录并重新加入待导出列表，可能覆盖现有 Notion 页面或 Obsidian 笔记，是否继续？"
-                                : "重新导出将移除该帖子的导出记录并重新加入待导出列表，可能覆盖现有 Notion 页面，是否继续？",
+                            message: "重新导出将移除该帖子的导出记录并重新加入待导出列表，可能覆盖现有 Notion 页面，是否继续？",
                             confirmText: "重新导出",
                             onConfirm: () => {
                                 UI.requeueLinuxDoBookmark(bookmarkKey);
@@ -915,53 +845,17 @@ const UIEvents = {
             const loadSource = UI.getActiveBookmarkSource();
 
             try {
-                let bookmarks = [];
-
-                if (UI.isActiveGitHubSource()) {
-                    const username = refs.githubUsernameInput.value.trim()
-                        || Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "");
-                    const token = getSensitiveValue(refs.githubTokenInput, CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "");
-                    const types = GitHubAPI.getImportTypes();
-
-                    if (!username && !token) {
-                        UI.showStatus("请先在设置中填写 GitHub 用户名（或配置 Token）", "error");
-                        return;
-                    }
-
-                    const allItems = [];
-                    for (const type of types) {
-                        if (type === "stars") {
-                            const items = await GitHubAPI.fetchStarredRepos(username, token);
-                            allItems.push(...UI.mapGitHubItemsToBookmarks(items, "stars"));
-                        } else if (type === "repos") {
-                            const items = await GitHubAPI.fetchUserRepos(username, token);
-                            const ownRepos = items.filter(r => !r.fork);
-                            allItems.push(...UI.mapGitHubItemsToBookmarks(ownRepos, "repos"));
-                        } else if (type === "forks") {
-                            const items = await GitHubAPI.fetchForkedRepos(username, token);
-                            allItems.push(...UI.mapGitHubItemsToBookmarks(items, "forks"));
-                        } else if (type === "gists") {
-                            const items = await GitHubAPI.fetchUserGists(username, token);
-                            allItems.push(...UI.mapGitHubItemsToBookmarks(items, "gists"));
-                        }
-                        // P4 收敛(c13): 与 Linux.do 分支同口径 —— 加载期间切换来源后不再写计数
-                        if (loadSource === UI.getActiveBookmarkSource() && UI.refs?.bookmarkCount) {
-                            UI.refs.bookmarkCount.textContent = allItems.length;
-                        }
-                    }
-                    bookmarks = allItems;
-                } else {
-                    const username = await Utils.getCurrentLinuxDoUsernameAsync();
-                    if (!username) {
-                        UI.showStatus("无法获取当前 Linux.do 用户名，请先登录后重试", "error");
-                        return;
-                    }
-                    bookmarks = await LinuxDoAPI.fetchAllBookmarks(username, (count) => {
-                        // P4 收敛(c13): 加载期间切换来源后不再写计数(与最终结果丢弃同源)
-                        if (loadSource !== UI.getActiveBookmarkSource()) return;
-                        if (UI.refs?.bookmarkCount) UI.refs.bookmarkCount.textContent = count;
-                    });
+                // v3.17: GitHub 收藏源已移除,加载恒走 Linux.do 路径。
+                const username = await Utils.getCurrentLinuxDoUsernameAsync();
+                if (!username) {
+                    UI.showStatus("无法获取当前 Linux.do 用户名，请先登录后重试", "error");
+                    return;
                 }
+                const bookmarks = await LinuxDoAPI.fetchAllBookmarks(username, (count) => {
+                    // P4 收敛(c13): 加载期间切换来源后不再写计数(与最终结果丢弃同源)
+                    if (loadSource !== UI.getActiveBookmarkSource()) return;
+                    if (UI.refs?.bookmarkCount) UI.refs.bookmarkCount.textContent = count;
+                });
 
                 // P3 共识(dsf+qwen): 加载期间切换来源时丢弃陈旧结果——否则旧来源数据
                 // 覆盖新来源列表与选中集, 展示与导出统计错配。
@@ -982,8 +876,7 @@ const UIEvents = {
                 // F-UI-32:加载成功后隐藏空状态引导
                 if (UI.refs.bookmarkEmptyState) UI.refs.bookmarkEmptyState.style.display = "none";
 
-                const sourceText = UI.isActiveGitHubSource() ? "GitHub 收藏" : "Linux.do 收藏";
-                UI.showStatus(`成功加载 ${bookmarks.length} 个${sourceText}`, "success");
+                UI.showStatus(`成功加载 ${bookmarks.length} 个Linux.do 收藏`, "success");
             } catch (error) {
                 UI.showStatus(`加载失败: ${error.message}`, "error");
             } finally {

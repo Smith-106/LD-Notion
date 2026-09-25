@@ -1,6 +1,6 @@
 # 整体架构
 
-LD-Notion 是一个浏览器侧应用：核心逻辑运行在用户脚本或扩展 content script 中，通过浏览器存储保存非敏感配置，并通过本地加密凭证保险箱保存敏感凭证，再调用外部 API 读写 Notion、GitHub、AI 服务和 Obsidian。
+LD-Notion 是一个浏览器侧应用：核心逻辑运行在用户脚本或扩展 content script 中，通过浏览器存储保存非敏感配置，并通过本地加密凭证保险箱保存敏感凭证，再调用外部 API 读写 Notion、AI 服务和 Obsidian。
 
 ## 模块结构
 
@@ -13,7 +13,7 @@ flowchart TB
   end
 
   subgraph UI[界面层]
-    MainUI[Linux.do / GitHub 主面板]
+    MainUI[Linux.do 主面板]
     NotionUI[Notion 浮动 AI 面板]
     GenericUI[通用网页剪藏面板]
     Popup[扩展 Popup]
@@ -22,7 +22,6 @@ flowchart TB
   subgraph Services[服务层]
     WorkspaceService[WorkspaceService]
     NotionAPI[NotionAPI / NotionTransport]
-    GitHubAPI[GitHubAPI / GitHubExporter]
     BookmarkExporter[BookmarkBridge / BookmarkExporter]
     ZhihuAPI[ZhihuAPI]
     ObsidianAPI[ObsidianAPI]
@@ -37,7 +36,6 @@ flowchart TB
 
   subgraph External[外部系统]
     LinuxDo[Linux.do]
-    GitHub[GitHub API]
     ChromeBookmarks[chrome.bookmarks]
     Notion[Notion API]
     AI[AI Providers]
@@ -65,7 +63,6 @@ flowchart TB
 
   NotionAPI --> Notion
   WorkspaceService --> Notion
-  GitHubAPI --> GitHub
   BookmarkExporter --> ChromeBookmarks
   ZhihuAPI --> External
   ObsidianAPI --> Obsidian
@@ -77,7 +74,7 @@ flowchart TB
 ## 关键数据流
 
 1. UI 层读取用户配置与来源选择。
-2. 来源服务拉取帖子、仓库、书签或网页信息。
+2. 来源服务拉取帖子、书签或网页信息。
 3. 解析层清洗内容、保留格式、生成 Notion Blocks 或 Markdown。
 4. 可选 AI 层生成摘要、分类、标签或执行对话式任务。
 5. 写入前进入 OperationGuard。

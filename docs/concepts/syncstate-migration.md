@@ -7,22 +7,22 @@ v3.7.0 完成了 SyncState 从 V1 嵌套结构到 V2 扁平结构的迁移，消
 旧版 SyncState 使用嵌套结构存储同步状态：
 
 ```text
-V1: { linuxdo: {...}, github: { meta, stars, repos, forks, gists }, bookmarks: {...} }
+V1（历史结构，v3.17 起 github 分支不再迁移，存量静默丢弃）: { linuxdo: {...}, github: { meta, stars, repos, forks, gists }, bookmarks: {...} }
 ```
 
 这带来了两个问题：
 
 1. **V1/V2 双写**：新代码写 V2 格式，旧代码仍写 V1 格式，导致数据不一致。
-2. **GitHub 子类型嵌套**：`github.stars`、`github.repos` 等子类型嵌套在同一对象下，无法独立管理同步周期。
+2. **来源子类型嵌套**：旧 `github.stars`、`github.repos` 等子类型曾嵌套在同一对象下，无法独立管理同步周期（GitHub 源已于 v3.17 移除）。
 
 ## V2 扁平结构
 
 V2 将所有来源类型展平为独立 key：
 
 ```text
-V2: { version: 2, sources: { linuxdo: {...}, github-stars: {...}, github-repos: {...}, github-forks: {...}, github-gists: {...}, github-meta: {...}, bookmark: {...}, zhihu: {...}, generic: {...} } }
+V2: { version: 2, sources: { linuxdo: {...}, bookmark: {...}, zhihu: {...}, generic: {...} } }
 
-> 注（v3.15.0）：`rss` 源已移除（存量由 `_load` 自动剪枝）；历史版本结构曾含 `rss: {...}`。
+> 注（v3.15.0）：`rss` 源已移除（存量由 `_load` 自动剪枝）；注（v3.17）：`github-*` 源已移除（存量由 `_load` 自动剪枝；历史版本结构曾含 `github: {...}` / `github-stars/...`）。
 ```
 
 每个来源类型独立管理自己的 `lastSyncTime`、`lastSyncCount`、`lastError` 等字段。
@@ -31,17 +31,17 @@ V2: { version: 2, sources: { linuxdo: {...}, github-stars: {...}, github-repos: 
 
 首次访问时，`SyncStateV2._load()` 检测到 V1 数据后自动执行 `_migrateV1toV2()`：
 
-- 将 `github.meta/stars/repos/forks/gists` 展平为 `github-meta/github-stars/...`。
+- 将旧 `github.meta/stars/repos/forks/gists` 展平为 `github-meta/github-stars/...`（v3.17 起不再迁移，存量静默丢弃）。
 - 将 `bookmarks` 重命名为 `bookmark`（单数形式，与其他来源类型一致）。
 - 迁移是幂等的，重复执行不会产生副作用。
 
 ## V1 facade
 
-为了消除双写，V1 的公共 API 被替换为 V2 的 facade 代理层。所有现有代码调用 `SyncState.getLinuxDoState()`、`SyncState.updateGitHubState()` 等方法时，实际委托给 `SyncStateV2`：
+为了消除双写，V1 的公共 API 被替换为 V2 的 facade 代理层。所有现有代码调用 `SyncState.getLinuxDoState()` 等方法时，实际委托给 `SyncStateV2`（`updateGitHubState` 已于 v3.17 删除，仅留兼容壳）：
 
 ```text
 SyncState.getLinuxDoState() → SyncStateV2.getSourceState("linuxdo")
-SyncState.updateGitHubState(subtype, data) → SyncStateV2.updateSourceState("github-" + subtype, data)
+SyncState.updateGitHubState(subtype, data) →（v3.17 已删除；兼容壳静默降级，不再迁移）
 ```
 
 这样，旧代码无需修改即可自动使用 V2 存储。
@@ -68,11 +68,11 @@ facade 必须完整委托 V2 的**全部公共方法**。v3.14.0 曾因缺失 `g
 - **unmark 墓碑（#19）**：`endBatch` rebase 会把已 `unmarkSeen` 的键从磁盘复活（dirtyKeys + deleted tombstones 未区分）。修复：rebase 不再复活墓碑键。
 - **wipe 复活（#18）**：`clearSeen` + `endBatch` 会把已清空的键从磁盘 rebase 回来。修复：清空后不再从磁盘回读。
 
-配套：GitHub 自动同步在 watermark 重置后尊重 `isExported`；RSS `allow_duplicates` 用 feed 感知的 DedupStore 键；Zhihu/Generic clipper 成功后 `markSeen`；去重键统一走 `normalizeDedupUrl`（含 Discourse `/t/slug/id` → `/t/id` 归一）。
+配套：Zhihu/Generic clipper 成功后 `markSeen`；RSS `allow_duplicates` 用 feed 感知的 DedupStore 键；Zhihu/Generic clipper 成功后 `markSeen`；去重键统一走 `normalizeDedupUrl`（含 Discourse `/t/slug/id` → `/t/id` 归一）。
 
 ### 基线重置（v3.13.0）
 
-`SyncState.resetSourceState(sourceType)` 将指定源的增量基线恢复为默认（watermark=null、lastOutcome=idle），下次同步退化为全量扫描。工作区洞察（统一同步中心）每张来源卡提供「重置基线」按钮；GitHub 按子类型（stars/repos/forks/gists）逐个重置。
+`SyncState.resetSourceState(sourceType)` 将指定源的增量基线恢复为默认（watermark=null、lastOutcome=idle），下次同步退化为全量扫描。工作区洞察（统一同步中心）每张来源卡提供「重置基线」按钮。
 
 ## 遗留问题
 

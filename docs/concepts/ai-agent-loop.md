@@ -74,7 +74,7 @@ sequenceDiagram
 | Write block | 在页面末尾插入总结。 | 标准 | 检查目标、权限和 auth 后写入。 |
 | Update metadata | 加图标、封面、归档或恢复。 | 标准 / 高级 | 高风险动作需要确认。 |
 | Batch organize | 给未分类页面打标签。 | 标准 / 高级 | 根据影响范围要求预览或确认。 |
-| Import | 导入 GitHub 收藏或浏览器书签。 | 标准 | 先生成 preview，再通过 Guard 写入。 |
+| Import | 导入浏览器书签。 | 标准 | 先生成 preview，再通过 Guard 写入。 |
 | Deep workflow | 总结、翻译、提取为数据库。 | 只读 / 标准 / 高级 | 每个写入步骤单独 guard。 |
 
 ## Multi-step behavior

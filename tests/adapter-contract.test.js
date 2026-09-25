@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { AdapterRegistry } from "../src/adapter/AdapterRegistry.js";
 import { SourceAdapter } from "../src/adapter/SourceAdapter.js";
 import { LinuxDoAdapter } from "../src/adapter/LinuxDoAdapter.js";
-import { createGitHubAdapter } from "../src/adapter/GitHubAdapter.js";
+// v3.17: GitHub 收藏源已移除, GitHubAdapter.js 已删除。
 import { BookmarkAdapter } from "../src/adapter/BookmarkAdapter.js";
 import { ZhihuAdapter } from "../src/adapter/ZhihuAdapter.js";
 import { GenericAdapter } from "../src/adapter/GenericAdapter.js";
@@ -22,8 +22,7 @@ beforeEach(() => {
 describe("SourceAdapter contract", () => {
     const adapters = [
         { name: "linuxdo", adapter: LinuxDoAdapter },
-        { name: "github-stars", adapter: createGitHubAdapter("stars") },
-        { name: "github-repos", adapter: createGitHubAdapter("repos") },
+        // v3.17: github-stars/github-repos 适配器随 GitHub 收藏源删除。
         { name: "bookmark", adapter: BookmarkAdapter },
         { name: "zhihu", adapter: ZhihuAdapter },
         { name: "generic", adapter: GenericAdapter },

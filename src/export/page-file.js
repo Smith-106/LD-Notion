@@ -15,8 +15,8 @@ const { Utils } = require("../utils");
 const { SiteDetector, HTMLToMarkdown } = require("../api");
 const { ZhihuAPI, GenericExtractor, LinuxDoAPI } = require("../extract");
 
-// 文件名消毒：与 github-obsidian-service.sanitizeObsidianFileName 同口径
-// （Windows 非法字符 → 下划线，截断），此处本地实现避免 export→import
+// 文件名消毒(Windows 非法字符 → 下划线，截断)：
+// 此处本地实现避免 export→import
 // 新增跨模块依赖边（AGENTS.md 禁止新增循环依赖边）。
 const sanitizeFileName = (name, fallback = "page") => {
     const base = String(name || "").trim().replace(/[\\/:*?"<>|]/g, "_").substring(0, 80);

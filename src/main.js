@@ -14,7 +14,7 @@ const { AIService, ChatState, QUICK_INTENT_PATTERNS, QUICK_INTENT_RULES, AI_AGEN
 const { OperationGuard, OperationLog, ConfirmationDialog, UndoManager } = require("./security");
 const { ZhihuAPI, GenericExtractor, WorkspaceService } = require("./extract");
 const { GenericExporter, LinuxDoAPI, Exporter } = require("./export");
-const { AutoImporter, UpdateChecker, GitHubAutoImporter, GitHubAPI, GitHubExporter } = require("./import");
+const { AutoImporter, UpdateChecker } = require("./import");
 const { BookmarkBridge, BookmarkExporter, BookmarkAutoImporter } = require("./bridge");
 const { StyleManager, DesignSystem, PanelResize, NotionSiteUI, UI_CSS, UIEvents, UI, GenericUI } = require("./ui");
 const { UICommandService } = require("./coordination");
@@ -49,7 +49,8 @@ window.addEventListener("ld-notion-popup-action", (event) => {
     const { action } = event.detail || {};
 
     if (action === "set-bookmark-source") {
-        const source = event.detail?.source === "github" ? "github" : "linuxdo";
+        // v3.17: GitHub 收藏源已移除,收藏来源恒为 linuxdo(历史 github 值归一)。
+        const source = "linuxdo";
         Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_SOURCE, source);
         if (UI.panel && UI.refs) {
             if (typeof UI.switchBookmarkSource === "function") {
@@ -72,7 +73,6 @@ window.addEventListener("ld-notion-popup-action", (event) => {
 
     const cmdMap = {
         "import-bookmarks": "导入浏览器书签",
-        "import-github": "导入GitHub收藏",
     };
     // P4 收敛(c09): 原型链键(constructor/toString)会命中继承属性 —— 必须自有属性校验
     const cmd = Object.prototype.hasOwnProperty.call(cmdMap, action) ? cmdMap[action] : undefined;
@@ -125,11 +125,7 @@ function main() {
         } else if (currentSite === SiteDetector.SITES.NOTION) {
             NotionSiteUI.init();
             Utils.runWhenBrowserIdle(() => BookmarkAutoImporter.init());
-        } else if (currentSite === SiteDetector.SITES.GITHUB) {
-            UI.init();
-            Utils.runWhenBrowserIdle(() => UpdateChecker.init());
-            Utils.runWhenBrowserIdle(() => GitHubAutoImporter.init());
-            Utils.runWhenBrowserIdle(() => BookmarkAutoImporter.init());
+        // v3.17: GitHub 收藏源已移除,脚本不再注入 github 站点(原 SITES.GITHUB 分支删除)。
         } else if (currentSite === SiteDetector.SITES.ZHIHU) {
             GenericUI.init();
         } else if (currentSite === SiteDetector.SITES.GENERIC) {

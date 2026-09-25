@@ -187,28 +187,36 @@ describe("P4 收敛(c09/c13/c14): 源码级契约锁定", () => {
         expect(src).not.toContain("Utils.runWhenBrowserIdle(() => AutoImporter.run());");
     });
 
-    it("AI 分类匹配为精确优先 + 最长匹配", () => {
-        const src = read("src/import/GitHubExporter.js");
-        expect(src).toContain("categories.includes(trimmedCategory)");
-        expect(src).toContain(".sort((a, b) => String(b).length - String(a).length)[0]");
+    it("AI 分类匹配为精确优先 + 包含回退", () => {
+        // v3.17: GitHub 收藏源已移除, GitHubExporter.js 已删除。分类精确优先语义
+        // 由 AIService.matchCategory 承载(src/ai/ai-service.js)。
+        const src = read("src/ai/ai-service.js");
+        expect(src).toContain("if (cleaned === cat || cleaned.toLowerCase() === cat.toLowerCase())");
+        expect(src).toContain("if (cleaned.includes(cat) || cat.includes(cleaned))");
+        expect(src).toContain("if (!cleaned) return categories[categories.length - 1];");
         expect(src).not.toContain("categories.find(c => category.trim().includes(c))");
     });
 
-    it("GitHub 自动导入配置警告写到 GitHub 状态位", () => {
+    it("Linux.do 自动导入配置警告写到 AutoImporter 状态位", () => {
+        // v3.17: GitHub 收藏源已移除。配置缺失警告语义由 Linux.do 自动导入承载。
         const src = read("src/ui/events.js");
-        expect(src).toContain('GitHubAutoImporter.updateStatus("⚠️ 请先配置 GitHub 用户名/Token 与 Notion 目标");');
+        expect(src).toContain('AutoImporter.updateStatus("⚠️ 请先配置 Notion API Key")');
     });
 
-    it("GitHub 加载循环写计数前复核来源", () => {
+    it("Linux.do 加载循环写计数前复核来源", () => {
+        // v3.17: GitHub 收藏源已移除,加载恒走 Linux.do 路径。来源复核语义不变。
         const src = read("src/ui/events.js");
-        expect(src).toContain("if (loadSource === UI.getActiveBookmarkSource() && UI.refs?.bookmarkCount) {");
+        expect(src).toContain("if (loadSource !== UI.getActiveBookmarkSource()) return;");
+        expect(src).toContain("if (UI.refs?.bookmarkCount)");
     });
 
-    it("导出器选择与 toExport 同一来源快照", () => {
+    it("导出器恒走 Linux.do 路径(与 toExport 同源)", () => {
         // M3 events 拆分: exportBtn.onclick 迁 export-bindings.js
+        // v3.17: GitHub 收藏源已移除,来源分支已删除,导出恒走 Exporter.exportBookmarks。
         const src = read("src/ui/events/export-bindings.js");
-        expect(src).toContain("const exportIsGitHub = UI.isActiveGitHubSource();");
-        expect(src).toContain("if (exportIsGitHub) {");
+        expect(src).not.toContain("isActiveGitHubSource");
+        expect(src).not.toContain("exportIsGitHub");
+        expect(src).toContain("Exporter.exportBookmarks(toExport");
     });
 
     it("Obsidian URL/目录在 Key 落盘成功后才写", () => {
@@ -266,9 +274,10 @@ describe("P4 收敛(c15/c16/c17): 销毁中止 / 面板复用 / 原型键 / base
         expect(src).toContain("const title = payload.title ? String(payload.title) : \"\";");
     });
 
-    it("GitHub 类型标签映射为无原型对象", () => {
+    it("同步中心不再含 GitHub 类型标签映射", () => {
+        // v3.17: GitHub 收藏源已移除, githubTypeLabelMap 已随同步中心 GitHub 行删除。
         const src = fs.readFileSync("src/ui/workspace-insight.js", "utf8");
-        expect(src).toContain("const githubTypeLabelMap = Object.assign(Object.create(null), {");
+        expect(src).not.toContain("githubTypeLabelMap");
     });
 
     it("base64Encode/DecodeUnicode 对 Latin-1 区间字符对称(UTF-8)", () => {
@@ -278,10 +287,13 @@ describe("P4 收敛(c15/c16/c17): 销毁中止 / 面板复用 / 原型键 / base
         }
     });
 
-    it("githubTypeLabelMap 对原型键不再取到函数源码", () => {
+    it("书签类型标签对原型键不再取到函数源码", () => {
+        // v3.17: GitHub 收藏源已移除, githubTypeLabelMap 已删除。无原型对象语义
+        // 由书签来源标签映射承载(src/ui/bookmark-list.js sourceTypeMap)。
+        const { BookmarkList } = require("../src/ui/bookmark-list");
+        expect(BookmarkList.getBookmarkVisualTypeLabel({ source: "github", sourceType: "constructor" })).toBe("GitHub");
+        expect(BookmarkList.getBookmarkVisualTypeLabel({ source: "github", sourceType: "stars" })).toBe("Stars");
         const src = fs.readFileSync("src/ui/workspace-insight.js", "utf8");
-        const map = Object.assign(Object.create(null), { stars: "Stars", repos: "Repos", forks: "Forks", gists: "Gists" });
-        expect(map["constructor"] || "constructor").toBe("constructor");
-        expect(src).not.toMatch(/const githubTypeLabelMap = \{\n\s+stars: "Stars",/);
+        expect(src).not.toContain("githubTypeLabelMap");
     });
 });

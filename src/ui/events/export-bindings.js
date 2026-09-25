@@ -12,7 +12,6 @@ const { Storage, DedupStore } = require("../../storage");
 const { NotionOAuth } = require("../../auth");
 const { OperationGuard, OperationLog, ConfirmationDialog } = require("../../security");
 const { Exporter, LinuxDoAPI, GenericExporter, PageFileExporter } = require("../../export");
-const { GitHubAPI } = require("../../import");
 const { BookmarkExporter } = require("../../bridge");
 const { UICommandService } = require("../../coordination/UICommandService");
 const { HTMLToMarkdown, ObsidianAPI } = require("../../api");
@@ -60,9 +59,6 @@ const bindExport = (ctx) => {
             }
 
             // 获取选中的收藏（严格模式过滤已导出，允许重复模式仅按勾选）
-            // P4 收敛(c13): 导出器选择必须与 toExport 同一来源快照 ——
-            // 设置保存 await 期间用户切换来源时, 重读来源会把陈旧列表交给错误导出器
-            const exportIsGitHub = UI.isActiveGitHubSource();
             const toExport = UI.bookmarks.filter((b) => {
                 const bookmarkKey = UI.getBookmarkKey(b);
                 return UI.selectedBookmarks.has(bookmarkKey) && !UI.isBookmarkKeyExported(bookmarkKey);
@@ -94,8 +90,7 @@ const bindExport = (ctx) => {
                 categories: Utils.parseAICategories(
                     refs.aiCategoriesInput.value.trim() || ""
                 ),
-                githubUsername: refs.githubUsernameInput.value.trim(),
-                token: getSensitiveValue(refs.githubTokenInput, CONFIG.STORAGE_KEYS.GITHUB_TOKEN, ""),
+                // v3.17: GitHub 收藏源已移除,githubUsername/token 设置项删除。
                 imgFilter: refs.filterImgSelect.value,
                 filterUsers: refs.filterUsersInput.value.trim(),
                 filterInclude: refs.filterIncludeInput.value.trim(),
@@ -125,11 +120,9 @@ const bindExport = (ctx) => {
                     [CONFIG.STORAGE_KEYS.IMG_MODE]: settings.imgMode,
                     [CONFIG.STORAGE_KEYS.REQUEST_DELAY]: parseInt(refs.requestDelaySelect.value),
                     [CONFIG.STORAGE_KEYS.EXPORT_CONCURRENCY]: settings.concurrency,
-                    [CONFIG.STORAGE_KEYS.GITHUB_OAUTH_CLIENT_ID]: refs.githubOauthClientIdInput ? String(refs.githubOauthClientIdInput.value || "").trim() : "",
                 },
                 sensitiveEntries: {
                     [CONFIG.STORAGE_KEYS.AI_API_KEY]: getInputValue(refs.aiApiKeyInput),
-                    [CONFIG.STORAGE_KEYS.GITHUB_TOKEN]: getInputValue(refs.githubTokenInput),
                 },
             }).then(() => true, (error) => {
                 // P4 收敛(c13): 保存失败不得使导出按钮永久禁用(异常此前直接逃逸 onclick)
@@ -153,20 +146,14 @@ const bindExport = (ctx) => {
             UI.refs.reportContainer.innerHTML = "";
 
             try {
-                let results;
-                if (exportIsGitHub) {
-                    results = await UI.exportGitHubSelected(toExport, settings, (current, total, title) => {
-                        UI.showProgress(current, total, `${title}\n导出中`);
-                    });
-                } else {
-                    results = await Exporter.exportBookmarks(toExport, settings, (progress) => {
-                        UI.showProgress(
-                            progress.current,
-                            progress.total,
-                            `${progress.title}\n${progress.message || progress.stage}${progress.isPaused ? " (已暂停)" : ""}`
-                        );
-                    });
-                }
+                // v3.17: GitHub 收藏源已移除,导出恒走 Linux.do 路径。
+                const results = await Exporter.exportBookmarks(toExport, settings, (progress) => {
+                    UI.showProgress(
+                        progress.current,
+                        progress.total,
+                        `${progress.title}\n${progress.message || progress.stage}${progress.isPaused ? " (已暂停)" : ""}`
+                    );
+                });
 
                 UI.hideProgress();
 
@@ -258,234 +245,216 @@ const bindExport = (ctx) => {
             let imageFailures = 0;
 
             try {
-                if (UI.isActiveGitHubSource()) {
-                    const githubResults = await UI.exportGitHubSelectedToObsidian(selected, {
-                        obsUrl,
-                        obsKey,
-                        obsDir,
-                        aiApiKey: getSensitiveValue(refs.aiApiKeyInput, CONFIG.STORAGE_KEYS.AI_API_KEY, ""),
-                        aiService: refs.aiServiceSelect.value,
-                        aiModel: refs.aiModelSelect.value,
-                        aiBaseUrl: refs.aiBaseUrlInput.value.trim(),
-                        categories: Utils.parseAICategories(refs.aiCategoriesInput.value.trim() || ""),
-                        token: getSensitiveValue(refs.githubTokenInput, CONFIG.STORAGE_KEYS.GITHUB_TOKEN, ""),
-                    }, (current, total, title) => {
-                        UI.showProgress(current, total, `${title}\n导出到 Obsidian...`);
+                // v3.17: GitHub 收藏源已移除,Obsidian 导出恒走 Linux.do 路径。
+                for (let i = 0; i < selected.length; i++) {
+                if (Exporter.isCancelled) break;
+                while (Exporter.isPaused) {
+                    await Utils.sleep(200);
+                    if (Exporter.isCancelled) break;
+                }
+                if (Exporter.isCancelled) break;
+
+                const bookmark = selected[i];
+                const topicId = LinuxDoAPI.resolveTopicId(bookmark);
+                if (!topicId) {
+                    results.failed.push({ topicId: "", title: bookmark.title || bookmark.fancy_title || bookmark.name || "未知标题", error: "无法解析话题 ID" });
+                    continue;
+                }
+                UI.showProgress(i + 1, selected.length, "导出帖子到 Obsidian...");
+
+                try {
+                    const { topic, posts } = await LinuxDoAPI.fetchAllPosts(topicId);
+                    const filteredPosts = Exporter.filterPosts(posts, topic, {
+                        onlyFirst: refs.onlyFirstCheckbox.checked,
+                        onlyOp: refs.onlyOpCheckbox.checked,
+                        rangeStart: parseInt(refs.rangeStartInput.value) || 1,
+                        rangeEnd: parseInt(refs.rangeEndInput.value) || 999999,
+                        imgFilter: refs.filterImgSelect.value,
+                        filterUsers: refs.filterUsersInput.value.trim(),
+                        filterInclude: refs.filterIncludeInput.value.trim(),
+                        filterExclude: refs.filterExcludeInput.value.trim(),
+                        filterMinLen: parseInt(refs.filterMinLenInput.value) || 0,
                     });
-                    results.success.push(...githubResults.success);
-                    results.failed.push(...githubResults.failed);
-                    results.skipped.push(...(githubResults.skipped || []));
-                } else {
-                    for (let i = 0; i < selected.length; i++) {
-                        if (Exporter.isCancelled) break;
-                        while (Exporter.isPaused) {
-                            await Utils.sleep(200);
+
+                    const meta = {
+                        title: topic.title,
+                        url: topic.url,
+                        author: topic.opUsername,
+                        topicId: topic.topicId || topic.topic_id,
+                        category: topic.categoryName || topic.category,
+                        tags: topic.tags || [],
+                        floors: filteredPosts.length,
+                    };
+                    let md = HTMLToMarkdown.buildFrontmatter(meta);
+
+                    md += `> [!info] 帖子信息\n`;
+                    md += `> - **原始链接**: ${Utils.mdLink(topic.title, topic.url)}\n`;
+                    md += `> - **楼主**: @${topic.opUsername || "未知"}\n`;
+                    md += `> - **分类**: ${meta.category || "无"}\n`;
+                    md += `> - **标签**: ${(topic.tags || []).join(", ") || "无"}\n`;
+                    md += `> - **导出时间**: ${new Date().toLocaleString("zh-CN")}\n\n`;
+
+                    filteredPosts.forEach((post, idx) => {
+                        const isOp = post.username === topic.opUsername;
+                        md += HTMLToMarkdown.buildPostCallout(post, idx, isOp);
+                    });
+
+                    if (obsImgMode === "file") {
+                        const imgRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
+                        let match;
+                        const imgDownloads = [];
+                        while ((match = imgRegex.exec(md)) !== null) {
+                            imgDownloads.push({ full: match[0], alt: match[1], url: match[2] });
+                        }
+                        for (const img of imgDownloads) {
+                            // P4 收敛(c13): 与主题循环同口径 —— 取消/暂停必须穿透图片下载循环
                             if (Exporter.isCancelled) break;
-                        }
-                        if (Exporter.isCancelled) break;
-
-                        const bookmark = selected[i];
-                        const topicId = LinuxDoAPI.resolveTopicId(bookmark);
-                        if (!topicId) {
-                            results.failed.push({ topicId: "", title: bookmark.title || bookmark.fancy_title || bookmark.name || "未知标题", error: "无法解析话题 ID" });
-                            continue;
-                        }
-                        UI.showProgress(i + 1, selected.length, "导出帖子到 Obsidian...");
-
-                        try {
-                            const { topic, posts } = await LinuxDoAPI.fetchAllPosts(topicId);
-                            const filteredPosts = Exporter.filterPosts(posts, topic, {
-                                onlyFirst: refs.onlyFirstCheckbox.checked,
-                                onlyOp: refs.onlyOpCheckbox.checked,
-                                rangeStart: parseInt(refs.rangeStartInput.value) || 1,
-                                rangeEnd: parseInt(refs.rangeEndInput.value) || 999999,
-                                imgFilter: refs.filterImgSelect.value,
-                                filterUsers: refs.filterUsersInput.value.trim(),
-                                filterInclude: refs.filterIncludeInput.value.trim(),
-                                filterExclude: refs.filterExcludeInput.value.trim(),
-                                filterMinLen: parseInt(refs.filterMinLenInput.value) || 0,
-                            });
-
-                            const meta = {
-                                title: topic.title,
-                                url: topic.url,
-                                author: topic.opUsername,
-                                topicId: topic.topicId || topic.topic_id,
-                                category: topic.categoryName || topic.category,
-                                tags: topic.tags || [],
-                                floors: filteredPosts.length,
-                            };
-                            let md = HTMLToMarkdown.buildFrontmatter(meta);
-
-                            md += `> [!info] 帖子信息\n`;
-                            md += `> - **原始链接**: ${Utils.mdLink(topic.title, topic.url)}\n`;
-                            md += `> - **楼主**: @${topic.opUsername || "未知"}\n`;
-                            md += `> - **分类**: ${meta.category || "无"}\n`;
-                            md += `> - **标签**: ${(topic.tags || []).join(", ") || "无"}\n`;
-                            md += `> - **导出时间**: ${new Date().toLocaleString("zh-CN")}\n\n`;
-
-                            filteredPosts.forEach((post, idx) => {
-                                const isOp = post.username === topic.opUsername;
-                                md += HTMLToMarkdown.buildPostCallout(post, idx, isOp);
-                            });
-
-                            if (obsImgMode === "file") {
-                                const imgRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
-                                let match;
-                                const imgDownloads = [];
-                                while ((match = imgRegex.exec(md)) !== null) {
-                                    imgDownloads.push({ full: match[0], alt: match[1], url: match[2] });
-                                }
-                                for (const img of imgDownloads) {
-                                    // P4 收敛(c13): 与主题循环同口径 —— 取消/暂停必须穿透图片下载循环
-                                    if (Exporter.isCancelled) break;
-                                    while (Exporter.isPaused) {
-                                        await Utils.sleep(200);
-                                        if (Exporter.isCancelled) break;
-                                    }
-                                    if (Exporter.isCancelled) break;
-                                    try {
-                                        const ext = img.url.split(".").pop().split("?")[0] || "png";
-                                        const nameBytes = new Uint8Array(4);
-                                        if (typeof crypto !== "undefined" && crypto.getRandomValues) {
-                                            crypto.getRandomValues(nameBytes);
-                                        } else {
-                                            throw new Error("crypto.getRandomValues 不可用，无法生成 Obsidian 图片文件名");
-                                        }
-                                        const safeName = `img-${Date.now()}-${Array.from(nameBytes, b => b.toString(16).padStart(2, "0")).join("")}.${ext}`;
-                                        const imgPath = `${obsImgDir}/${safeName}`;
-                                        // SSRF 防护（SEC-003）：img.url 来自导入页面 Markdown/HTML 解析的 img src，
-                                        // 远程不可信。校验外链 URL 拒内网/私有地址后再下载（@connect 白名单已限制可达域，
-                                        // 但白名单含 *.amazonaws.com/zhihu.com 宽泛域，此处补私有地址过滤）。
-                                        const { UrlValidator } = require("../security/UrlValidator");
-                                        if (!UrlValidator.validatePageExternalUrl(img.url)) {
-                                            throw new Error("图片 URL 未通过安全校验");
-                                        }
-                                        const blob = await new Promise((resolve, reject) => {
-                                            GM_xmlhttpRequest({
-                                                method: "GET",
-                                                url: img.url,
-                                                responseType: "blob",
-                                                timeout: 30000,
-                                                onload: (r) => {
-                                                    // P4 收敛(c13): onload 对 4xx/5xx 同样触发 ——
-                                                    // 错误页字节不得当图片写入
-                                                    if (r.status >= 200 && r.status < 300) resolve(r.response);
-                                                    else reject(new Error(`图片下载失败: HTTP ${r.status}`));
-                                                },
-                                                onerror: (e) => reject(e),
-                                                ontimeout: () => reject(new Error("图片下载超时")),
-                                            });
-                                        });
-                                        // v3.14.7 (REV-03 UI-07): Obsidian 写入经 OperationGuard 闸门
-                                        if (!OperationGuard.canExecute("obsidian.writeImage")) {
-                                            OperationGuard.auditDenied("obsidian.writeImage", { itemName: topic.title, trigger: "user_requested_write" }, {
-                                                phase: "execute",
-                                                reason: "权限不足：Obsidian 图片写入需要 level≥1",
-                                            });
-                                            throw new Error("权限不足：Obsidian 图片写入需要 level≥1");
-                                        }
-                                        const imgResult = await ObsidianAPI.writeImage(obsUrl, obsKey, imgPath, blob, getMimeType(ext));
-                                        if (!imgResult.ok) throw new Error(imgResult.error);
-                                        // P4 收敛(c13): 替换串中的 __BODY__/$1/$ 会被 String.replace 解释 ——
-                                        // 用函数形式避免 alt 含 $ 时损坏 Markdown
-                                        md = md.replace(img.full, () => `![${img.alt}](${encodeURI(imgPath)})`);
-                                    } catch {
-                                        // 图片下载失败，保留原始链接
-                                        imageFailures++;
-                                    }
-                                }
-                            } else if (obsImgMode === "base64") {
-                                const imgRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
-                                const matches = [];
-                                let m;
-                                while ((m = imgRegex.exec(md)) !== null) matches.push(m);
-                                for (const match of matches.reverse()) {
-                                    // P4 收敛(c13): 与主题循环同口径 —— 取消/暂停必须穿透图片内嵌循环
-                                    if (Exporter.isCancelled) break;
-                                    while (Exporter.isPaused) {
-                                        await Utils.sleep(200);
-                                        if (Exporter.isCancelled) break;
-                                    }
-                                    if (Exporter.isCancelled) break;
-                                    try {
-                                        // SSRF 防护（SEC-003）：match[2] 同为页面解析的 img src，校验外链 URL。
-                                        const { UrlValidator } = require("../security/UrlValidator");
-                                        if (!UrlValidator.validatePageExternalUrl(match[2])) {
-                                            throw new Error("图片 URL 未通过安全校验");
-                                        }
-                                        const resp = await new Promise((resolve, reject) => {
-                                            GM_xmlhttpRequest({
-                                                method: "GET",
-                                                url: match[2],
-                                                responseType: "blob",
-                                                timeout: 30000,
-                                                // P4 收敛(c13): onload 对 4xx/5xx 同样触发 —— 错误页不得内嵌为 data URL
-                                                onload: (r) => {
-                                                    if (r.status >= 200 && r.status < 300) resolve(r);
-                                                    else reject(new Error(`图片下载失败: HTTP ${r.status}`));
-                                                },
-                                                onerror: (e) => reject(e),
-                                                ontimeout: () => reject(new Error("图片下载超时")),
-                                            });
-                                        });
-                                        const b64 = await new Promise((resolve) => {
-                                            const reader = new FileReader();
-                                            reader.onloadend = () => resolve(reader.result);
-                                            reader.readAsDataURL(resp.response);
-                                        });
-                                        md = md.replace(match[0], () => `![${match[1]}](${b64})`);
-                                    } catch {
-                                        // 跳过失败的图片
-                                        imageFailures++;
-                                    }
-                                }
+                            while (Exporter.isPaused) {
+                                await Utils.sleep(200);
+                                if (Exporter.isCancelled) break;
                             }
-
-                            const fileName = UI.sanitizeObsidianFileName(topic.title, `topic-${topicId}`);
-                            // v3.14.7 (REV-03 UI-07): Obsidian 写入经 OperationGuard 闸门
-                            if (!OperationGuard.canExecute("obsidian.writeNote")) {
-                                OperationGuard.auditDenied("obsidian.writeNote", { itemName: topic.title, trigger: "user_requested_write" }, {
-                                    phase: "execute",
-                                    reason: "权限不足：Obsidian 笔记写入需要 level≥1",
-                                });
-                                throw new Error("权限不足：Obsidian 笔记写入需要 level≥1");
-                            }
-                            const noteResult = await ObsidianAPI.writeNote(obsUrl, obsKey, `${obsDir}/${fileName}.md`, md);
-                            if (!noteResult.ok) throw new Error(noteResult.error);
-                            // v3.14.3 修复: Obsidian 导出成功同样写入已导出账本(与 Notion 导出同构),
-                            // 否则 UI 恒显示“待导出”致重复导出。
-                            Storage.markTopicExported(topicId);
-                            results.success.push({
-                                title: topic.title,
-                                url: topic.url,
-                            });
-                        } catch (error) {
-                            results.failed.push({
-                                title: bookmark.title || `帖子 ${topicId}`,
-                                error: error.message,
-                            });
-                            // 认证/连接终态 fail-fast(v3.14.5):Obsidian key 无效或连接拒绝是系统性错误,
-                            // 逐项重试只会重复注定失败的请求——中止批次,剩余项留待重试
-                            const msgText = String(error?.message || "");
-                            // 认证/连接终态(Obsidian HTTP 401/403 或本地服务拒绝):系统性错误 fail-fast
-                            if (/\bHTTP\s*40[13]\b/.test(msgText) || msgText.includes("invalid") || msgText.includes("Invalid") || msgText.includes("ECONNREFUSED") || msgText.includes("refused")) {
-                                results.authAborted = { reason: error.message, at: i + 1 };
-                                for (let k = i + 1; k < selected.length; k++) {
-                                    const skippedBm = selected[k];
-                                    results.skipped.push({
-                                        title: skippedBm.title || skippedBm.fancy_title || skippedBm.name || `帖子 ${LinuxDoAPI.resolveTopicId(skippedBm)}`,
+                            if (Exporter.isCancelled) break;
+                            try {
+                                const ext = img.url.split(".").pop().split("?")[0] || "png";
+                                const nameBytes = new Uint8Array(4);
+                                if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+                                    crypto.getRandomValues(nameBytes);
+                                } else {
+                                    throw new Error("crypto.getRandomValues 不可用，无法生成 Obsidian 图片文件名");
+                                }
+                                const safeName = `img-${Date.now()}-${Array.from(nameBytes, b => b.toString(16).padStart(2, "0")).join("")}.${ext}`;
+                                const imgPath = `${obsImgDir}/${safeName}`;
+                                // SSRF 防护（SEC-003）：img.url 来自导入页面 Markdown/HTML 解析的 img src，
+                                // 远程不可信。校验外链 URL 拒内网/私有地址后再下载（@connect 白名单已限制可达域，
+                                // 但白名单含 *.amazonaws.com/zhihu.com 宽泛域，此处补私有地址过滤）。
+                                const { UrlValidator } = require("../security/UrlValidator");
+                                if (!UrlValidator.validatePageExternalUrl(img.url)) {
+                                    throw new Error("图片 URL 未通过安全校验");
+                                }
+                                const blob = await new Promise((resolve, reject) => {
+                                    GM_xmlhttpRequest({
+                                        method: "GET",
+                                        url: img.url,
+                                        responseType: "blob",
+                                        timeout: 30000,
+                                        onload: (r) => {
+                                            // P4 收敛(c13): onload 对 4xx/5xx 同样触发 ——
+                                            // 错误页字节不得当图片写入
+                                            if (r.status >= 200 && r.status < 300) resolve(r.response);
+                                            else reject(new Error(`图片下载失败: HTTP ${r.status}`));
+                                        },
+                                        onerror: (e) => reject(e),
+                                        ontimeout: () => reject(new Error("图片下载超时")),
                                     });
+                                });
+                                // v3.14.7 (REV-03 UI-07): Obsidian 写入经 OperationGuard 闸门
+                                if (!OperationGuard.canExecute("obsidian.writeImage")) {
+                                    OperationGuard.auditDenied("obsidian.writeImage", { itemName: topic.title, trigger: "user_requested_write" }, {
+                                        phase: "execute",
+                                        reason: "权限不足：Obsidian 图片写入需要 level≥1",
+                                    });
+                                    throw new Error("权限不足：Obsidian 图片写入需要 level≥1");
                                 }
-                                break;
+                                const imgResult = await ObsidianAPI.writeImage(obsUrl, obsKey, imgPath, blob, getMimeType(ext));
+                                if (!imgResult.ok) throw new Error(imgResult.error);
+                                // P4 收敛(c13): 替换串中的 __BODY__/$1/$ 会被 String.replace 解释 ——
+                                // 用函数形式避免 alt 含 $ 时损坏 Markdown
+                                md = md.replace(img.full, () => `![${img.alt}](${encodeURI(imgPath)})`);
+                            } catch {
+                                // 图片下载失败，保留原始链接
+                                imageFailures++;
                             }
                         }
-
-                        if (i < selected.length - 1) {
-                            await Utils.sleep(300);
+                    } else if (obsImgMode === "base64") {
+                        const imgRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
+                        const matches = [];
+                        let m;
+                        while ((m = imgRegex.exec(md)) !== null) matches.push(m);
+                        for (const match of matches.reverse()) {
+                            // P4 收敛(c13): 与主题循环同口径 —— 取消/暂停必须穿透图片内嵌循环
+                            if (Exporter.isCancelled) break;
+                            while (Exporter.isPaused) {
+                                await Utils.sleep(200);
+                                if (Exporter.isCancelled) break;
+                            }
+                            if (Exporter.isCancelled) break;
+                            try {
+                                // SSRF 防护（SEC-003）：match[2] 同为页面解析的 img src，校验外链 URL。
+                                const { UrlValidator } = require("../security/UrlValidator");
+                                if (!UrlValidator.validatePageExternalUrl(match[2])) {
+                                    throw new Error("图片 URL 未通过安全校验");
+                                }
+                                const resp = await new Promise((resolve, reject) => {
+                                    GM_xmlhttpRequest({
+                                        method: "GET",
+                                        url: match[2],
+                                        responseType: "blob",
+                                        timeout: 30000,
+                                        // P4 收敛(c13): onload 对 4xx/5xx 同样触发 —— 错误页不得内嵌为 data URL
+                                        onload: (r) => {
+                                            if (r.status >= 200 && r.status < 300) resolve(r);
+                                            else reject(new Error(`图片下载失败: HTTP ${r.status}`));
+                                        },
+                                        onerror: (e) => reject(e),
+                                        ontimeout: () => reject(new Error("图片下载超时")),
+                                    });
+                                });
+                                const b64 = await new Promise((resolve) => {
+                                    const reader = new FileReader();
+                                    reader.onloadend = () => resolve(reader.result);
+                                    reader.readAsDataURL(resp.response);
+                                });
+                                md = md.replace(match[0], () => `![${match[1]}](${b64})`);
+                            } catch {
+                                // 跳过失败的图片
+                                imageFailures++;
+                            }
                         }
                     }
+
+                    const fileName = UI.sanitizeObsidianFileName(topic.title, `topic-${topicId}`);
+                    // v3.14.7 (REV-03 UI-07): Obsidian 写入经 OperationGuard 闸门
+                    if (!OperationGuard.canExecute("obsidian.writeNote")) {
+                        OperationGuard.auditDenied("obsidian.writeNote", { itemName: topic.title, trigger: "user_requested_write" }, {
+                            phase: "execute",
+                            reason: "权限不足：Obsidian 笔记写入需要 level≥1",
+                        });
+                        throw new Error("权限不足：Obsidian 笔记写入需要 level≥1");
+                    }
+                    const noteResult = await ObsidianAPI.writeNote(obsUrl, obsKey, `${obsDir}/${fileName}.md`, md);
+                    if (!noteResult.ok) throw new Error(noteResult.error);
+                    // v3.14.3 修复: Obsidian 导出成功同样写入已导出账本(与 Notion 导出同构),
+                    // 否则 UI 恒显示“待导出”致重复导出。
+                    Storage.markTopicExported(topicId);
+                    results.success.push({
+                        title: topic.title,
+                        url: topic.url,
+                    });
+                } catch (error) {
+                    results.failed.push({
+                        title: bookmark.title || `帖子 ${topicId}`,
+                        error: error.message,
+                    });
+                    // 认证/连接终态 fail-fast(v3.14.5):Obsidian key 无效或连接拒绝是系统性错误,
+                    // 逐项重试只会重复注定失败的请求——中止批次,剩余项留待重试
+                    const msgText = String(error?.message || "");
+                    // 认证/连接终态(Obsidian HTTP 401/403 或本地服务拒绝):系统性错误 fail-fast
+                    if (/\bHTTP\s*40[13]\b/.test(msgText) || msgText.includes("invalid") || msgText.includes("Invalid") || msgText.includes("ECONNREFUSED") || msgText.includes("refused")) {
+                        results.authAborted = { reason: error.message, at: i + 1 };
+                        for (let k = i + 1; k < selected.length; k++) {
+                            const skippedBm = selected[k];
+                            results.skipped.push({
+                                title: skippedBm.title || skippedBm.fancy_title || skippedBm.name || `帖子 ${LinuxDoAPI.resolveTopicId(skippedBm)}`,
+                            });
+                        }
+                        break;
+                    }
                 }
+
+                if (i < selected.length - 1) {
+                    await Utils.sleep(300);
+                }
+                    }
 
                 UI.hideProgress();
                 UI.showReport(results);
@@ -683,9 +652,9 @@ const bindExport = (ctx) => {
             const el = refs.dedupSummary;
             if (!el) return;
             const linuxdoCount = Object.keys(DedupStore.getSeen("linuxdo") || {}).length;
-            const githubCount = Object.keys(GitHubAPI.getExported() || {}).length + Object.keys(GitHubAPI.getExportedGists() || {}).length;
             const bookmarkCount = Object.keys(BookmarkExporter.getExported() || {}).length;
-            el.textContent = `去重/导出记录 —— Linux.do: ${linuxdoCount} 条；GitHub: ${githubCount} 条；书签: ${bookmarkCount} 条`;
+            // v3.17: GitHub 收藏源已移除,去重摘要仅保留 Linux.do 与书签两源。
+            el.textContent = `去重/导出记录 —— Linux.do: ${linuxdoCount} 条；书签: ${bookmarkCount} 条`;
         };
         const clearWithConfirm = (label, doClear) => {
             // P2:原生 confirm 统一为 ConfirmationDialog
@@ -705,7 +674,8 @@ const bindExport = (ctx) => {
             // → 同 tab 内 isTopicExported 仍返回 true, 按钮实际无效(刷新后才生效)
             Storage.clearExportedTopics();
         });
-        refs.clearGithubExportedBtn.onclick = () => clearWithConfirm("GitHub 已导出", () => GitHubAPI.clearExportedRecords());
+        // v3.17: GitHub 收藏源已移除,clearGithubExportedBtn 按钮已随面板删除(守卫防旧缓存面板崩溃)。
+        if (refs.clearGithubExportedBtn) refs.clearGithubExportedBtn.onclick = () => {};
         refs.clearBookmarkExportedBtn.onclick = () => clearWithConfirm("书签已导出", () => BookmarkExporter.clearExportedRecords());
         renderDedupSummary();
 };

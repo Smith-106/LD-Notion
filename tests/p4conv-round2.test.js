@@ -39,60 +39,52 @@ beforeEach(() => {
     SyncConfig._deviceId = null;
 });
 
+// v3.17: GitHub 收藏源已移除, githubToken 不再经 _saveNotionSiteSettings 处理。
+// 以下仅覆盖 AI_API_KEY 的 undefined 保留 / 新值覆盖 / 空串删除语义。
 describe("P4 收敛(c07): 未编辑的敏感输入框不得清除已存密钥", () => {
     const KEY = CONFIG.STORAGE_KEYS.AI_API_KEY;
-    const TOKEN = CONFIG.STORAGE_KEYS.GITHUB_TOKEN;
 
     it("未携带(undefined)时保留已存值", async () => {
         Storage.set(KEY, "sk-existing");
-        Storage.set(TOKEN, "ghp_existing");
 
         await UICommandService._saveNotionSiteSettings({
             scope: "notion-site",
             aiApiKey: undefined,
-            githubToken: undefined,
         });
 
         expect(Storage.get(KEY, "")).toBe("sk-existing");
-        expect(Storage.get(TOKEN, "")).toBe("ghp_existing");
     });
 
     it("携带新值时覆盖", async () => {
         Storage.set(KEY, "sk-existing");
-        Storage.set(TOKEN, "ghp_existing");
 
         await UICommandService._saveNotionSiteSettings({
             scope: "notion-site",
             aiApiKey: "sk-new",
-            githubToken: "ghp_new",
         });
 
         expect(Storage.get(KEY, "")).toBe("sk-new");
-        expect(Storage.get(TOKEN, "")).toBe("ghp_new");
     });
 
     it("显式传空串(用户清空)时删除", async () => {
         Storage.set(KEY, "sk-existing");
-        Storage.set(TOKEN, "ghp_existing");
 
         await UICommandService._saveNotionSiteSettings({
             scope: "notion-site",
             aiApiKey: "",
-            githubToken: "",
         });
 
         expect(Storage.get(KEY, "")).toBe("");
-        expect(Storage.get(TOKEN, "")).toBe("");
     });
 
-    it("notion-site 面板保存链路: 两密钥输入框均有 touched 守卫", () => {
+    it("notion-site 面板保存链路: AI 密钥输入框有 touched 守卫", () => {
         const src = fs.readFileSync("src/ui/notion-site-ui.js", "utf8");
         // 保存 payload: 未编辑传 undefined(不是裸 value.trim())
         expect(src).toContain('panel.querySelector("#ldb-notion-ai-api-key").dataset.touched === "true"');
-        expect(src).toContain('panel.querySelector("#ldb-notion-github-token").dataset.touched === "true"');
-        // loadConfig: 两个输入框均初始化并监听 touched
+        // loadConfig: 输入框初始化并监听 touched
         expect(src).toContain('panel.querySelector("#ldb-notion-ai-api-key").dataset.touched = "false";');
-        expect(src).toContain('panel.querySelector("#ldb-notion-github-token").dataset.touched = "false";');
+        // v3.17: github-token 输入框已随 GitHub 源删除
+        expect(src).not.toContain("ldb-notion-github-token");
     });
 });
 

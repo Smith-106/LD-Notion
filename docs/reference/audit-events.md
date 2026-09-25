@@ -84,7 +84,6 @@ Audit events MUST NOT store raw secrets. redaction 至少覆盖：
 - Notion access token、refresh token、manual token。
 - OAuth Client Secret。
 - AI API Key。
-- GitHub Token。
 - Obsidian API Key。
 - 完整数据库 ID、页面 ID、block ID 可按展示需要使用 `<redacted>` 或短摘要。
 

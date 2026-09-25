@@ -8,7 +8,7 @@ LD-Notion 的交付目标包括用户脚本和独立扩展，因此验证要同�
 npm test
 ```
 
-运行核心 Node 测试（109 个文件、1827 个用例，另有 legacy 三件套，覆盖 SyncStateV2、DedupStore、Config、OperationLog、AIService、AI Schema/Trace/Handlers、API 模块、GitHub/书签/通用导出、UI 基线等模块；RSS 源已于 v3.15.0 移除）。
+运行核心 Node 测试（109 个文件、1827 个用例，另有 legacy 三件套，覆盖 SyncStateV2、DedupStore、Config、OperationLog、AIService、AI Schema/Trace/Handlers、API 模块、书签/通用导出、UI 基线等模块；RSS 源已于 v3.15.0 移除）。
 
 ```bash
 npm run verify:baseline

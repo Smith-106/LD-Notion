@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
-// quality-auto-test p3 (AT-003/004/005, L2): 三个自动导入器 run() 全流程集成。
+// quality-auto-test p3 (AT-003/005, L2): 存活自动导入器 run() 全流程集成。
+// v3.17: GitHub 收藏源已移除, AT-004 GitHub 全流程删除。
 // 断言面: 远端对账落账 → 建页/update → 账本/watermark 推进 → 双 emit → 返回契约。
 // 夹具契约: 跨模块 stub 用 require(); 建页 stub 走 NotionAPI.request; afterEach 还原。
-const { AutoImporter, GitHubAutoImporter } = require("../src/import");
-const { GitHubAPI } = require("../src/import/GitHubAPI.js");
+const { AutoImporter } = require("../src/import");
 const { NotionAPI } = require("../src/api");
 const { Storage, SyncState, DedupStore } = require("../src/storage");
 const { NotionOAuth } = require("../src/auth");
@@ -14,15 +14,6 @@ const { OperationGuard, OperationLog } = require("../src/security");
 const { BookmarkAutoImporter, BookmarkBridge, BookmarkExporter } = require("../src/bridge");
 const { on: subscribe } = require("../src/coordination/event-bus");
 const { CONFIG } = require("../src/config");
-
-const mkGithubItem = () => ({
-    id: 1,
-    full_name: "u/repo-1",
-    html_url: "https://github.com/u/repo-1",
-    description: "desc",
-    language: "JS",
-    starred_at: "2026-09-01T00:00:00Z",
-});
 
 describe("AT-003: LinuxDo 自动导入 run() 全流程", () => {
     const saved = {};
@@ -121,113 +112,7 @@ describe("AT-003: LinuxDo 自动导入 run() 全流程", () => {
     });
 });
 
-describe("AT-004: GitHub 自动导入 run() 全流程", () => {
-    const saved = {};
-    let emitLog;
-
-    beforeEach(() => {
-        emitLog = [];
-        saved.acquireLease = SyncLock.acquireLease;
-        saved.releaseLease = SyncLock.releaseLease;
-        saved.renewLease = SyncLock.renewLease;
-        saved.sleep = Utils.sleep;
-        saved.getAccessToken = NotionOAuth.getAccessToken;
-        saved.getGithubState = SyncState.getGitHubState;
-        saved.updateGithubState = SyncState.updateGitHubState;
-        saved.updateGithubMeta = SyncState.updateGitHubMeta;
-        saved.fetchTypeItems = GitHubAutoImporter.fetchTypeItems;
-        saved.getImportTypes = GitHubAPI.getImportTypes;
-        saved.getExported = GitHubAPI.getExported;
-        saved.collectUrls = NotionAPI.collectDatabaseUrls;
-        saved.request = NotionAPI.request;
-        saved.canExecute = OperationGuard.canExecute;
-        saved.logAdd = OperationLog.add;
-        saved.enrich = GitHubExporterRef.enrichRepo;
-        saved.buildProps = GitHubExporterRef.buildRepoProperties;
-
-        global.document = { hidden: false, querySelector: () => null };
-        SyncLock.isExporting = false;
-        GitHubAutoImporter.isRunning = false;
-        GitHubAutoImporter.lastRunAt = 0;
-        SyncLock.acquireLease = async () => ({ owner: "t", expiresAt: Date.now() + 60000 });
-        SyncLock.renewLease = () => true;
-        SyncLock.releaseLease = () => {};
-        Utils.sleep = async () => {};
-        NotionOAuth.getAccessToken = () => "tok";
-        GitHubAutoImporter.buildSettings = () => ({ apiKey: "tok", databaseId: "db-1", username: "octocat", token: "" });
-        GitHubAPI.getImportTypes = () => ["stars"];
-        SyncState.getGitHubState = () => ({ watermark: 0 });
-        SyncState.updateGitHubState = () => {};
-        SyncState.updateGitHubMeta = () => {};
-        GitHubAPI.getExported = () => ({});
-        OperationGuard.canExecute = () => true;
-        OperationLog.add = () => {};
-        subscribe("bookmarks:updated", () => emitLog.push("bookmarks:updated"));
-        subscribe("sync:center-summary-updated", () => emitLog.push("sync:center-summary-updated"));
-    });
-
-    afterEach(() => {
-        Object.assign(SyncLock, {
-            acquireLease: saved.acquireLease, releaseLease: saved.releaseLease, renewLease: saved.renewLease,
-        });
-        Utils.sleep = saved.sleep;
-        NotionOAuth.getAccessToken = saved.getAccessToken;
-        SyncState.getGitHubState = saved.getGithubState;
-        SyncState.updateGitHubState = saved.updateGithubState;
-        SyncState.updateGitHubMeta = saved.updateGithubMeta;
-        GitHubAutoImporter.fetchTypeItems = saved.fetchTypeItems;
-        GitHubAPI.getImportTypes = saved.getImportTypes;
-        GitHubAPI.getExported = saved.getExported;
-        NotionAPI.collectDatabaseUrls = saved.collectUrls;
-        NotionAPI.request = saved.request;
-        OperationGuard.canExecute = saved.canExecute;
-        OperationLog.add = saved.logAdd;
-        GitHubExporterRef.enrichRepo = saved.enrich;
-        GitHubExporterRef.buildRepoProperties = saved.buildProps;
-    });
-
-    it("created 建页落账 + watermark 推进 + 双 emit", async () => {
-        let lastStatePatch = null;
-        const created = [];
-        GitHubAutoImporter.fetchTypeItems = async () => [mkGithubItem()];
-        SyncState.updateGitHubState = (_type, patch) => { if (patch.watermark !== undefined || patch.lastStats) lastStatePatch = patch; };
-        NotionAPI.collectDatabaseUrls = async () => new Set();
-        NotionAPI.request = async (_m, path) => {
-            if (path === "/pages") { created.push(path); return { id: `page-${created.length}` }; }
-            throw new Error(`unexpected ${path}`);
-        };
-        GitHubExporterRef.enrichRepo = async (raw) => raw;
-        GitHubExporterRef.buildRepoProperties = (r) => ({ "链接": { url: r.html_url } });
-
-        const result = await GitHubAutoImporter.run();
-        expect(created).toHaveLength(1);
-        expect(result.importedCount).toBe(1);
-        expect(result.failedCount).toBe(0);
-        expect(result.errors).toEqual([]);
-        expect(lastStatePatch.watermark).toBeDefined();
-        expect(lastStatePatch.lastStats.exported).toBe(1);
-        expect(emitLog).toContain("bookmarks:updated");
-        expect(emitLog).toContain("sync:center-summary-updated");
-    });
-
-    it("skippedExisting(远端命中)计入 success 推进 watermark 且不建页", async () => {
-        let lastStatePatch = null;
-        const created = [];
-        GitHubAutoImporter.fetchTypeItems = async () => [mkGithubItem()];
-        SyncState.updateGitHubState = (_type, patch) => { if (patch.watermark !== undefined || patch.lastStats) lastStatePatch = patch; };
-        NotionAPI.collectDatabaseUrls = async () => new Set(["https://github.com/u/repo-1"]);
-        NotionAPI.request = async () => { throw new Error("should not create"); };
-
-        const result = await GitHubAutoImporter.run();
-        expect(created).toHaveLength(0);
-        // 契约: importedCount = 新建数; skippedExisting 不计为导入, 经 lastStats.skippedExisting
-        // 单独计数 + watermark 推进(防重复拉取) + 账本落账(计数收敛) —— 三路各自表达
-        expect(result.importedCount).toBe(0);
-        expect(lastStatePatch.watermark).toBeDefined(); // watermark 仍推进
-        expect(lastStatePatch.lastStats.skippedExisting).toBe(1);
-        expect(lastStatePatch.lastStats.exported).toBe(0);
-    });
-});
+// v3.17: GitHub 收藏源已移除, AT-004 GitHub 全流程 describe 整体删除。
 
 describe("AT-005: Bookmark 自动同步快照式 run() 流", () => {
     const saved = {};
@@ -336,4 +221,3 @@ describe("AT-005: Bookmark 自动同步快照式 run() 流", () => {
 });
 
 const { Exporter: ExporterRef, LinuxDoAPI } = require("../src/export");
-const { GitHubExporter: GitHubExporterRef } = require("../src/import/GitHubExporter.js");

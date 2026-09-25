@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.16.6
-// @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
+// @version      3.17.0
+// @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
 // @updateURL    https://raw.githubusercontent.com/Smith-106/LD-Notion/main/LinuxDo-Bookmarks-to-Notion.user.js
@@ -13,13 +13,10 @@
 // @match        https://notion.so/*
 // @match        https://*.notion.so/*
 // @match        https://smith-106.github.io/LD-Notion/*
-// @match        https://github.com/*
-// @match        https://www.github.com/*
-// @match        https://gist.github.com/*
 // @match        https://www.zhihu.com/*
 // @match        https://zhuanlan.zhihu.com/*
 // (audit) broad include catch-all removed; supported sites use explicit @match above.
-// Subdomain matches aligned with SiteDetector (*.linux.do / *.notion.so / gist.github.com).
+// Subdomain matches aligned with SiteDetector (*.linux.do / *.notion.so).
 // Generic sites: add Tampermonkey user @match as needed; extension still has http(s)://*/* ; @exclude retained as defense-in-depth.
 // @exclude      https://www.google.com/*
 // @exclude      https://www.google.com.hk/*
@@ -38,7 +35,6 @@
 // @grant        GM_xmlhttpRequest
 // @grant        GM_notification
 // @grant        GM_addValueChangeListener
-// @grant        GM_setClipboard
 // @connect      api.notion.com
 // @connect      linux.do
 // @connect      *.amazonaws.com
@@ -47,10 +43,8 @@
 // @connect      api.anthropic.com
 // @connect      generativelanguage.googleapis.com
 // @connect      api.github.com
-// @connect      github.com
-// v3.16.4: GitHub OAuth Device Flow 需直连 github.com/login/device/code 与
-// /login/oauth/access_token —— GM_xmlhttpRequest 受 @connect 白名单约束,
-// 缺此行时授权报 "not part of @connect list"(api.github.com 仅覆盖数据接口)。
+// v3.17: GitHub 收藏源已移除,github.com @connect 删除(Device Flow 下线);
+// api.github.com 保留, 仅供 UpdateChecker 自身更新检查(releases/latest)。
 // @connect      zhihu.com
 // @connect      zhuanlan.zhihu.com
 // v3.14.6 (AUD-ARCH-13): Obsidian 本地导出需 127.0.0.1/localhost —— 缺白名单时
@@ -86,7 +80,7 @@
       "use strict";
       var CONFIG2 = {
         // Keep in sync with package.json + userscript @version + build.js header.
-        SCRIPT_VERSION: "3.16.6",
+        SCRIPT_VERSION: "3.17.0",
         // 编译期 feature flag: 多端同步。默认关闭——off 时 main.js 不初始化同步引擎、
         // 零网络/零定时器/零 DOM,行为与关闭前字节级一致(F-SYNC-11)。
         MULTI_DEVICE_SYNC_ENABLED: false,
@@ -165,7 +159,7 @@
           AGENT_MAX_ITERATIONS: "ldb_agent_max_iterations",
           // AI 输出模板
           AI_TEMPLATES: "ldb_ai_templates",
-          // GitHub 收藏导入
+          // v3.17: GitHub 收藏源已移除 —— 以下 GITHUB_* 键仅为历史存储兼容保留(读到无害), 不再有写入方
           GITHUB_USERNAME: "ldb_github_username",
           GITHUB_TOKEN: "ldb_github_token",
           GITHUB_OAUTH_CLIENT_ID: "ldb_github_oauth_client_id",
@@ -663,11 +657,7 @@
             version: SyncStateV2.VERSION,
             sources: {
               linuxdo: this._makeSourceDefault(),
-              "github-stars": this._makeSourceDefault(),
-              "github-repos": this._makeSourceDefault(),
-              "github-forks": this._makeSourceDefault(),
-              "github-gists": this._makeSourceDefault(),
-              "github-meta": this._makeSourceDefault(),
+              // v3.17 GitHub 收藏源已移除: 不再预置 github-* 源(历史残留由 _load 剪枝)
               bookmark: this._makeSourceDefault(true),
               zhihu: this._makeSourceDefault(),
               generic: this._makeSourceDefault()
@@ -720,13 +710,6 @@
           if (v1State.linuxdo) {
             sources.linuxdo = this.normalizeSyncRecord(v1State.linuxdo);
           }
-          if (v1State.github) {
-            for (const type of ["stars", "repos", "forks", "gists"]) {
-              if (v1State.github[type]) {
-                sources[`github-${type}`] = this.normalizeSyncRecord(v1State.github[type]);
-              }
-            }
-          }
           if (v1State.bookmarks) {
             sources.bookmark = this.normalizeSyncRecord(v1State.bookmarks, { keepSnapshot: true });
           }
@@ -752,6 +735,13 @@
           }
           if (parsed.sources && parsed.sources.rss) {
             delete parsed.sources.rss;
+          }
+          if (parsed.sources) {
+            for (const key of Object.keys(parsed.sources)) {
+              if (key === "github-meta" || key.startsWith("github-")) {
+                delete parsed.sources[key];
+              }
+            }
           }
           if (!parsed.sources) parsed.sources = {};
           for (const key of Object.keys(defaults.sources)) {
@@ -1491,7 +1481,7 @@
             GM_addValueChangeListener(CONFIG2.STORAGE_KEYS.EXPORTED_TOPICS, () => {
               Storage2._exportedTopicsCache = null;
             });
-            for (const sourceType of ["linuxdo", "bookmark", "github-stars", "github-repos", "github-forks", "github-gists", "zhihu", "generic"]) {
+            for (const sourceType of ["linuxdo", "bookmark", "zhihu", "generic"]) {
               GM_addValueChangeListener(
                 `${CONFIG2.STORAGE_KEYS.EXPORTED_TOPICS}:${sourceType}`,
                 () => {
@@ -1594,6 +1584,8 @@
         // V1 兼容 API 代理到 V2
         getLinuxDoState: () => SyncStateV2.getSourceState("linuxdo"),
         updateLinuxDoState: (patch) => SyncStateV2.updateSourceState("linuxdo", patch),
+        // v3.17 GitHub 收藏源已移除: 仅保留兼容壳供旧测试/旧数据静默降级(通用 get/set 透传,
+        // 不再有预置 github-* 源, _load 会剪枝存量; 同步白名单亦不再含 github-*, 不会参与多端同步)
         getGitHubState: (type) => SyncStateV2.getSourceState(`github-${type}`),
         updateGitHubState: (type, patch) => SyncStateV2.updateSourceState(`github-${type}`, patch),
         getGitHubMeta: () => SyncStateV2.getSourceState("github-meta"),
@@ -2091,273 +2083,6 @@
     }
   });
 
-  // src/auth/github-oauth.js
-  var require_github_oauth = __commonJS({
-    "src/auth/github-oauth.js"(exports, module) {
-      "use strict";
-      var { CONFIG: CONFIG2 } = require_config();
-      var { Storage: Storage2 } = require_storage();
-      var DEVICE_CODE_URL = "https://github.com/login/device/code";
-      var TOKEN_URL = "https://github.com/login/oauth/access_token";
-      var DEFAULT_SCOPES = "repo gist";
-      var DEFAULT_INTERVAL_MS = 5e3;
-      var SLOW_DOWN_EXTRA_MS = 5e3;
-      var DEFAULT_MAX_POLL_MS = 15 * 60 * 1e3;
-      function gmPostForm(url, params, timeoutMs = 3e4) {
-        return new Promise((resolve, reject) => {
-          if (typeof GM_xmlhttpRequest === "undefined") {
-            reject(new Error("\u5F53\u524D\u73AF\u5883\u4E0D\u652F\u6301 GM_xmlhttpRequest, \u65E0\u6CD5\u53D1\u8D77 GitHub \u6388\u6743"));
-            return;
-          }
-          GM_xmlhttpRequest({
-            method: "POST",
-            url,
-            headers: {
-              "Content-Type": "application/x-www-form-urlencoded",
-              "Accept": "application/json"
-            },
-            data: Object.keys(params).map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(params[k])}`).join("&"),
-            onload: (response) => {
-              let body = {};
-              try {
-                body = JSON.parse(response.responseText || "{}");
-              } catch (_) {
-                body = {};
-              }
-              resolve({ status: response.status, body });
-            },
-            onerror: (error) => reject(new Error(`GitHub \u6388\u6743\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25: ${(error == null ? void 0 : error.error) || error}`)),
-            timeout: timeoutMs,
-            ontimeout: () => reject(new Error("GitHub \u6388\u6743\u8BF7\u6C42\u8D85\u65F6\uFF0C\u8BF7\u68C0\u67E5\u7F51\u7EDC\u8FDE\u63A5"))
-          });
-        });
-      }
-      function describeDeviceCodeError(body, status) {
-        const code = String((body == null ? void 0 : body.error) || "").toLowerCase();
-        const message = String((body == null ? void 0 : body.error_description) || (body == null ? void 0 : body.error_uri) || "").slice(0, 200);
-        const map = {
-          incorrect_client_credentials: "Client ID \u65E0\u6548\uFF08github.com/settings/developers \u6838\u5BF9 OAuth App \u7684 Client ID\uFF09",
-          incorrect_device_code: "\u8BBE\u5907\u7801\u65E0\u6548\u6216\u5DF2\u8FC7\u671F\uFF0C\u8BF7\u91CD\u65B0\u53D1\u8D77\u6388\u6743",
-          expired_token: "\u6388\u6743\u7B49\u5F85\u8D85\u65F6\uFF0815 \u5206\u949F\u5185\u672A\u5728 GitHub \u9875\u9762\u786E\u8BA4\uFF09\uFF0C\u8BF7\u91CD\u65B0\u53D1\u8D77\u6388\u6743",
-          device_flow_disabled: "\u8BE5 OAuth App \u672A\u542F\u7528 Device Flow\uFF08GitHub \u9ED8\u8BA4\u542F\u7528\uFF1B\u8001\u5F0F App \u9700\u52FE\u9009 Enable Device Flow\uFF09",
-          unauthorized_client: "\u8BE5 OAuth App \u4E0D\u5141\u8BB8\u6B64\u6388\u6743\u65B9\u5F0F",
-          access_denied: "\u4F60\u5728 GitHub \u9875\u9762\u62D2\u7EDD\u4E86\u6388\u6743"
-        };
-        const error = new Error(map[code] || `GitHub \u6388\u6743\u5931\u8D25(HTTP ${status}${code ? `, ${code}` : ""})`);
-        error.code = code;
-        if (message) error.detail = message;
-        return error;
-      }
-      var GitHubOAuth = {
-        DEVICE_CODE_URL,
-        TOKEN_URL,
-        DEFAULT_SCOPES,
-        // client_id 为公开信息(设计上随请求明文出现), 存普通键即可; 空表示未配置
-        getClientId: () => String(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_OAUTH_CLIENT_ID, "")).trim(),
-        setClientId: (clientId) => {
-          const value = String(clientId || "").trim();
-          Storage2.set(CONFIG2.STORAGE_KEYS.GITHUB_OAUTH_CLIENT_ID, value);
-          return value;
-        },
-        // —— Device Flow 主流程 ——
-        // options: { clientId?, scopes?, intervalMs?, maxPollMs?, onUserCode?, onStatus? }
-        // 返回 { accessToken, tokenType, scope }; 过程回调用于 UI 展示(用户代码/轮询状态)
-        startDeviceFlow: async (options = {}) => {
-          const clientId = String(options.clientId || GitHubOAuth.getClientId()).trim();
-          if (!clientId) {
-            const error = new Error("\u7F3A\u5C11 GitHub OAuth Client ID \u2014\u2014 \u524D\u5F80 github.com/settings/developers \u521B\u5EFA OAuth App\uFF08Callback URL \u968F\u4FBF\u586B\u4E00\u4E2A https \u5730\u5740\u5373\u53EF\uFF0C\u5982 https://smith-106.github.io/LD-Notion/\uFF0CDevice Flow \u4E0D\u7528\u5B83\uFF09\uFF0C\u628A Client ID \u7C98\u8D34\u5230\u4E0B\u65B9\u8F93\u5165\u6846");
-            error.code = "missing_client_id";
-            throw error;
-          }
-          const scopes = options.scopes || GitHubOAuth.DEFAULT_SCOPES;
-          let intervalMs = Number(options.intervalMs) > 0 ? Number(options.intervalMs) : DEFAULT_INTERVAL_MS;
-          const maxPollMs = Number(options.maxPollMs) > 0 ? Number(options.maxPollMs) : DEFAULT_MAX_POLL_MS;
-          const slowDownExtraMs = Number(options.slowDownExtraMs) > 0 ? Number(options.slowDownExtraMs) : SLOW_DOWN_EXTRA_MS;
-          const onUserCode = typeof options.onUserCode === "function" ? options.onUserCode : (() => {
-          });
-          const onStatus = typeof options.onStatus === "function" ? options.onStatus : (() => {
-          });
-          GitHubOAuth._pollCancelled = false;
-          const dcResponse = await gmPostForm(DEVICE_CODE_URL, {
-            client_id: clientId,
-            scope: scopes
-          });
-          const dc = dcResponse.body || {};
-          if (dcResponse.status !== 200 || !dc.device_code || !dc.user_code) {
-            throw describeDeviceCodeError(dc, dcResponse.status);
-          }
-          const expiresInSeconds = Number(dc.expires_in) > 0 ? Number(dc.expires_in) : 900;
-          onUserCode({
-            userCode: String(dc.user_code),
-            verificationUri: String(dc.verification_uri || "https://github.com/login/device"),
-            expiresInSeconds
-          });
-          const startedAt = Date.now();
-          const deadlineMs = Math.min(maxPollMs, expiresInSeconds * 1e3);
-          for (; ; ) {
-            if (GitHubOAuth._pollCancelled) {
-              const cancelError = new Error("\u5DF2\u53D6\u6D88 GitHub \u6388\u6743");
-              cancelError.code = "cancelled";
-              throw cancelError;
-            }
-            if (Date.now() - startedAt > deadlineMs) {
-              const timeoutError = new Error("GitHub \u6388\u6743\u7B49\u5F85\u8D85\u65F6\uFF0C\u8BF7\u91CD\u65B0\u53D1\u8D77\u6388\u6743");
-              timeoutError.code = "expired_token";
-              throw timeoutError;
-            }
-            await new Promise((r) => setTimeout(r, intervalMs));
-            if (GitHubOAuth._pollCancelled) {
-              const cancelError = new Error("\u5DF2\u53D6\u6D88 GitHub \u6388\u6743");
-              cancelError.code = "cancelled";
-              throw cancelError;
-            }
-            const tokenResponse = await gmPostForm(TOKEN_URL, {
-              client_id: clientId,
-              device_code: dc.device_code,
-              grant_type: "urn:ietf:params:oauth:grant-type:device_code"
-            });
-            const tb = tokenResponse.body || {};
-            if (tokenResponse.status === 200 && tb.access_token) {
-              onStatus({ phase: "success" });
-              return {
-                accessToken: String(tb.access_token),
-                tokenType: String(tb.token_type || "bearer"),
-                scope: String(tb.scope || scopes)
-              };
-            }
-            const code = String(tb.error || "").toLowerCase();
-            if (code === "authorization_pending") {
-              onStatus({ phase: "pending", intervalMs });
-              continue;
-            }
-            if (code === "slow_down") {
-              intervalMs += slowDownExtraMs;
-              onStatus({ phase: "slow_down", intervalMs });
-              continue;
-            }
-            throw describeDeviceCodeError(tb, tokenResponse.status);
-          }
-        },
-        // —— 授权结果落库(与手动 PAT 同一存储键, GitHubAPI 零改动) ——
-        applyTokenResponse: async (result = {}) => {
-          if (!(result == null ? void 0 : result.accessToken)) throw new Error("GitHub OAuth \u672A\u8FD4\u56DE access_token");
-          Storage2.set(CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, result.accessToken);
-          return result.accessToken;
-        },
-        // v3.16.6: 设备码状态行渲染 —— user_code 来自 GitHub 接口(不可信输入)。
-        // ① 主码行经 textContent 赋值(防注入); ② href 白名单限定
-        // https://github.com/login/device 前缀, 否则降级纯文本(防 verification_uri 劫持);
-        // ③ phase 为 pending/slow_down 时状态行仍保留设备码(轮询回调不再裸 setStatus 覆盖);
-        // ④ 设备码自动复制剪贴板(GM_setClipboard → navigator.clipboard → execCommand 降级, 全部静默)。
-        // codeEl 优先使用 <strong> 高亮(选中即复制, 无需手动全选); 不可用时降级纯文本。
-        // 返回 'link' | 'text-only' | 'no-el', 供单测断言。
-        renderUserCodeStatus: (statusEl, userCode, verificationUri, phase) => {
-          const code = String(userCode || "");
-          if (!statusEl) return "no-el";
-          const phaseTip = phase === "slow_down" ? "GitHub \u9650\u6D41\u63D0\u793A, \u5DF2\u81EA\u52A8\u964D\u901F\u7EE7\u7EED\u7B49\u5F85\u2026" : "\u7B49\u5F85\u4F60\u5728 GitHub \u9875\u9762\u786E\u8BA4\u6388\u6743\u2026";
-          try {
-            while (statusEl.firstChild) statusEl.removeChild(statusEl.firstChild);
-            const doc = typeof document !== "undefined" ? document : null;
-            if (!doc || typeof doc.createElement !== "function" || typeof doc.createTextNode !== "function") {
-              statusEl.textContent = "\u8BF7\u5728\u5DF2\u6253\u5F00\u7684 GitHub \u9875\u9762\u8F93\u5165\u4EE3\u7801: " + code + " \u2014\u2014 " + phaseTip;
-            } else {
-              statusEl.appendChild(doc.createTextNode("\u8BF7\u5728\u5DF2\u6253\u5F00\u7684 GitHub \u9875\u9762\u8F93\u5165\u4EE3\u7801: "));
-              let codeEl = null;
-              try {
-                codeEl = doc.createElement("strong");
-                codeEl.textContent = code;
-                codeEl.style.userSelect = "all";
-                codeEl.style.fontSize = "1.2em";
-                codeEl.style.letterSpacing = "2px";
-                statusEl.appendChild(codeEl);
-              } catch (_) {
-                statusEl.appendChild(doc.createTextNode(code));
-              }
-              statusEl.appendChild(doc.createTextNode(" \u2014\u2014 " + phaseTip));
-            }
-          } catch (_) {
-            return "no-el";
-          }
-          try {
-            if (GitHubOAuth._lastCopiedCode !== code) {
-              GitHubOAuth._lastCopiedCode = code;
-              GitHubOAuth.copyUserCode(code);
-            }
-          } catch (_) {
-          }
-          const safeUrl = String(verificationUri || "");
-          if (!safeUrl.startsWith("https://github.com/login/device")) return "text-only";
-          try {
-            const doc = typeof document !== "undefined" ? document : null;
-            if (!doc || typeof doc.createElement !== "function") return "text-only";
-            const link = doc.createElement("a");
-            link.href = safeUrl;
-            link.target = "_blank";
-            link.rel = "noopener";
-            link.textContent = "\u{1F449} \u6253\u4E0D\u5F00\uFF1F\u70B9\u6211\u624B\u52A8\u6253\u5F00\u6388\u6743\u9875";
-            link.style.marginLeft = "8px";
-            statusEl.appendChild(doc.createTextNode(" "));
-            statusEl.appendChild(link);
-          } catch (_) {
-            return "text-only";
-          }
-          return "link";
-        },
-        // v3.16.6: 设备码剪贴板写入(静默尽力, 失败不抛、不阻断授权 —— 状态行已常驻显示设备码)。
-        // GM_setClipboard → navigator.clipboard → execCommand 三级降级。
-        // 返回 true(已由某一级接管写入)/false(无可用写入通道或同步复制失败);
-        // 注意 navigator.clipboard.writeText 为异步 fire-and-forget, true 仅表示“已发起”而非“已成功”。
-        copyUserCode: (userCode) => {
-          const code = String(userCode || "");
-          if (!code) return false;
-          try {
-            if (typeof GM_setClipboard !== "undefined" && GM_setClipboard) {
-              GM_setClipboard(code);
-              return true;
-            }
-          } catch (_) {
-          }
-          try {
-            if (typeof navigator !== "undefined" && navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
-              navigator.clipboard.writeText(code).catch(() => {
-              });
-              return true;
-            }
-          } catch (_) {
-          }
-          try {
-            if (typeof document !== "undefined" && typeof document.execCommand === "function" && document.body && typeof document.body.appendChild === "function") {
-              const ta = document.createElement("textarea");
-              let added = false;
-              try {
-                ta.value = code;
-                ta.setAttribute("readonly", "readonly");
-                ta.style.position = "fixed";
-                ta.style.opacity = "0";
-                document.body.appendChild(ta);
-                added = true;
-                ta.select();
-                if (!!document.execCommand("copy")) return true;
-              } finally {
-                try {
-                  if (added) ta.remove();
-                } catch (_) {
-                }
-              }
-            }
-          } catch (_) {
-          }
-          return false;
-        },
-        // UI 取消按钮调用; 正在进行的轮询在下一个检查点抛 cancelled
-        cancelPolling: () => {
-          GitHubOAuth._pollCancelled = true;
-        }
-      };
-      module.exports = { GitHubOAuth };
-    }
-  });
-
   // src/auth/credential-vault.js
   var require_credential_vault = __commonJS({
     "src/auth/credential-vault.js"(exports, module) {
@@ -2369,7 +2094,7 @@
         VERSION: 1,
         // 敏感键集已全部清空(v3.14.2):
         // vault 解锁态(_unlocked/_sessionCache)为模块内存态,每次页面加载(含 Tampermonkey
-        // 脚本更新强制重载)即重置为锁定;锁定态下读取返回空,导致 AI/GitHub/Obsidian
+        // 脚本更新强制重载)即重置为锁定;锁定态下读取返回空,导致 AI/Obsidian
         // 敏感键在每次更新后看似失效。与 v3.12.0 OAuth 三键同根(R1),按同一先例改走
         // GM 明文存储,审计日志仍由 REDACT_IN_LOGS 统一脱敏。
         SENSITIVE_KEYS: Object.freeze(/* @__PURE__ */ new Set()),
@@ -2907,7 +2632,6 @@
         describeExchangeError,
         describeRedirectUriMismatch
       } = require_target_discovery();
-      var { GitHubOAuth } = require_github_oauth();
       var { CredentialVault: CredentialVault2 } = require_credential_vault();
       var INVISIBLE_CHARS_RE = /[\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF\u00AD]/g;
       var CLIENT_ID_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -3128,7 +2852,7 @@
           const raw = String(apiKey ?? "").trim().replace(INVISIBLE_CHARS_RE, "").replace(/[\r\n\t]/g, "");
           if (!raw) return { valid: false, code: "EMPTY", value: "", message: "\u8BF7\u5148\u586B\u5199 Notion API Key" };
           if (!/^(secret_|ntn_)/i.test(raw)) {
-            return { valid: false, code: "FORMAT_SUSPECT", value: raw, message: "Notion API Key \u5E94\u4EE5 secret_ \u6216 ntn_ \u5F00\u5934\uFF1B\u5F53\u524D\u503C\u7591\u4F3C\u590D\u5236\u4E0D\u5B8C\u6574\u6216\u8BEF\u8D34\u5176\u4ED6\u51ED\u8BC1\uFF08\u5982 OAuth Client Secret / AI Key / GitHub token\uFF09" };
+            return { valid: false, code: "FORMAT_SUSPECT", value: raw, message: "Notion API Key \u5E94\u4EE5 secret_ \u6216 ntn_ \u5F00\u5934\uFF1B\u5F53\u524D\u503C\u7591\u4F3C\u590D\u5236\u4E0D\u5B8C\u6574\u6216\u8BEF\u8D34\u5176\u4ED6\u51ED\u8BC1\uFF08\u5982 OAuth Client Secret / AI Key / \u5176\u4ED6\u51ED\u8BC1\uFF09" };
           }
           if (raw.length < 20) {
             return { valid: false, code: "TOO_SHORT", value: raw, message: "Notion API Key \u957F\u5EA6\u5F02\u5E38\uFF08\u8FC7\u77ED\uFF09\uFF0C\u7591\u4F3C\u590D\u5236\u4E0D\u5B8C\u6574\uFF0C\u8BF7\u4ECE Notion \u96C6\u6210\u9875\u9762\u7528 Copy \u6309\u94AE\u5B8C\u6574\u590D\u5236" };
@@ -3851,7 +3575,7 @@
           return true;
         }
       };
-      module.exports = { CredentialVault: CredentialVault2, TargetState: TargetState2, NotionOAuth: NotionOAuth2, GitHubOAuth };
+      module.exports = { CredentialVault: CredentialVault2, TargetState: TargetState2, NotionOAuth: NotionOAuth2 };
     }
   });
 
@@ -4053,7 +3777,7 @@
         SITES: {
           LINUX_DO: "linux_do",
           NOTION: "notion",
-          GITHUB: "github",
+          // v3.17: GitHub 收藏源已移除,不再识别 github 站点。
           ZHIHU: "zhihu",
           GENERIC: "generic"
         },
@@ -4065,9 +3789,6 @@
           }
           if (hostname === "notion.so" || hostname === "www.notion.so" || hostname.endsWith(".notion.so")) {
             return SiteDetector2.SITES.NOTION;
-          }
-          if (hostname === "github.com" || hostname === "www.github.com" || hostname === "gist.github.com") {
-            return SiteDetector2.SITES.GITHUB;
           }
           if (hostname === "www.zhihu.com" || hostname === "zhuanlan.zhihu.com") {
             return SiteDetector2.SITES.ZHIHU;
@@ -4082,10 +3803,7 @@
         isNotion: () => {
           return SiteDetector2.detect() === SiteDetector2.SITES.NOTION;
         },
-        // 判断是否在 GitHub 站点
-        isGitHub: () => {
-          return SiteDetector2.detect() === SiteDetector2.SITES.GITHUB;
-        },
+        // v3.17: GitHub 收藏源已移除,isGitHub() 删除(调用方改走恒 false 兼容壳)。
         // 判断是否在通用网页
         isGeneric: () => {
           return SiteDetector2.detect() === SiteDetector2.SITES.GENERIC;
@@ -7439,8 +7157,7 @@ Content-Type: ${safeContentType}\r
           restorePage: 2,
           createComment: 1,
           agentTask: 2,
-          // v3.14.7 (REV-03 UI-07): Obsidian 写入登记——此前 4 个裸调点(events.js:1335/1380,
-          // github-obsidian-service.js:210, generic-ui.js:704)绕过 OperationGuard, 权限 0 只读
+          // v3.14.7 (REV-03 UI-07): Obsidian 写入登记——此前裸调点(events.js/generic-ui.js 等)绕过 OperationGuard, 权限 0 只读
           // 级仍可写零审计。登记后 writeNote/writeImage 统一经 canExecute 闸门 + auditDenied。
           "obsidian.writeNote": 1,
           "obsidian.writeImage": 1,
@@ -10367,8 +10084,8 @@ Content-Type: ${safeContentType}\r
         },
         // === 跨源工具 (Level 0) ===
         cross_source_search: {
-          description: "\u8DE8\u6E90\u641C\u7D22\uFF1A\u5728 Linux.do\u3001GitHub\u3001\u6D4F\u89C8\u5668\u4E66\u7B7E\u7B49\u591A\u4E2A\u6765\u6E90\u4E2D\u7EDF\u4E00\u641C\u7D22",
-          params: "query(\u641C\u7D22\u8BCD), source(\u53EF\u9009:'linux.do'|'github'|'\u4E66\u7B7E'|'all', \u9ED8\u8BA4all), limit(\u6570\u91CF,\u9ED8\u8BA410)",
+          description: "\u8DE8\u6E90\u641C\u7D22\uFF1A\u5728 Linux.do\u3001\u6D4F\u89C8\u5668\u4E66\u7B7E\u7B49\u591A\u4E2A\u6765\u6E90\u4E2D\u7EDF\u4E00\u641C\u7D22",
+          params: "query(\u641C\u7D22\u8BCD), source(\u53EF\u9009:'linux.do'|'\u4E66\u7B7E'|'all', \u9ED8\u8BA4all), limit(\u6570\u91CF,\u9ED8\u8BA410)",
           level: 0,
           execute: async (args, settings) => {
             const { query = "", source = "all", limit = 10 } = args;
@@ -10377,7 +10094,7 @@ Content-Type: ${safeContentType}\r
             });
             let sourceFilter = null;
             if (source !== "all") {
-              const sourceMap = { "linux.do": "Linux.do", "github": "GitHub", "\u4E66\u7B7E": "\u6D4F\u89C8\u5668\u4E66\u7B7E" };
+              const sourceMap = { "linux.do": "Linux.do", "\u4E66\u7B7E": "\u6D4F\u89C8\u5668\u4E66\u7B7E" };
               const sourceValue = sourceMap[source.toLowerCase()] || source;
               sourceFilter = { property: "\u6765\u6E90", rich_text: { contains: sourceValue } };
             }
@@ -10453,7 +10170,7 @@ Content-Type: ${safeContentType}\r
           }
         },
         unified_stats: {
-          description: "\u8DE8\u6E90\u7EDF\u8BA1\uFF1A\u7EDF\u8BA1\u5404\u6765\u6E90\uFF08Linux.do/GitHub/\u6D4F\u89C8\u5668\u4E66\u7B7E\uFF09\u7684\u6570\u636E\u91CF\u3001\u5206\u7C7B\u5206\u5E03",
+          description: "\u8DE8\u6E90\u7EDF\u8BA1\uFF1A\u7EDF\u8BA1\u5404\u6765\u6E90\uFF08Linux.do/\u6D4F\u89C8\u5668\u4E66\u7B7E\uFF09\u7684\u6570\u636E\u91CF\u3001\u5206\u7C7B\u5206\u5E03",
           params: "\u65E0\u9700\u53C2\u6570",
           level: 0,
           execute: async (args, settings) => {
@@ -10627,7 +10344,7 @@ ${candidateList}
       module.exports = {
         batch_tag: {
           description: "\u6279\u91CF\u6253\u6807\u7B7E\uFF1A\u7528 AI \u4E3A\u6307\u5B9A\u6765\u6E90\u7684\u6240\u6709\u672A\u6807\u8BB0\u9875\u9762\u81EA\u52A8\u6DFB\u52A0\u6807\u7B7E",
-          params: "source(\u53EF\u9009:'linux.do'|'github'|'\u4E66\u7B7E'|'all'), tag_count(\u6BCF\u9875\u6807\u7B7E\u6570,\u9ED8\u8BA43)",
+          params: "source(\u53EF\u9009:'linux.do'|'\u4E66\u7B7E'|'all'), tag_count(\u6BCF\u9875\u6807\u7B7E\u6570,\u9ED8\u8BA43)",
           level: 1,
           execute: async (args, settings) => {
             var _a, _b, _c, _d, _e;
@@ -10667,7 +10384,7 @@ ${candidateList}
               }
             }
             if (source !== "all") {
-              const sourceMap = { "linux.do": "Linux.do", "github": "GitHub", "\u4E66\u7B7E": "\u6D4F\u89C8\u5668\u4E66\u7B7E" };
+              const sourceMap = { "linux.do": "Linux.do", "\u4E66\u7B7E": "\u6D4F\u89C8\u5668\u4E66\u7B7E" };
               const sourceValue = sourceMap[source.toLowerCase()] || source;
               pages = pages.filter((p) => {
                 var _a2, _b2, _c2, _d2, _e2;
@@ -13589,7 +13306,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
           return BookmarkExporter2._exportedCache;
         },
         // 仅 mutate 内存缓存，不写存储（DISCOVER P3 同类修复）：循环内逐条调用避免写侧 O(N²)。
-        // 单次调用场景须紧跟 flushExported() 持久化，或用 markExportedAndFlush。与 GitHubAPI.markExported 同构。
+        // 单次调用场景须紧跟 flushExported() 持久化，或用 markExportedAndFlush。
         markExported: (bookmarkUrl) => {
           const exported = BookmarkExporter2.getExported();
           exported[Utils2.normalizeDedupUrl(bookmarkUrl)] = Date.now();
@@ -13985,77 +13702,6 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
     }
   });
 
-  // src/adapter/GitHubAdapter.js
-  var require_GitHubAdapter = __commonJS({
-    "src/adapter/GitHubAdapter.js"(exports, module) {
-      "use strict";
-      var { SourceAdapter } = require_SourceAdapter();
-      var { GitHubAPI: GitHubAPI2 } = require_import();
-      var { SyncState: SyncState2 } = require_storage();
-      var { CONFIG: CONFIG2 } = require_config();
-      var { Storage: Storage2 } = require_storage();
-      function createGitHubAdapter(subType) {
-        const adapter = Object.assign(Object.create(SourceAdapter), {
-          sourceType: `github-${subType}`,
-          subType,
-          async fetchIncremental(watermark) {
-            const rawItems = await this._fetchByType();
-            if (watermark && watermark.time) {
-              return SyncState2.filterOrderedItems(
-                rawItems,
-                watermark,
-                this._getTime.bind(this),
-                this._getId.bind(this)
-              ).map((item) => this.normalize(item));
-            }
-            return rawItems.map((item) => this.normalize(item));
-          },
-          async fetchAll() {
-            const rawItems = await this._fetchByType();
-            return rawItems.map((item) => this.normalize(item));
-          },
-          normalize(raw) {
-            return {
-              source: "github",
-              id: String(raw.full_name || raw.id || ""),
-              title: raw.full_name || raw.description || "",
-              content: raw.description || "",
-              url: raw.html_url || "",
-              author: raw.owner && raw.owner.login || "",
-              tags: raw.language ? [`lang:${raw.language}`] : [],
-              createdAt: raw.starred_at || raw.pushed_at || raw.updated_at || raw.created_at || "",
-              raw
-            };
-          },
-          getDedupKey(item) {
-            return `github:${subType}:${item.id}`;
-          },
-          _getTime(raw) {
-            if (subType === "stars") return raw.starred_at || "";
-            if (subType === "repos") return raw.pushed_at || raw.updated_at || "";
-            if (subType === "forks") return raw.pushed_at || raw.updated_at || "";
-            if (subType === "gists") return raw.updated_at || raw.created_at || "";
-            return "";
-          },
-          _getId(raw) {
-            return String(raw.full_name || raw.id || "");
-          },
-          async _fetchByType() {
-            const username = Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, "");
-            const token = Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "");
-            if (subType === "stars") return GitHubAPI2.fetchStarredRepos(username, token);
-            if (subType === "repos") return GitHubAPI2.fetchUserRepos(username, token);
-            if (subType === "forks") return GitHubAPI2.fetchForkedRepos(username, token);
-            if (subType === "gists") return GitHubAPI2.fetchUserGists(username, token);
-            return [];
-          }
-        });
-        return adapter;
-      }
-      module.exports = { createGitHubAdapter };
-    }
-  });
-
   // src/adapter/BookmarkAdapter.js
   var require_BookmarkAdapter = __commonJS({
     "src/adapter/BookmarkAdapter.js"(exports, module) {
@@ -14231,17 +13877,12 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
       var { SourceAdapter } = require_SourceAdapter();
       var { AdapterRegistry } = require_AdapterRegistry();
       var { LinuxDoAdapter } = require_LinuxDoAdapter();
-      var { createGitHubAdapter } = require_GitHubAdapter();
       var { BookmarkAdapter } = require_BookmarkAdapter();
       var { ZhihuAdapter } = require_ZhihuAdapter();
       var { GenericAdapter } = require_GenericAdapter();
       var lazyBridge = () => require_bridge();
       Object.assign(BookmarkAdapter, { _bridgeAccessor: lazyBridge });
       AdapterRegistry.register(LinuxDoAdapter);
-      AdapterRegistry.register(createGitHubAdapter("stars"));
-      AdapterRegistry.register(createGitHubAdapter("repos"));
-      AdapterRegistry.register(createGitHubAdapter("forks"));
-      AdapterRegistry.register(createGitHubAdapter("gists"));
       AdapterRegistry.register(BookmarkAdapter);
       AdapterRegistry.register(ZhihuAdapter);
       AdapterRegistry.register(GenericAdapter);
@@ -14363,6 +14004,1715 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
     }
   });
 
+  // src/export/page-file.js
+  var require_page_file = __commonJS({
+    "src/export/page-file.js"(exports, module) {
+      "use strict";
+      var { Utils: Utils2 } = require_utils();
+      var { SiteDetector: SiteDetector2, HTMLToMarkdown: HTMLToMarkdown2 } = require_api();
+      var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, LinuxDoAPI: LinuxDoAPI2 } = require_extract();
+      var sanitizeFileName = (name, fallback = "page") => {
+        const base = String(name || "").trim().replace(/[\\/:*?"<>|]/g, "_").substring(0, 80);
+        return base || fallback;
+      };
+      var MAX_PUBLISH_RAW_LENGTH = 6e4;
+      var MIN_PUBLISH_TITLE_LENGTH = 5;
+      var PageFileExporter = {
+        MAX_PUBLISH_RAW_LENGTH,
+        MIN_PUBLISH_TITLE_LENGTH,
+        sanitizeFileName,
+        // —— Markdown 装配（三种来源） ——
+        // 通用页：meta + 正文 HTML → markdown
+        buildMarkdownFromGeneric: (meta = {}, bodyHtml = "") => {
+          const safeMeta = {
+            title: meta.title || "\u65E0\u6807\u9898",
+            url: meta.url || (typeof location !== "undefined" ? location.href : ""),
+            author: meta.author || "",
+            source: meta.source || meta.siteName || "\u901A\u7528\u9875\u9762",
+            sourceType: meta.sourceType || "\u7F51\u9875"
+          };
+          let md = HTMLToMarkdown2.buildFrontmatter(safeMeta);
+          md += `> [!info] \u9875\u9762\u4FE1\u606F
+> - **\u6765\u6E90**: ${Utils2.mdText(safeMeta.source)}
+> - **\u94FE\u63A5**: ${Utils2.mdLink(safeMeta.title, safeMeta.url)}
+`;
+          if (safeMeta.author) md += `> - **\u4F5C\u8005**: ${Utils2.mdText(safeMeta.author)}
+`;
+          md += `> - **\u5BFC\u51FA\u65F6\u95F4**: ${(/* @__PURE__ */ new Date()).toLocaleString("zh-CN")}
+
+`;
+          if (bodyHtml) md += `${HTMLToMarkdown2.convert(bodyHtml)}
+`;
+          return { meta: safeMeta, markdown: md };
+        },
+        // 知乎内容对象（ZhihuAPI.extractContent 形态）→ markdown（与 generic-ui Obsidian 分支同构）
+        buildMarkdownFromZhihu: (content = {}) => {
+          const title = content.title || "\u65E0\u6807\u9898";
+          const safeMeta = {
+            title,
+            url: content.url || (typeof location !== "undefined" ? location.href : ""),
+            author: content.author || "",
+            source: "\u77E5\u4E4E",
+            sourceType: content.type === "answer" ? "\u56DE\u7B54" : content.type === "question" ? "\u95EE\u9898" : "\u6587\u7AE0"
+          };
+          let md = HTMLToMarkdown2.buildFrontmatter(safeMeta);
+          md += `> [!info] \u9875\u9762\u4FE1\u606F
+> - **\u6765\u6E90**: \u77E5\u4E4E
+> - **\u94FE\u63A5**: ${Utils2.mdLink(title, safeMeta.url)}
+> - **\u4F5C\u8005**: ${Utils2.mdText(content.author || "\u672A\u77E5")}
+> - **\u5BFC\u51FA\u65F6\u95F4**: ${(/* @__PURE__ */ new Date()).toLocaleString("zh-CN")}
+
+`;
+          if (content.detail && content.type === "question") md += `${HTMLToMarkdown2.convert(content.detail)}
+
+`;
+          if (content.html) md += `${HTMLToMarkdown2.convert(content.html)}
+
+`;
+          if (Array.isArray(content.answers)) {
+            content.answers.forEach((ans, i) => {
+              md += `> [!note]+ #${i + 1} ${Utils2.mdText(ans.author || "\u533F\u540D")} \xB7 \u{1F44D} ${ans.voteCount || 0}
+`;
+              const lines = HTMLToMarkdown2.convert(ans.html || "").trim().split("\n");
+              md += lines.map((l) => `> ${l}`).join("\n") + "\n\n";
+            });
+          }
+          return { meta: safeMeta, markdown: md };
+        },
+        // linux.do 话题（fetchAllPosts 形态）→ markdown（与 Obsidian 批量导出同构）
+        buildMarkdownFromPosts: (topic = {}, posts = []) => {
+          const safeMeta = {
+            title: topic.title || "\u65E0\u6807\u9898",
+            url: topic.url || "",
+            author: topic.opUsername || "",
+            source: "Linux.do",
+            sourceType: "\u5E16\u5B50",
+            topicId: topic.topicId || topic.topic_id || "",
+            category: topic.categoryName || topic.category || "",
+            tags: topic.tags || [],
+            floors: posts.length
+          };
+          let md = HTMLToMarkdown2.buildFrontmatter(safeMeta);
+          md += `> [!info] \u5E16\u5B50\u4FE1\u606F
+`;
+          md += `> - **\u539F\u59CB\u94FE\u63A5**: ${Utils2.mdLink(safeMeta.title, safeMeta.url)}
+`;
+          md += `> - **\u697C\u4E3B**: @${Utils2.mdText(safeMeta.author || "\u672A\u77E5")}
+`;
+          md += `> - **\u5206\u7C7B**: ${Utils2.mdText(safeMeta.category || "\u65E0")}
+`;
+          md += `> - **\u6807\u7B7E**: ${Utils2.mdText((safeMeta.tags || []).join(", ") || "\u65E0")}
+`;
+          md += `> - **\u5BFC\u51FA\u65F6\u95F4**: ${(/* @__PURE__ */ new Date()).toLocaleString("zh-CN")}
+
+`;
+          posts.forEach((post, idx) => {
+            const isOp = post.username === topic.opUsername;
+            md += HTMLToMarkdown2.buildPostCallout(post, idx, isOp);
+          });
+          return { meta: safeMeta, markdown: md };
+        },
+        // —— 当前页面统一装配（来源路由与 GenericExporter.exportCurrentPage 同口径） ——
+        buildCurrentPage: async () => {
+          var _a;
+          const site = SiteDetector2.detect();
+          if (site === SiteDetector2.SITES.ZHIHU) {
+            const content = ZhihuAPI2.extractContent();
+            if (content) return PageFileExporter.buildMarkdownFromZhihu(content);
+          }
+          if (site === SiteDetector2.SITES.LINUX_DO) {
+            const pathSegments = window.location.pathname.split("/").filter(Boolean);
+            const tIndex = pathSegments.indexOf("t");
+            const numericTopicId = tIndex >= 0 ? pathSegments.slice(tIndex + 1).find((seg) => /^\d+$/.test(seg)) : null;
+            const topicId = numericTopicId || ((_a = window.location.pathname.match(/\/t\/([^/]+)/)) == null ? void 0 : _a[1]) || "";
+            if (topicId) {
+              const { topic, posts } = await LinuxDoAPI2.fetchAllPosts(topicId);
+              return PageFileExporter.buildMarkdownFromPosts(topic, posts);
+            }
+          }
+          const meta = GenericExtractor2.extractMeta();
+          const contentEl = GenericExtractor2.extractContent();
+          return PageFileExporter.buildMarkdownFromGeneric(meta, contentEl ? contentEl.innerHTML : "");
+        },
+        // —— 文件载荷 ——
+        // 独立 HTML：标题/链接头 + 正文原 HTML（本地存档可直接打开）
+        buildStandaloneHtml: (meta = {}, bodyHtml = "") => {
+          const title = Utils2.escapeHtml(meta.title || "\u65E0\u6807\u9898");
+          const url = Utils2.escapeHtml(meta.url || "");
+          return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>${title}</title>
+</head>
+<body>
+<h1>${title}</h1>
+<p>\u6765\u6E90\uFF1A<a href="${url}">${title}</a></p>
+<article>
+${bodyHtml || ""}
+</article>
+</body>
+</html>
+`;
+        },
+        // JSON 载荷：meta + markdown（可再生，机器可读）
+        buildJsonPayload: (meta = {}, markdown = "") => {
+          return JSON.stringify({
+            kind: "ld-notion-page-file",
+            version: 1,
+            exportedAt: (/* @__PURE__ */ new Date()).toISOString(),
+            meta,
+            markdown
+          }, null, 2);
+        },
+        // format: md | html | json → { filename, content, mime }
+        buildFilePayload: (built = {}, format = "md", bodyHtml = "") => {
+          const { meta = {}, markdown = "" } = built;
+          const base = PageFileExporter.sanitizeFileName(meta.title, "page");
+          if (format === "html") {
+            return {
+              filename: `${base}.html`,
+              content: PageFileExporter.buildStandaloneHtml(meta, bodyHtml),
+              mime: "text/html;charset=utf-8"
+            };
+          }
+          if (format === "json") {
+            return {
+              filename: `${base}.json`,
+              content: PageFileExporter.buildJsonPayload(meta, markdown),
+              mime: "application/json;charset=utf-8"
+            };
+          }
+          return {
+            filename: `${base}.md`,
+            content: markdown,
+            mime: "text/markdown;charset=utf-8"
+          };
+        },
+        // 本地下载触发（BookmarkOrganizer.backup / workspace 报告先例：Blob + a.click）
+        downloadFile: (filename, content, mime) => {
+          if (typeof document === "undefined" || typeof Blob === "undefined") {
+            throw new Error("\u5F53\u524D\u73AF\u5883\u4E0D\u652F\u6301\u6587\u4EF6\u4E0B\u8F7D");
+          }
+          const objectUrlApi = typeof window !== "undefined" && window.URL && typeof window.URL.createObjectURL === "function" ? window.URL : typeof URL !== "undefined" && typeof URL.createObjectURL === "function" ? URL : null;
+          if (!objectUrlApi) throw new Error("\u5F53\u524D\u73AF\u5883\u4E0D\u652F\u6301\u6587\u4EF6\u4E0B\u8F7D");
+          const blob = new Blob([content], { type: mime || "text/plain;charset=utf-8" });
+          const href = objectUrlApi.createObjectURL(blob);
+          try {
+            const link = document.createElement("a");
+            link.href = href;
+            link.download = filename;
+            link.style.display = "none";
+            document.body.appendChild(link);
+            link.click();
+            if (typeof link.remove === "function") link.remove();
+          } finally {
+            if (typeof objectUrlApi.revokeObjectURL === "function") {
+              setTimeout(() => objectUrlApi.revokeObjectURL(href), 5e3);
+            }
+          }
+          return filename;
+        },
+        // —— 发往 linux.do 的参数组装（纯函数，可单测） ——
+        // mode: "topic" | "reply"
+        buildPublishParams: ({ mode = "topic", title = "", raw = "", category = "", topicId = "" } = {}) => {
+          const cleanTitle = String(title || "").trim();
+          const cleanRaw = String(raw || "").trim();
+          if (mode === "reply") {
+            const tid = String(topicId || "").trim();
+            if (!/^\d+$/.test(tid)) throw new Error("\u56DE\u590D\u6A21\u5F0F\u9700\u586B\u5199\u6570\u5B57\u8BDD\u9898 ID");
+            if (cleanRaw.length < 10) throw new Error("\u6B63\u6587\u8FC7\u77ED\uFF08\u81F3\u5C11 10 \u4E2A\u5B57\u7B26\uFF09");
+            if (cleanRaw.length > MAX_PUBLISH_RAW_LENGTH) {
+              throw new Error(`\u6B63\u6587\u8D85\u957F\uFF08${cleanRaw.length} > ${MAX_PUBLISH_RAW_LENGTH}\uFF09\uFF0C\u8BF7\u6539\u5B58\u672C\u5730\u6587\u4EF6`);
+            }
+            return { mode, topic_id: tid, raw: cleanRaw };
+          }
+          if (cleanTitle.length < MIN_PUBLISH_TITLE_LENGTH) {
+            throw new Error(`\u6807\u9898\u8FC7\u77ED\uFF08\u81F3\u5C11 ${MIN_PUBLISH_TITLE_LENGTH} \u4E2A\u5B57\u7B26\uFF09`);
+          }
+          if (cleanRaw.length < 10) throw new Error("\u6B63\u6587\u8FC7\u77ED\uFF08\u81F3\u5C11 10 \u4E2A\u5B57\u7B26\uFF09");
+          if (cleanRaw.length > MAX_PUBLISH_RAW_LENGTH) {
+            throw new Error(`\u6B63\u6587\u8D85\u957F\uFF08${cleanRaw.length} > ${MAX_PUBLISH_RAW_LENGTH}\uFF09\uFF0C\u8BF7\u6539\u5B58\u672C\u5730\u6587\u4EF6`);
+          }
+          const params = { mode, title: cleanTitle.slice(0, 255), raw: cleanRaw, archetype: "regular" };
+          const cat = String(category || "").trim();
+          if (cat !== "") {
+            if (!/^\d+$/.test(cat)) throw new Error("\u5206\u7C7B\u9700\u586B\u5199\u6570\u5B57 ID\uFF08\u7559\u7A7A\u5219\u7531\u7AD9\u70B9\u9ED8\u8BA4\uFF09");
+            params.category = cat;
+          }
+          return params;
+        }
+      };
+      module.exports = { PageFileExporter };
+    }
+  });
+
+  // src/export/index.js
+  var require_export = __commonJS({
+    "src/export/index.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2, MSG: MSG2, getFileCategory: getFileCategory2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
+      var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
+      var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
+      var { NotionAPI: NotionAPI2, DOMToNotion: DOMToNotion2, HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2, SiteDetector: SiteDetector2, EMOJI_MAP: EMOJI_MAP2 } = require_api();
+      var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2 } = require_security();
+      var { BookmarkExporter: BookmarkExporter2 } = require_bridge();
+      var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2 } = require_extract();
+      var { AIAssistant: AIAssistant2 } = require_ai();
+      var { SyncLock } = require_sync_lock();
+      var GenericExporter2 = {
+        resolveUnifiedSource: (meta = {}) => {
+          const explicitSource = GenericExporter2.normalizeSourceLabel(meta.source || "");
+          if (explicitSource) return explicitSource;
+          const siteDerived = GenericExporter2.normalizeSourceLabel(meta.siteName || "");
+          return siteDerived === "\u77E5\u4E4E" ? "\u77E5\u4E4E" : "\u901A\u7528\u9875\u9762";
+        },
+        normalizeSourceLabel: (value) => {
+          const raw = BookmarkExporter2.normalizeText(String(value || "").trim(), 100);
+          if (!raw) return "";
+          const lower = raw.toLowerCase();
+          if (lower.includes("zhihu") || raw.includes("\u77E5\u4E4E")) return "\u77E5\u4E4E";
+          return raw;
+        },
+        normalizeSourceTypeLabel: (value, source = "") => {
+          const raw = BookmarkExporter2.normalizeText(String(value || "").trim(), 40);
+          if (!raw) {
+            if (source === "\u77E5\u4E4E") return "\u7F51\u9875";
+            return "\u7F51\u9875";
+          }
+          const lower = raw.toLowerCase();
+          if (["answer", "\u56DE\u7B54"].includes(lower) || raw.includes("\u56DE\u7B54")) return "\u56DE\u7B54";
+          if (["question", "\u95EE\u9898", "\u95EE\u7B54"].includes(lower) || raw.includes("\u95EE\u9898") || raw.includes("\u95EE\u7B54")) return "\u95EE\u9898";
+          if (["article", "column_article", "\u6587\u7AE0", "\u4E13\u680F\u6587\u7AE0"].includes(lower) || raw.includes("\u6587\u7AE0")) return "\u6587\u7AE0";
+          if (["web", "webpage", "web page", "page", "\u7F51\u9875"].includes(lower) || raw.includes("\u7F51\u9875")) return "\u7F51\u9875";
+          return raw;
+        },
+        stripHtml: (html) => BookmarkExporter2.normalizeText(
+          String(html || "").replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " "),
+          500
+        ),
+        extractSummaryText: (meta = {}) => {
+          const chunks = [
+            meta.description,
+            meta.detail,
+            meta.html,
+            ...Array.isArray(meta.answers) ? meta.answers.map((answer) => (answer == null ? void 0 : answer.html) || "") : []
+          ];
+          for (const chunk of chunks) {
+            const text = GenericExporter2.stripHtml(chunk);
+            if (text) return text;
+          }
+          return "";
+        },
+        inferTags: (meta = {}) => {
+          const tags = [];
+          const source = GenericExporter2.normalizeSourceLabel(meta.source || meta.siteName || "");
+          const sourceType = GenericExporter2.normalizeSourceTypeLabel(meta.sourceType || "", source);
+          try {
+            const host = new URL(meta.url || "").hostname.replace(/^www\./, "");
+            if (host) tags.push(host);
+          } catch {
+          }
+          if (source) tags.push(source);
+          if (sourceType) tags.push(sourceType);
+          if (meta.siteName && meta.siteName !== source) {
+            tags.push(BookmarkExporter2.normalizeText(meta.siteName, 60));
+          }
+          const uniq = [];
+          for (const tag of tags) {
+            const clean = BookmarkExporter2.normalizeText(tag, 80);
+            if (!clean || uniq.includes(clean)) continue;
+            uniq.push(clean);
+            if (uniq.length >= 8) break;
+          }
+          return uniq;
+        },
+        enrichMeta: async (meta = {}, settings = {}) => {
+          const source = GenericExporter2.resolveUnifiedSource(meta);
+          const siteName = BookmarkExporter2.normalizeText(meta.siteName || "", 100) || source;
+          const sourceType = GenericExporter2.normalizeSourceTypeLabel(meta.sourceType || "", source);
+          const description = GenericExporter2.extractSummaryText(meta);
+          const enriched = {
+            ...meta,
+            title: BookmarkExporter2.normalizeText(meta.title || "\u65E0\u6807\u9898", 200) || "\u65E0\u6807\u9898",
+            // Canonicalize clipper URL (strip hash + tracking query) so DedupStore / Notion 链接 share one key
+            url: Utils2.normalizeDedupUrl(String(meta.url || (typeof location !== "undefined" ? location.href : "") || "").trim()),
+            author: BookmarkExporter2.normalizeText(meta.author || "", 100),
+            publishDate: BookmarkExporter2.normalizeText(meta.publishDate || "", 40),
+            siteName,
+            source,
+            sourceType,
+            description
+          };
+          const insight = {
+            title: enriched.title,
+            summary: enriched.description || "",
+            siteName: enriched.siteName || enriched.source || ""
+          };
+          const bookmarkLike = {
+            title: enriched.title,
+            url: enriched.url,
+            folderPath: `${enriched.source} ${enriched.sourceType}`.trim()
+          };
+          let inferredCategory = BookmarkExporter2.inferCategoryHeuristic(
+            bookmarkLike,
+            insight,
+            (settings == null ? void 0 : settings.categories) || []
+          );
+          const canUseAI = !!((settings == null ? void 0 : settings.aiApiKey) && (settings == null ? void 0 : settings.aiService) && Array.isArray(settings == null ? void 0 : settings.categories) && settings.categories.length > 0);
+          if (canUseAI) {
+            const aiCategory = await BookmarkExporter2.generateAICategory(bookmarkLike, insight, settings);
+            if (aiCategory) inferredCategory = aiCategory;
+          }
+          return {
+            ...enriched,
+            inferredCategory,
+            inferredTags: GenericExporter2.inferTags(enriched)
+          };
+        },
+        // 链接属性安全校验 —— 仅 http(s) 公网(拒内网/169.254/非 http 协议)
+        // 与 BookmarkExporter(hy3 LOW) 对称: exporter 写入侧统一防线
+        _safeUrl: (url) => {
+          const raw = String(url || "").trim();
+          if (!raw) return null;
+          const { UrlValidator } = require_UrlValidator();
+          return UrlValidator.validatePageExternalUrl(raw) ? raw.slice(0, 2e3) : null;
+        },
+        // 构建通用网页的 Notion 属性
+        buildProperties: (meta) => {
+          const source = GenericExporter2.resolveUnifiedSource(meta);
+          const sourceType = GenericExporter2.normalizeSourceTypeLabel(meta.sourceType || "", source);
+          const props = {
+            "\u6807\u9898": {
+              title: [{ text: { content: meta.title || "\u65E0\u6807\u9898" } }]
+            },
+            "\u94FE\u63A5": {
+              // U1(uibackend review): 仅 http(s) 公网才写入 url 属性; javascript:/data:/内网 置 null
+              url: GenericExporter2._safeUrl(meta.url)
+            },
+            "\u6765\u6E90": {
+              rich_text: [{ text: { content: source } }]
+            },
+            "\u6765\u6E90\u7C7B\u578B": {
+              rich_text: [{ text: { content: sourceType } }]
+            },
+            "\u4F5C\u8005": {
+              rich_text: [{ text: { content: meta.author || "" } }]
+            }
+          };
+          if (meta.publishDate) {
+            props["\u53D1\u5E03\u65E5\u671F"] = { date: { start: meta.publishDate } };
+          }
+          if (meta.description) {
+            props["\u6458\u8981"] = {
+              rich_text: [{ text: { content: meta.description.substring(0, 2e3) } }]
+            };
+          }
+          if (meta.inferredCategory) {
+            props["\u5206\u7C7B"] = {
+              rich_text: [{ text: { content: BookmarkExporter2.normalizeText(meta.inferredCategory, 300) } }]
+            };
+          }
+          const tags = Array.isArray(meta.inferredTags) ? meta.inferredTags : [];
+          if (tags.length > 0) {
+            props["\u6807\u7B7E"] = {
+              multi_select: tags.map((tag) => BookmarkExporter2.normalizeText(tag, 100)).filter(Boolean).map((name) => ({ name })).slice(0, 8)
+            };
+          }
+          return props;
+        },
+        // Clipper（知乎/通用页）去重：与 ZhihuAdapter/GenericAdapter.getDedupKey 同构。
+        // 此前 GenericUI.doExport 成功后不 markSeen → 连点/重导出必建重复 Notion 页。
+        resolveClipperDedup: (meta = {}) => {
+          const url = Utils2.normalizeDedupUrl(String(meta.url || (typeof location !== "undefined" ? location.href : "") || "").trim());
+          const site = SiteDetector2.detect();
+          if (site === SiteDetector2.SITES.ZHIHU || GenericExporter2.resolveUnifiedSource(meta) === "\u77E5\u4E4E") {
+            return { sourceType: "zhihu", dedupKey: url ? `zhihu:${url}` : "" };
+          }
+          return { sourceType: "generic", dedupKey: url ? `generic:${url}` : "" };
+        },
+        isClipperExported: (meta = {}) => {
+          const { DedupStore } = require_storage();
+          const { sourceType, dedupKey } = GenericExporter2.resolveClipperDedup(meta);
+          if (!dedupKey) return false;
+          return DedupStore.isDuplicate(sourceType, dedupKey);
+        },
+        // ISS-20260914-001: Clipper(知乎/通用页)远端对账 —— 远端「链接」索引是 ground truth。
+        // 与 BookmarkExporter 同构,但 dedupKey 为 `zhihu:<normUrl>`/`generic:<normUrl>`
+        // 形式(非裸 URL),故单独抽 URL 段与远端集合比对,不硬套 URL 索引模板。
+        // 返回值三态:
+        //   { remote: Set }            → 远端可达, exported 字段以远端为准(本地账本 hit 被覆盖)
+        //   { remote: null, exported } → 远端不可达, 降级本地 DedupStore.isDuplicate(旧语义,防查询故障误放行)
+        checkClipperRemote: async (apiKey, databaseId, meta = {}) => {
+          const { sourceType, dedupKey } = GenericExporter2.resolveClipperDedup(meta);
+          if (!dedupKey || !apiKey || !databaseId) return { remote: null, exported: GenericExporter2.isClipperExported(meta), dedupKey };
+          let remoteUrls = null;
+          try {
+            remoteUrls = await NotionAPI2.collectDatabaseUrls(apiKey, databaseId);
+          } catch (_) {
+            remoteUrls = null;
+          }
+          if (!remoteUrls) {
+            return { remote: null, exported: GenericExporter2.isClipperExported(meta), dedupKey };
+          }
+          const urlPart = dedupKey.slice(dedupKey.indexOf(":") + 1);
+          const normRemote = (u) => String(u || "").trim().replace(/\/+$/, "");
+          const key = normRemote(urlPart);
+          const exported = key ? [...remoteUrls].some((u) => normRemote(u) === key) : false;
+          return { remote: remoteUrls, exported, dedupKey };
+        },
+        markClipperExported: (meta = {}) => {
+          const { DedupStore } = require_storage();
+          const { sourceType, dedupKey } = GenericExporter2.resolveClipperDedup(meta);
+          if (!dedupKey) return;
+          DedupStore.markSeen(sourceType, dedupKey);
+        },
+        // 导出当前页面
+        exportCurrentPage: async (settings) => {
+          var _a;
+          let meta, blocks;
+          if (SiteDetector2.detect() === SiteDetector2.SITES.ZHIHU) {
+            const content = ZhihuAPI2.extractContent();
+            if (content) {
+              meta = {
+                title: content.title,
+                url: content.url,
+                source: "\u77E5\u4E4E",
+                siteName: "\u77E5\u4E4E",
+                sourceType: content.type === "answer" ? "\u56DE\u7B54" : content.type === "question" ? "\u95EE\u9898" : "\u6587\u7AE0",
+                author: content.author,
+                description: GenericExporter2.extractSummaryText(content),
+                detail: content.detail || "",
+                html: content.html || "",
+                answers: content.answers || []
+              };
+              blocks = ZhihuAPI2.htmlToBlocks(content.html || "");
+              if (content.type === "question" && content.detail) {
+                const detailBlocks = ZhihuAPI2.htmlToBlocks(content.detail);
+                if (detailBlocks.length > 0) {
+                  blocks.push({
+                    type: "callout",
+                    callout: {
+                      icon: { type: "emoji", emoji: "\u2753" },
+                      rich_text: [{ type: "text", text: { content: "\u95EE\u9898\u63CF\u8FF0" } }]
+                    }
+                  });
+                  blocks.push(...detailBlocks);
+                }
+              }
+              if (content.type === "question" && content.answers) {
+                for (const ans of content.answers) {
+                  const ansBlocks = ZhihuAPI2.htmlToBlocks(ans.html || "");
+                  blocks.push({
+                    type: "divider",
+                    divider: {}
+                  });
+                  blocks.push({
+                    type: "callout",
+                    callout: {
+                      icon: { type: "emoji", emoji: "\u{1F464}" },
+                      rich_text: [{ type: "text", text: { content: `${ans.author} \xB7 \u{1F44D} ${ans.voteCount}` } }]
+                    }
+                  });
+                  blocks.push(...ansBlocks);
+                }
+              }
+            } else {
+              meta = GenericExtractor2.extractMeta();
+              const contentEl = GenericExtractor2.extractContent();
+              blocks = GenericExtractor2.toNotionBlocks(contentEl, settings.imgMode || CONFIG2.DEFAULTS.imgMode);
+            }
+          } else if (SiteDetector2.detect() === SiteDetector2.SITES.LINUX_DO) {
+            const pathSegments = window.location.pathname.split("/").filter(Boolean);
+            const tIndex = pathSegments.indexOf("t");
+            const numericTopicId = tIndex >= 0 ? pathSegments.slice(tIndex + 1).find((seg) => /^\d+$/.test(seg)) : null;
+            const topicId = numericTopicId || ((_a = window.location.pathname.match(/\/t\/([^/]+)/)) == null ? void 0 : _a[1]) || "";
+            if (topicId) {
+              const { topic, posts } = await LinuxDoAPI2.fetchAllPosts(topicId);
+              const filteredPosts = Exporter2.filterPosts(posts, topic, settings);
+              meta = {
+                title: topic.title || "\u65E0\u6807\u9898",
+                url: topic.url || window.location.href,
+                source: "Linux.do",
+                siteName: "Linux.do",
+                sourceType: "\u5E16\u5B50",
+                author: topic.opUsername || "",
+                description: topic.title || "",
+                detail: "",
+                html: "",
+                answers: filteredPosts.map((post) => ({
+                  author: post.name || post.username || "\u533F\u540D",
+                  username: post.username || "",
+                  html: post.cooked || "",
+                  voteCount: post.like_count || 0,
+                  postNumber: post.post_number || 0,
+                  createdAt: post.created_at || ""
+                }))
+              };
+              blocks = Exporter2.buildContentBlocks(filteredPosts, topic, settings);
+            } else {
+              meta = GenericExtractor2.extractMeta();
+              const contentEl = GenericExtractor2.extractContent();
+              blocks = GenericExtractor2.toNotionBlocks(contentEl, settings.imgMode || CONFIG2.DEFAULTS.imgMode);
+            }
+          } else {
+            meta = GenericExtractor2.extractMeta();
+            const contentEl = GenericExtractor2.extractContent();
+            blocks = GenericExtractor2.toNotionBlocks(contentEl, settings.imgMode || CONFIG2.DEFAULTS.imgMode);
+          }
+          meta = await GenericExporter2.enrichMeta(meta, settings);
+          if (!blocks || blocks.length === 0) {
+            blocks = [{
+              type: "paragraph",
+              paragraph: { rich_text: [{ type: "text", text: { content: meta.url } }] }
+            }];
+          }
+          const sourcePrefix = "\u6765\u6E90: ";
+          blocks.unshift({
+            type: "callout",
+            callout: {
+              icon: { type: "emoji", emoji: "\u{1F517}" },
+              // P4 收敛(c08): 与属性侧同口径截断 —— 超 rich_text 2000 上限会让整页导出被 Notion 拒
+              rich_text: [{
+                type: "text",
+                text: { content: `${sourcePrefix}${String(meta.url || "").trim().slice(0, 2e3 - sourcePrefix.length)}` }
+              }]
+            }
+          });
+          if (settings.imgMode === "upload") {
+            await Exporter2.processImageUploads(blocks, settings.apiKey, null);
+          }
+          let page;
+          if (settings.exportTargetType === CONFIG2.EXPORT_TARGET_TYPES.PAGE) {
+            page = await AIAssistant2._executeGuardedPageWrite(
+              "createDatabasePage",
+              { id: settings.parentPageId, name: meta.title },
+              () => NotionAPI2.createChildPage(
+                settings.parentPageId,
+                meta.title,
+                blocks,
+                settings.apiKey
+              ),
+              settings,
+              { itemName: meta.title, pageId: settings.parentPageId }
+            );
+          } else {
+            const properties = GenericExporter2.buildProperties(meta);
+            page = await AIAssistant2._executeGuardedDatabaseWrite(
+              "createDatabasePage",
+              settings.databaseId,
+              () => NotionAPI2.createDatabasePage(
+                settings.databaseId,
+                properties,
+                blocks,
+                settings.apiKey
+              ),
+              settings,
+              { itemName: meta.title }
+            );
+          }
+          return { page, meta };
+        },
+        // 自动设置通用数据库属性
+        setupDatabaseProperties: async (databaseId, apiKey) => {
+          const requiredProperties = {
+            "\u6807\u9898": { typeName: "title", schema: { title: {} } },
+            "\u94FE\u63A5": { typeName: "url", schema: { url: {} } },
+            "\u6765\u6E90": { typeName: "rich_text", schema: { rich_text: {} } },
+            "\u6765\u6E90\u7C7B\u578B": { typeName: "rich_text", schema: { rich_text: {} } },
+            "\u4F5C\u8005": { typeName: "rich_text", schema: { rich_text: {} } },
+            "\u53D1\u5E03\u65E5\u671F": { typeName: "date", schema: { date: {} } },
+            "\u6458\u8981": { typeName: "rich_text", schema: { rich_text: {} } },
+            "\u5206\u7C7B": { typeName: "rich_text", schema: { rich_text: {} } },
+            "\u6807\u7B7E": { typeName: "multi_select", schema: { multi_select: { options: [] } } }
+          };
+          try {
+            const database = await NotionAPI2.request("GET", `/databases/${databaseId}`, null, apiKey);
+            const existingProps = database.properties || {};
+            const propsToAdd = {};
+            const propsToUpdate = /* @__PURE__ */ Object.create(null);
+            const typeConflicts = [];
+            for (const [name, { typeName, schema }] of Object.entries(requiredProperties)) {
+              const existingProp = existingProps[name];
+              if (!existingProp) {
+                if (typeName === "title") {
+                  const existingTitle = Object.entries(existingProps).find(([_, prop]) => prop.type === "title");
+                  if (existingTitle && existingTitle[0] !== name) {
+                    propsToUpdate[existingTitle[0]] = { name };
+                  }
+                } else {
+                  propsToAdd[name] = schema;
+                }
+              } else if (existingProp.type !== typeName) {
+                typeConflicts.push(`\u300C${name}\u300D\u671F\u671B ${typeName}\uFF0C\u5B9E\u9645 ${existingProp.type}`);
+              }
+            }
+            if (typeConflicts.length > 0) {
+              return {
+                success: false,
+                message: `\u5C5E\u6027\u7C7B\u578B\u51B2\u7A81: ${typeConflicts.join("\uFF1B")}\uFF0C\u8BF7\u624B\u52A8\u4FEE\u6539\u6570\u636E\u5E93\u5C5E\u6027\u540E\u91CD\u8BD5`
+              };
+            }
+            const allChanges = { ...propsToAdd, ...propsToUpdate };
+            if (Object.keys(allChanges).length === 0) {
+              return { success: true, message: "\u5C5E\u6027\u5DF2\u6B63\u786E\u914D\u7F6E" };
+            }
+            await NotionAPI2.request("PATCH", `/databases/${databaseId}`, {
+              properties: allChanges
+            }, apiKey);
+            return { success: true, message: `\u5DF2\u6DFB\u52A0 ${Object.keys(propsToAdd).length} \u4E2A\u5C5E\u6027` };
+          } catch (error) {
+            return { success: false, error: error.message };
+          }
+        }
+      };
+      var { LinuxDoAPI: LinuxDoAPI2 } = require_extract();
+      var Exporter2 = {
+        // 筛选帖子
+        filterPosts: (posts, topic, settings) => {
+          const wantUsers = (settings.filterUsers || "").split(/[,;，；\s]+/).filter(Boolean).map((u) => u.toLowerCase());
+          const includeKws = (settings.filterInclude || "").split(/[,;，；\s]+/).filter(Boolean).map((k) => k.toLowerCase());
+          const excludeKws = (settings.filterExclude || "").split(/[,;，；\s]+/).filter(Boolean).map((k) => k.toLowerCase());
+          const minLen = settings.filterMinLen || 0;
+          return posts.filter((post) => {
+            const postNum = post.post_number;
+            if (postNum < settings.rangeStart || postNum > settings.rangeEnd) return false;
+            if (settings.onlyFirst && postNum !== 1) return false;
+            if (settings.onlyOp && post.username !== topic.opUsername) return false;
+            if (wantUsers.length && !wantUsers.includes((post.username || "").toLowerCase())) return false;
+            if (settings.imgFilter === "only_img" && !(post.cooked || "").includes("<img")) return false;
+            if (settings.imgFilter === "no_img" && (post.cooked || "").includes("<img")) return false;
+            if (includeKws.length || excludeKws.length || minLen > 0) {
+              const parser = new DOMParser();
+              const doc = parser.parseFromString(post.cooked || "", "text/html");
+              const plainText = (doc.body.textContent || "").trim();
+              if (minLen > 0 && plainText.length < minLen) return false;
+              if (includeKws.length && !includeKws.some((k) => plainText.toLowerCase().includes(k))) return false;
+              if (excludeKws.length && excludeKws.some((k) => plainText.toLowerCase().includes(k))) return false;
+            }
+            return true;
+          });
+        },
+        // 构建 Notion 页面属性
+        buildProperties: (topic, bookmark) => {
+          return {
+            "\u6807\u9898": {
+              title: [{ text: { content: topic.title || "\u65E0\u6807\u9898" } }]
+            },
+            "\u94FE\u63A5": {
+              url: topic.url
+            },
+            "\u5206\u7C7B": {
+              rich_text: [{ text: { content: topic.categoryName || topic.category || "" } }]
+            },
+            "\u6807\u7B7E": {
+              multi_select: (topic.tags || []).map((tag) => ({
+                name: typeof tag === "string" ? tag : tag.name || ""
+              })).filter((t) => t.name)
+            },
+            "\u4F5C\u8005": {
+              rich_text: [{ text: { content: topic.opUsername || "" } }]
+            },
+            "\u6536\u85CF\u65F6\u95F4": (bookmark == null ? void 0 : bookmark.created_at) ? {
+              date: { start: bookmark.created_at.split("T")[0] }
+            } : void 0,
+            "\u5E16\u5B50\u6570": {
+              number: topic.postsCount || 0
+            },
+            "\u6D4F\u89C8\u6570": {
+              number: topic.views || 0
+            },
+            "\u70B9\u8D5E\u6570": {
+              number: topic.likeCount || 0
+            }
+          };
+        },
+        // 构建帖子内容 blocks
+        buildContentBlocks: (posts, topic, settings) => {
+          const blocks = [];
+          const metaLines = [
+            { label: "\u539F\u59CB\u94FE\u63A5", value: topic.url, link: true },
+            { label: "\u4E3B\u9898 ID", value: String(topic.topicId || topic.topic_id || "") },
+            { label: "\u697C\u4E3B", value: `@${topic.opUsername || "\u672A\u77E5"}` },
+            { label: "\u5206\u7C7B", value: topic.categoryName || topic.category || "\u65E0" },
+            { label: "\u6807\u7B7E", value: (topic.tags || []).join(", ") || "\u65E0" },
+            { label: "\u5BFC\u51FA\u65F6\u95F4", value: (/* @__PURE__ */ new Date()).toLocaleString("zh-CN") },
+            { label: "\u697C\u5C42\u6570", value: String(posts.length) }
+          ];
+          const metaRichText = [];
+          metaLines.forEach((line, i) => {
+            if (i > 0) metaRichText.push({ type: "text", text: { content: "\n" } });
+            metaRichText.push({ type: "text", text: { content: `${line.label}: ` }, annotations: { bold: true } });
+            if (line.link && line.value) {
+              metaRichText.push({ type: "text", text: { content: line.value, link: { url: line.value } } });
+            } else {
+              metaRichText.push({ type: "text", text: { content: line.value || "\u65E0" } });
+            }
+          });
+          blocks.push({
+            type: "callout",
+            callout: {
+              icon: { type: "emoji", emoji: "\u{1F4CB}" },
+              rich_text: metaRichText
+            }
+          });
+          for (const post of posts) {
+            const isOp = post.username === topic.opUsername;
+            const dateStr = Utils2.formatDate(post.created_at);
+            const emoji = isOp ? "\u{1F3E0}" : "\u{1F4AC}";
+            let title = `#${post.post_number} ${post.name || post.username || "\u533F\u540D"}`;
+            if (isOp) title += " \u697C\u4E3B";
+            if (dateStr) title += ` \xB7 ${dateStr}`;
+            const contentBlocks = DOMToNotion2.cookedToBlocks(post.cooked, settings.imgMode);
+            const children = [];
+            if (post.reply_to_post_number) {
+              children.push({
+                type: "paragraph",
+                paragraph: {
+                  rich_text: [{ type: "text", text: { content: `\u21A9\uFE0F \u56DE\u590D #${post.reply_to_post_number}\u697C` } }]
+                }
+              });
+            }
+            children.push(...contentBlocks);
+            if (children.length === 0) {
+              children.push({
+                type: "paragraph",
+                paragraph: {
+                  rich_text: [{ type: "text", text: { content: "\uFF08\u5185\u5BB9\u4E3A\u7A7A\u6216\u65E0\u6CD5\u89E3\u6790\uFF09" } }]
+                }
+              });
+            }
+            const maxChildren = 100;
+            for (let i = 0; i < children.length; i += maxChildren) {
+              const chunk = children.slice(i, i + maxChildren);
+              const isFirst = i === 0;
+              const partNum = Math.floor(i / maxChildren) + 1;
+              const totalParts = Math.ceil(children.length / maxChildren);
+              blocks.push({
+                type: "callout",
+                callout: {
+                  icon: { type: "emoji", emoji: isFirst ? emoji : "\u{1F4CE}" },
+                  rich_text: [{
+                    type: "text",
+                    text: {
+                      content: isFirst ? title : `#${post.post_number}\u697C \u7EED\uFF08${partNum}/${totalParts}\uFF09`
+                    }
+                  }],
+                  children: chunk
+                }
+              });
+            }
+          }
+          return blocks;
+        },
+        // 处理文件上传（图片、视频、音频、附件）
+        // 支持 URL 去重 + 受控并发 + 递归子 block
+        processImageUploads: async (blocks, apiKey, onProgress, _fileUrlCache) => {
+          const fileUrlCache = _fileUrlCache || /* @__PURE__ */ new Map();
+          const pendingBlocks = [];
+          const collectPending = (items) => {
+            for (const block of items || []) {
+              if (block._needsUpload && block._originalUrl) {
+                pendingBlocks.push(block);
+              }
+              const containers = Exporter2._getChildContainers(block);
+              for (const c of containers) {
+                collectPending(c.children);
+              }
+            }
+          };
+          collectPending(blocks);
+          if (pendingBlocks.length === 0) return;
+          const uniqueUrls = [...new Set(pendingBlocks.map((b) => b._originalUrl))];
+          let uploaded = 0;
+          const CONCURRENCY = 3;
+          const uploadWithRetry = async (url) => {
+            try {
+              const result = await NotionAPI2.uploadFileToNotion(url, apiKey);
+              fileUrlCache.set(url, result);
+            } catch (e) {
+              if (Exporter2.isAuthTerminalError(e)) throw e;
+              console.warn("[LD-Notion] \u6587\u4EF6\u4E0A\u4F20\u5931\u8D25:", url, e.message);
+              fileUrlCache.set(url, null);
+            }
+            uploaded++;
+            if (onProgress) onProgress(uploaded, uniqueUrls.length);
+          };
+          for (let i = 0; i < uniqueUrls.length; i += CONCURRENCY) {
+            const batch = uniqueUrls.slice(i, i + CONCURRENCY);
+            let didNetworkWork = false;
+            await Promise.all(batch.map((url) => {
+              if (fileUrlCache.has(url)) {
+                uploaded++;
+                if (onProgress) onProgress(uploaded, uniqueUrls.length);
+                return Promise.resolve();
+              }
+              didNetworkWork = true;
+              return uploadWithRetry(url);
+            }));
+            if (didNetworkWork && i + CONCURRENCY < uniqueUrls.length) {
+              await Utils2.sleep(300);
+            }
+          }
+          const applyUploadedRefs = (items) => {
+            var _a;
+            for (const block of items || []) {
+              if (block._needsUpload && block._originalUrl) {
+                const uploadResult = fileUrlCache.get(block._originalUrl);
+                const originalCaption = block._fileType === "file" ? (_a = block.file) == null ? void 0 : _a.caption : null;
+                if (uploadResult == null ? void 0 : uploadResult.fileId) {
+                  const blockType = uploadResult.blockType || block._fileType || "image";
+                  const blockKey = blockType === "image" ? "image" : blockType === "video" ? "video" : blockType === "audio" ? "audio" : "file";
+                  block[blockKey] = { type: "file_upload", file_upload: { id: uploadResult.fileId } };
+                  ["image", "file", "video", "audio"].forEach((k) => {
+                    if (k !== blockKey) delete block[k];
+                  });
+                  if (blockKey === "file" && originalCaption) {
+                    block[blockKey].caption = originalCaption;
+                  }
+                  block.type = blockKey;
+                  block._uploaded = true;
+                } else {
+                  const fallbackKey = block._fileType || "image";
+                  const ext = (block._originalUrl.split(".").pop() || "").toLowerCase();
+                  const category = getFileCategory2(ext);
+                  const fallbackBlockKey = category === "video" ? "video" : category === "audio" ? "audio" : fallbackKey === "file" ? "file" : "image";
+                  block[fallbackBlockKey] = {
+                    type: "external",
+                    external: { url: block._originalUrl }
+                  };
+                  if (fallbackKey === "file" && originalCaption) {
+                    block[fallbackBlockKey].caption = originalCaption;
+                  }
+                  ["image", "file", "video", "audio"].forEach((k) => {
+                    if (k !== fallbackBlockKey) delete block[k];
+                  });
+                  block.type = fallbackBlockKey;
+                }
+                delete block._needsUpload;
+                delete block._originalUrl;
+                delete block._uploaded;
+                delete block._fileType;
+                delete block._fileName;
+              }
+              const containers = Exporter2._getChildContainers(block);
+              for (const c of containers) {
+                applyUploadedRefs(c.children);
+              }
+            }
+          };
+          applyUploadedRefs(blocks);
+        },
+        _getChildContainers: (block) => {
+          var _a, _b, _c, _d, _e, _f;
+          const containers = [];
+          if ((_a = block.callout) == null ? void 0 : _a.children) containers.push(block.callout);
+          if ((_b = block.quote) == null ? void 0 : _b.children) containers.push(block.quote);
+          if ((_c = block.synced_block) == null ? void 0 : _c.children) containers.push(block.synced_block);
+          if ((_d = block.column_list) == null ? void 0 : _d.children) containers.push(block.column_list);
+          if ((_e = block.column) == null ? void 0 : _e.children) containers.push(block.column);
+          if ((_f = block.toggle) == null ? void 0 : _f.children) containers.push(block.toggle);
+          return containers;
+        },
+        // 导出单个帖子
+        exportTopic: async (bookmark, settings, onProgress) => {
+          const topicId = LinuxDoAPI2.resolveTopicId(bookmark);
+          if (!topicId) {
+            throw new Error(`\u65E0\u6CD5\u89E3\u6790\u8BDD\u9898 ID(\u6536\u85CF\u9879\u7F3A\u5C11 topic_id/bookmarkable_url): ${(bookmark == null ? void 0 : bookmark.title) || (bookmark == null ? void 0 : bookmark.name) || (bookmark == null ? void 0 : bookmark.fancy_title) || "\u672A\u77E5\u6807\u9898"}`);
+          }
+          onProgress == null ? void 0 : onProgress({ stage: "fetch", message: "\u83B7\u53D6\u5E16\u5B50\u6570\u636E..." });
+          const { topic, posts } = await LinuxDoAPI2.fetchAllPosts(topicId, (current, total) => {
+            onProgress == null ? void 0 : onProgress({ stage: "fetch", message: `\u83B7\u53D6\u697C\u5C42 ${current}/${total}` });
+          });
+          const filteredPosts = Exporter2.filterPosts(posts, topic, settings);
+          onProgress == null ? void 0 : onProgress({ stage: "convert", message: "\u8F6C\u6362\u5185\u5BB9\u683C\u5F0F..." });
+          const blocks = Exporter2.buildContentBlocks(filteredPosts, topic, settings);
+          if (settings.imgMode === "upload") {
+            onProgress == null ? void 0 : onProgress({ stage: "upload", message: "\u4E0A\u4F20\u56FE\u7247..." });
+            await Exporter2.processImageUploads(blocks, settings.apiKey, (current, total) => {
+              onProgress == null ? void 0 : onProgress({ stage: "upload", message: `\u4E0A\u4F20\u56FE\u7247 ${current}/${total}` });
+            });
+          }
+          onProgress == null ? void 0 : onProgress({ stage: "create", message: "\u521B\u5EFA Notion \u9875\u9762..." });
+          let page;
+          if (settings.exportTargetType === CONFIG2.EXPORT_TARGET_TYPES.PAGE) {
+            page = await AIAssistant2._executeGuardedPageWrite(
+              "createDatabasePage",
+              { id: settings.parentPageId, name: topic.title },
+              () => NotionAPI2.createChildPage(
+                settings.parentPageId,
+                topic.title,
+                blocks,
+                settings.apiKey
+              ),
+              settings,
+              { itemName: topic.title, pageId: settings.parentPageId }
+            );
+          } else {
+            const properties = Exporter2.buildProperties(topic, bookmark);
+            page = await AIAssistant2._executeGuardedDatabaseWrite(
+              "createDatabasePage",
+              settings.databaseId,
+              () => NotionAPI2.createDatabasePage(
+                settings.databaseId,
+                properties,
+                blocks,
+                settings.apiKey
+              ),
+              settings,
+              { itemName: topic.title }
+            );
+          }
+          Storage2.markTopicExported(topicId);
+          return page;
+        },
+        // 批量导出 (支持暂停/继续)
+        isPaused: false,
+        isCancelled: false,
+        currentIndex: 0,
+        pause: () => {
+          Exporter2.isPaused = true;
+        },
+        resume: () => {
+          Exporter2.isPaused = false;
+        },
+        cancel: () => {
+          Exporter2.isCancelled = true;
+          Exporter2.isPaused = false;
+        },
+        reset: () => {
+          Exporter2.isPaused = false;
+          Exporter2.isCancelled = false;
+          Exporter2.currentIndex = 0;
+        },
+        // 批量导出:认证终态错误(不可续签的 401)标记检测——系统性失败应中止批次而非逐项重试
+        // v3.14.7 (AUD-ARCH-11 回归修复): 仅信 error.isAuthTerminal 标记, 不再用消息子串匹配——
+        // api 层对瞬态续签失败(网络/超时/429/5xx)不带标记只设 60s 冷却, 消息前缀与终态相同,
+        // 子串匹配会把一次网络抖动误判为认证终态而中止整批(用户报「几分钟后全部失败」主因)。
+        isAuthTerminalError: (error) => !!(error && error.isAuthTerminal === true),
+        // 认证中止时的剩余项收集:与取消路径同构,但保留原因说明供 UI 报告展示
+        // 经 resolveTopicId 统一话题 ID 口径(Post 收藏 bookmarkable_id 为 postId 不可直用)。
+        _collectSkippedFrom: (bookmarks, remaining) => remaining.map((i) => {
+          const b = bookmarks[i];
+          const topicId = LinuxDoAPI2.resolveTopicId(b);
+          return {
+            topicId,
+            title: b.title || b.fancy_title || b.name || `\u5E16\u5B50 ${topicId}`
+          };
+        }),
+        // 报告/跳过项统一话题 ID 口径 + 新版 serializer 标题回退(fancy_title)。
+        _bookmarkReportOf: (b) => {
+          const topicId = LinuxDoAPI2.resolveTopicId(b);
+          return {
+            topicId,
+            title: b.title || b.fancy_title || b.name || `\u5E16\u5B50 ${topicId}`
+          };
+        },
+        exportBookmarks: async (bookmarks, settings, onProgress, startIndex = 0) => {
+          if (SyncLock.isExporting) {
+            return {
+              success: [],
+              failed: [],
+              skipped: bookmarks.slice(startIndex).map((b) => Exporter2._bookmarkReportOf(b)),
+              message: "\u5DF2\u6709\u5BFC\u51FA\u8FDB\u884C\u4E2D\uFF0C\u5DF2\u8DF3\u8FC7\u672C\u6B21\u8BF7\u6C42"
+            };
+          }
+          SyncLock.isExporting = true;
+          Exporter2.reset();
+          const lease = await SyncLock.acquireLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE);
+          if (!lease) {
+            SyncLock.isExporting = false;
+            return {
+              success: [],
+              failed: [],
+              skipped: bookmarks.slice(startIndex).map((b) => Exporter2._bookmarkReportOf(b)),
+              message: "\u5176\u4ED6\u6807\u7B7E\u9875\u6B63\u5728\u5BFC\u51FA/\u540C\u6B65\uFF0C\u5DF2\u8DF3\u8FC7\u672C\u6B21\u8BF7\u6C42"
+            };
+          }
+          const results = { success: [], failed: [], skipped: [] };
+          let leaseLost = false;
+          const renewTimer = setInterval(() => {
+            let renewed;
+            try {
+              renewed = SyncLock.renewLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
+            } catch (renewError) {
+              console.warn("[LD-Notion] \u5BFC\u51FA\u7EED\u7EA6\u5931\u8D25:", renewError);
+              renewed = false;
+            }
+            if (!renewed) {
+              leaseLost = true;
+              clearInterval(renewTimer);
+            }
+          }, 3e4);
+          Exporter2.currentIndex = startIndex;
+          const concurrency = settings.concurrency || 1;
+          const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
+          const remaining = [];
+          for (let i = startIndex; i < bookmarks.length; i++) remaining.push(i);
+          let completedCount = 0;
+          const worker = async () => {
+            const abortIfLeaseLost = () => {
+              if (!leaseLost) return false;
+              Exporter2.cancel();
+              results.leaseLost = true;
+              return true;
+            };
+            while (true) {
+              while (Exporter2.isPaused) {
+                await Utils2.sleep(200);
+                if (Exporter2.isCancelled) return;
+                if (abortIfLeaseLost()) return;
+              }
+              if (Exporter2.isCancelled) return;
+              if (abortIfLeaseLost()) return;
+              const i = remaining.shift();
+              if (i === void 0) return;
+              const bookmark = bookmarks[i];
+              const topicId = LinuxDoAPI2.resolveTopicId(bookmark);
+              const title = bookmark.title || bookmark.fancy_title || bookmark.name || `\u5E16\u5B50 ${topicId}`;
+              const taskNum = i - startIndex + 1;
+              try {
+                onProgress == null ? void 0 : onProgress({
+                  current: taskNum,
+                  total: bookmarks.length,
+                  title,
+                  stage: "start",
+                  isPaused: Exporter2.isPaused
+                });
+              } catch (progressError) {
+                console.warn("[LD-Notion] onProgress \u56DE\u8C03\u5F02\u5E38:", progressError);
+              }
+              try {
+                if (!settings.liveApiKey) {
+                  settings.apiKey = NotionOAuth2.getAccessToken("");
+                }
+                await Exporter2.exportTopic(bookmark, settings, (detail) => {
+                  try {
+                    onProgress == null ? void 0 : onProgress({
+                      current: taskNum,
+                      total: bookmarks.length,
+                      title,
+                      isPaused: Exporter2.isPaused,
+                      ...detail
+                    });
+                  } catch (progressError) {
+                    console.warn("[LD-Notion] onProgress \u56DE\u8C03\u5F02\u5E38:", progressError);
+                  }
+                });
+                results.success.push({ topicId, title, url: `https://linux.do/t/${topicId}` });
+              } catch (error) {
+                console.error(`[LD-Notion] \u5BFC\u51FA\u5931\u8D25: ${title}`, error);
+                results.failed.push({ topicId, title, error: error.message, ux: error.ux || void 0 });
+                if (Exporter2.isAuthTerminalError(error)) {
+                  Exporter2.cancel();
+                  results.authAborted = {
+                    reason: error.message,
+                    at: completedCount + startIndex,
+                    // v3.14.12 (三模型共识): 透传 authCode 供 UI 分支文案
+                    authCode: error.authCode || "unauthorized"
+                  };
+                  return;
+                }
+              }
+              completedCount++;
+              Exporter2.currentIndex = completedCount + startIndex;
+              if (delay > 0 && remaining.length > 0 && !Exporter2.isCancelled) {
+                await Utils2.sleep(delay);
+              }
+            }
+          };
+          const workerCount = Math.min(concurrency, bookmarks.length - startIndex);
+          const workers = [];
+          try {
+            for (let w = 0; w < workerCount; w++) {
+              workers.push(worker());
+              if (w < workerCount - 1) await Utils2.sleep(100);
+            }
+            await Promise.all(workers);
+          } finally {
+            clearInterval(renewTimer);
+            SyncLock.releaseLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
+            SyncLock.isExporting = false;
+          }
+          if (Exporter2.isCancelled && remaining.length > 0) {
+            results.skipped.push(...Exporter2._collectSkippedFrom(bookmarks, remaining));
+          }
+          return results;
+        }
+      };
+      var { PageFileExporter } = require_page_file();
+      module.exports = { GenericExporter: GenericExporter2, LinuxDoAPI: LinuxDoAPI2, Exporter: Exporter2, PageFileExporter };
+    }
+  });
+
+  // src/import/UpdateChecker.js
+  var require_UpdateChecker = __commonJS({
+    "src/import/UpdateChecker.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
+      var { Storage: Storage2 } = require_storage();
+      var { emit } = require_event_bus();
+      var UpdateChecker2 = {
+        timerId: null,
+        isChecking: false,
+        _epoch: 0,
+        shouldCheckNow: (intervalHours) => {
+          const intervalMs = (parseInt(intervalHours, 10) || 0) * 60 * 60 * 1e3;
+          if (intervalMs <= 0) return true;
+          const lastCheckAt = parseInt(Storage2.get(CONFIG2.STORAGE_KEYS.UPDATE_LAST_CHECK_AT, 0), 10) || 0;
+          return !lastCheckAt || Date.now() - lastCheckAt >= intervalMs;
+        },
+        getCurrentVersion: () => {
+          var _a;
+          if (typeof GM_info !== "undefined" && ((_a = GM_info == null ? void 0 : GM_info.script) == null ? void 0 : _a.version)) {
+            return GM_info.script.version;
+          }
+          return CONFIG2.SCRIPT_VERSION || "3.14.10";
+        },
+        compareVersions: (a, b) => {
+          const parse = (v) => String(v || "0").replace(/^v/i, "").split(".").map((n) => parseInt(n, 10) || 0);
+          const va = parse(a);
+          const vb = parse(b);
+          const len = Math.max(va.length, vb.length);
+          for (let i = 0; i < len; i++) {
+            const na = va[i] || 0;
+            const nb = vb[i] || 0;
+            if (na > nb) return 1;
+            if (na < nb) return -1;
+          }
+          return 0;
+        },
+        fetchLatestVersion: () => {
+          return new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+              method: "GET",
+              url: "https://api.github.com/repos/Smith-106/LD-Notion/releases/latest",
+              headers: {
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "LD-Notion-UserScript"
+              },
+              timeout: 15e3,
+              onload: (response) => {
+                const status = response == null ? void 0 : response.status;
+                if (status !== 200) {
+                  reject(new Error(`\u66F4\u65B0\u68C0\u67E5\u5931\u8D25: HTTP ${status ?? "\u65E0\u54CD\u5E94"}`));
+                  return;
+                }
+                try {
+                  const data = JSON.parse((response == null ? void 0 : response.responseText) || "{}");
+                  const version = String(data.tag_name || data.name || "").replace(/^v/i, "").trim();
+                  if (!version) {
+                    reject(new Error("\u672A\u83B7\u53D6\u5230\u7248\u672C\u53F7"));
+                    return;
+                  }
+                  resolve(version);
+                } catch {
+                  reject(new Error("\u89E3\u6790\u66F4\u65B0\u4FE1\u606F\u5931\u8D25"));
+                }
+              },
+              ontimeout: () => reject(new Error("\u66F4\u65B0\u68C0\u67E5\u8D85\u65F6")),
+              onerror: () => reject(new Error("\u7F51\u7EDC\u9519\u8BEF\uFF0C\u65E0\u6CD5\u68C0\u67E5\u66F4\u65B0")),
+              // 2/3 共识(dsf+qwen): 缺少 onabort 时请求被中止 → Promise 永不 settle,
+              // isChecking 永久为 true 阻塞后续检查。
+              onabort: () => reject(new Error("\u66F4\u65B0\u68C0\u67E5\u5DF2\u4E2D\u6B62"))
+            });
+          });
+        },
+        saveResult: (result) => {
+          const checkedAt = Date.now();
+          Storage2.set(CONFIG2.STORAGE_KEYS.UPDATE_LAST_CHECK_AT, checkedAt);
+          Storage2.set(CONFIG2.STORAGE_KEYS.UPDATE_LAST_RESULT, JSON.stringify({ ...result, checkedAt }));
+          if (result.latestVersion) {
+            Storage2.set(CONFIG2.STORAGE_KEYS.UPDATE_LAST_SEEN_VERSION, result.latestVersion);
+          }
+        },
+        updateStatusText: (text) => {
+          const el = document.querySelector("#ldb-update-check-status");
+          if (el) el.textContent = text;
+        },
+        renderLastStatus: () => {
+          const raw = Storage2.get(CONFIG2.STORAGE_KEYS.UPDATE_LAST_RESULT, "");
+          if (!raw) {
+            UpdateChecker2.updateStatusText("\u5C1A\u672A\u68C0\u67E5\u66F4\u65B0");
+            return;
+          }
+          try {
+            const result = JSON.parse(raw);
+            const checkedAtText = result.checkedAt ? new Date(result.checkedAt).toLocaleString("zh-CN") : "\u672A\u77E5\u65F6\u95F4";
+            const latestText = result.latestVersion ? `\uFF0C\u6700\u65B0 v${result.latestVersion}` : "";
+            if (result.status === "update-available") {
+              UpdateChecker2.updateStatusText(`\u53D1\u73B0\u65B0\u7248\u672C\uFF08\u4E0A\u6B21\u68C0\u67E5\uFF1A${checkedAtText}${latestText}\uFF09`);
+            } else if (result.status === "up-to-date") {
+              UpdateChecker2.updateStatusText(`\u5DF2\u662F\u6700\u65B0\uFF08\u4E0A\u6B21\u68C0\u67E5\uFF1A${checkedAtText}${latestText}\uFF09`);
+            } else if (result.status === "error") {
+              UpdateChecker2.updateStatusText(`\u4E0A\u6B21\u68C0\u67E5\u5931\u8D25\uFF1A${result.message || "\u672A\u77E5\u9519\u8BEF"}`);
+            } else {
+              UpdateChecker2.updateStatusText(`\u4E0A\u6B21\u68C0\u67E5\uFF1A${checkedAtText}`);
+            }
+          } catch {
+            UpdateChecker2.updateStatusText("\u66F4\u65B0\u72B6\u6001\u8BFB\u53D6\u5931\u8D25");
+          }
+        },
+        check: async ({ manual = false } = {}) => {
+          if (UpdateChecker2.isChecking) return;
+          UpdateChecker2.isChecking = true;
+          if (manual) {
+            emit("notify", { message: "\u6B63\u5728\u68C0\u67E5\u66F4\u65B0...", type: "info" });
+          }
+          try {
+            const currentVersion = UpdateChecker2.getCurrentVersion();
+            const latestVersion = await UpdateChecker2.fetchLatestVersion();
+            const cmp = UpdateChecker2.compareVersions(latestVersion, currentVersion);
+            if (cmp > 0) {
+              const message = `\u53D1\u73B0\u65B0\u7248\u672C v${latestVersion}\uFF08\u5F53\u524D v${currentVersion}\uFF09\u3002\u811A\u672C\u53EF\u76F4\u63A5\u66F4\u65B0\uFF1BZIP/\u89E3\u538B\u6269\u5C55\u9700\u624B\u52A8\u91CD\u65B0\u5B89\u88C5\u6216\u5728\u6269\u5C55\u9875\u91CD\u65B0\u52A0\u8F7D\u3002`;
+              UpdateChecker2.saveResult({
+                status: "update-available",
+                latestVersion,
+                currentVersion,
+                message
+              });
+              UpdateChecker2.renderLastStatus();
+              if (manual) emit("notify", { message, type: "info" });
+            } else {
+              const message = `\u5F53\u524D\u5DF2\u662F\u6700\u65B0\u7248\u672C v${currentVersion}`;
+              UpdateChecker2.saveResult({
+                status: "up-to-date",
+                latestVersion,
+                currentVersion,
+                message
+              });
+              UpdateChecker2.renderLastStatus();
+              if (manual) emit("notify", { message, type: "success" });
+            }
+          } catch (error) {
+            const message = (error == null ? void 0 : error.message) || "\u66F4\u65B0\u68C0\u67E5\u5931\u8D25";
+            UpdateChecker2.saveResult({ status: "error", message });
+            UpdateChecker2.renderLastStatus();
+            if (manual) emit("notify", { message, type: "error" });
+          } finally {
+            UpdateChecker2.isChecking = false;
+          }
+        },
+        startPolling: (hours) => {
+          UpdateChecker2.stopPolling();
+          const intervalHours = parseInt(hours, 10) || 0;
+          if (intervalHours > 0) {
+            const intervalMs = Math.min(intervalHours * 60 * 60 * 1e3, 2147483647);
+            UpdateChecker2.timerId = setInterval(() => {
+              const epoch = UpdateChecker2._epoch;
+              Utils2.runWhenBrowserIdle(() => {
+                if (epoch !== UpdateChecker2._epoch) return;
+                UpdateChecker2.check({ manual: false });
+              });
+            }, intervalMs);
+          }
+        },
+        stopPolling: () => {
+          UpdateChecker2._epoch += 1;
+          if (UpdateChecker2.timerId) {
+            clearInterval(UpdateChecker2.timerId);
+            UpdateChecker2.timerId = null;
+          }
+        },
+        init: () => {
+          const enabled = Storage2.get(CONFIG2.STORAGE_KEYS.UPDATE_AUTO_CHECK_ENABLED, CONFIG2.DEFAULTS.updateAutoCheckEnabled);
+          const intervalHours = Storage2.get(CONFIG2.STORAGE_KEYS.UPDATE_CHECK_INTERVAL_HOURS, CONFIG2.DEFAULTS.updateCheckIntervalHours);
+          UpdateChecker2.stopPolling();
+          UpdateChecker2.renderLastStatus();
+          if (enabled) {
+            UpdateChecker2.startPolling(intervalHours);
+            if (UpdateChecker2.shouldCheckNow(intervalHours)) {
+              const epoch = UpdateChecker2._epoch;
+              Utils2.runWhenBrowserIdle(() => {
+                if (epoch !== UpdateChecker2._epoch) return;
+                UpdateChecker2.check({ manual: false });
+              });
+            }
+          }
+        }
+      };
+      module.exports = { UpdateChecker: UpdateChecker2 };
+    }
+  });
+
+  // src/import/index.js
+  var require_import = __commonJS({
+    "src/import/index.js"(exports, module) {
+      "use strict";
+      var { CONFIG: CONFIG2 } = require_config();
+      var { Utils: Utils2 } = require_utils();
+      var { Storage: Storage2, SyncState: SyncState2, DedupStore } = require_storage();
+      var { NotionOAuth: NotionOAuth2 } = require_auth();
+      var { NotionAPI: NotionAPI2 } = require_api();
+      var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2 } = require_export();
+      var { SyncLock } = require_sync_lock();
+      var { UpdateChecker: UpdateChecker2 } = require_UpdateChecker();
+      var { emit } = require_event_bus();
+      var AutoImporter2 = {
+        isRunning: false,
+        timerId: null,
+        deferredWhileHidden: false,
+        visibilityListenerBound: false,
+        lastRunAt: 0,
+        minimumRunGapMs: 60 * 1e3,
+        // 从 Storage 读取导出设置（不依赖 UI DOM）
+        // 20260914: 新收藏判定(纯函数, 可单测) —— 远端「链接」索引是 ground truth:
+        // 命中 https://linux.do/t/{id} → 库内已存在跳过; 未命中 → 导出(账本残留不阻断, 换库场景);
+        // remoteUrls=null(查询失败) → 降级本地账本(旧语义)。allow_duplicates 时不做任何去重过滤。
+        resolveNewBookmarks: ({ bookmarks = [], dedupStrict = true, remoteUrls = null } = {}) => {
+          if (!dedupStrict) return bookmarks.slice();
+          return bookmarks.filter((bookmark) => {
+            const topicId = LinuxDoAPI2.resolveTopicId(bookmark);
+            if (remoteUrls) return !remoteUrls.has(`https://linux.do/t/${topicId}`);
+            return !Storage2.isTopicExported(topicId);
+          });
+        },
+        // 20260914: 远端命中项回写导出账本(仅 strict; 远端是 ground truth, 三定律) ——
+        // skip 语义必须落账, 否则账本缺失项每轮 skip 而永不落账, 本地账本驱动的待导出计数恒冻结。
+        // batch 纪律同 workspace-insight 对账回填: beginBatch→逐条 mark→endBatch+缓存失效(消除写侧 O(N²))。
+        markRemoteExistingTopics: ({ bookmarks = [], newBookmarks = [], remoteUrls = null, dedupStrict = true } = {}) => {
+          if (!remoteUrls || !dedupStrict || bookmarks.length <= newBookmarks.length) return 0;
+          const newIds = new Set(newBookmarks.map((b) => LinuxDoAPI2.resolveTopicId(b)));
+          let marked = 0;
+          let linuxdoBatchOpened = false;
+          try {
+            DedupStore.beginBatch("linuxdo");
+            linuxdoBatchOpened = true;
+          } catch {
+          }
+          try {
+            bookmarks.forEach((b) => {
+              const topicId = LinuxDoAPI2.resolveTopicId(b);
+              if (!topicId || newIds.has(topicId)) return;
+              if (remoteUrls.has(`https://linux.do/t/${topicId}`)) {
+                Storage2.markTopicExported(topicId);
+                marked++;
+              }
+            });
+          } finally {
+            if (linuxdoBatchOpened) {
+              try {
+                DedupStore.endBatch("linuxdo");
+              } catch {
+              }
+              Storage2._exportedTopicsCache = null;
+            }
+          }
+          return marked;
+        },
+        buildSettings: () => {
+          const exportTargetType = Storage2.get(CONFIG2.STORAGE_KEYS.EXPORT_TARGET_TYPE, CONFIG2.DEFAULTS.exportTargetType);
+          return {
+            // 与 Bookmark AutoImporter 对齐：经 getAccessToken 读取，避免绕过 OAuth 语义
+            apiKey: NotionOAuth2.getAccessToken(""),
+            databaseId: Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_DATABASE_ID, ""),
+            parentPageId: Storage2.get(CONFIG2.STORAGE_KEYS.PARENT_PAGE_ID, ""),
+            exportTargetType,
+            onlyFirst: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_ONLY_FIRST, false),
+            onlyOp: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_ONLY_OP, false),
+            rangeStart: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_RANGE_START, 1),
+            rangeEnd: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_RANGE_END, 999999),
+            imgFilter: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_IMG, CONFIG2.DEFAULTS.imgFilter),
+            filterUsers: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_USERS, CONFIG2.DEFAULTS.filterUsers),
+            filterInclude: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_INCLUDE, CONFIG2.DEFAULTS.filterInclude),
+            filterExclude: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_EXCLUDE, CONFIG2.DEFAULTS.filterExclude),
+            filterMinLen: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_MINLEN, CONFIG2.DEFAULTS.filterMinLen),
+            imgMode: Storage2.get(CONFIG2.STORAGE_KEYS.IMG_MODE, CONFIG2.DEFAULTS.imgMode),
+            concurrency: Storage2.get(CONFIG2.STORAGE_KEYS.EXPORT_CONCURRENCY, CONFIG2.DEFAULTS.exportConcurrency)
+          };
+        },
+        // 检查配置是否足够
+        canStart: () => {
+          if (!Storage2.get(CONFIG2.STORAGE_KEYS.AUTO_IMPORT_ENABLED, false)) return false;
+          const apiKey = NotionOAuth2.getAccessToken();
+          if (!apiKey) return false;
+          const exportTargetType = Storage2.get(CONFIG2.STORAGE_KEYS.EXPORT_TARGET_TYPE, CONFIG2.DEFAULTS.exportTargetType);
+          if (exportTargetType === "database") {
+            return !!Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_DATABASE_ID, "");
+          } else {
+            return !!Storage2.get(CONFIG2.STORAGE_KEYS.PARENT_PAGE_ID, "");
+          }
+        },
+        // 更新状态栏
+        updateStatus: (text) => {
+          const el = document.querySelector("#ldb-auto-import-status");
+          if (el) el.textContent = text;
+        },
+        getWatermark: (bookmarks = []) => SyncState2.buildWatermark(
+          bookmarks,
+          LinuxDoAPI2.getBookmarkSyncTime,
+          LinuxDoAPI2.getBookmarkId
+        ),
+        startPolling: (intervalMinutes) => {
+          const { SyncScheduler } = require_SyncScheduler();
+          SyncScheduler.start("linuxdo", intervalMinutes);
+        },
+        ensureVisibilityListener: () => {
+          if (AutoImporter2.visibilityListenerBound) return;
+          document.addEventListener("visibilitychange", () => {
+            if (!document.hidden && AutoImporter2.deferredWhileHidden) {
+              AutoImporter2.deferredWhileHidden = false;
+              if (!AutoImporter2.canStart()) return;
+              Utils2.runWhenBrowserIdle(() => {
+                if (AutoImporter2.canStart()) AutoImporter2.run();
+              });
+            }
+          });
+          AutoImporter2.visibilityListenerBound = true;
+        },
+        stopPolling: () => {
+          if (AutoImporter2._initTimer) {
+            clearTimeout(AutoImporter2._initTimer);
+            AutoImporter2._initTimer = null;
+          }
+          const { SyncScheduler } = require_SyncScheduler();
+          SyncScheduler.stop("linuxdo");
+        },
+        init: () => {
+          if (!AutoImporter2.canStart()) return;
+          AutoImporter2.ensureVisibilityListener();
+          AutoImporter2._initTimer = setTimeout(() => {
+            AutoImporter2._initTimer = null;
+            if (!AutoImporter2.canStart()) return;
+            Utils2.runWhenBrowserIdle(() => {
+              if (AutoImporter2.canStart()) AutoImporter2.run();
+            });
+            const interval = Storage2.get(CONFIG2.STORAGE_KEYS.AUTO_IMPORT_INTERVAL, CONFIG2.DEFAULTS.autoImportInterval);
+            if (interval > 0) AutoImporter2.startPolling(interval);
+          }, 3e3);
+        }
+      };
+      AutoImporter2.run = async () => {
+        if (document.hidden) {
+          AutoImporter2.deferredWhileHidden = true;
+          return;
+        }
+        if (AutoImporter2.isRunning) return;
+        if (SyncLock.isExporting) return;
+        const apiKey = NotionOAuth2.getAccessToken("");
+        if (!apiKey) {
+          AutoImporter2.updateStatus("\u8BF7\u5148\u914D\u7F6E Notion API Key");
+          return { importedCount: 0, failedCount: 0, errors: ["\u8BF7\u5148\u914D\u7F6E Notion API Key"] };
+        }
+        const exportTargetType = Storage2.get(CONFIG2.STORAGE_KEYS.EXPORT_TARGET_TYPE, CONFIG2.DEFAULTS.exportTargetType);
+        if (exportTargetType === "database" && !Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_DATABASE_ID, "")) {
+          AutoImporter2.updateStatus("\u8BF7\u5148\u914D\u7F6E Notion \u6570\u636E\u5E93 ID");
+          return { importedCount: 0, failedCount: 0, errors: ["\u8BF7\u5148\u914D\u7F6E Notion \u6570\u636E\u5E93 ID"] };
+        }
+        if (exportTargetType === "page" && !Storage2.get(CONFIG2.STORAGE_KEYS.PARENT_PAGE_ID, "")) {
+          AutoImporter2.updateStatus("\u8BF7\u5148\u914D\u7F6E\u7236\u9875\u9762 ID");
+          return { importedCount: 0, failedCount: 0, errors: ["\u8BF7\u5148\u914D\u7F6E\u7236\u9875\u9762 ID"] };
+        }
+        const now = Date.now();
+        if (now - AutoImporter2.lastRunAt < AutoImporter2.minimumRunGapMs) return;
+        AutoImporter2.lastRunAt = now;
+        AutoImporter2.isRunning = true;
+        const exportMutexAcquired = SyncLock.isExporting !== true;
+        SyncLock.isExporting = true;
+        let lease = null;
+        try {
+          lease = await SyncLock.acquireLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE);
+        } catch (leaseError) {
+          AutoImporter2.isRunning = false;
+          if (exportMutexAcquired) SyncLock.isExporting = false;
+          console.error("[LD-Notion] \u81EA\u52A8\u5BFC\u5165\u83B7\u53D6\u79DF\u7EA6\u5931\u8D25:", leaseError);
+          AutoImporter2.updateStatus("\u274C \u83B7\u53D6\u540C\u6B65\u79DF\u7EA6\u5931\u8D25\uFF0C\u672C\u8F6E\u8DF3\u8FC7");
+          return;
+        }
+        if (!lease) {
+          AutoImporter2.isRunning = false;
+          if (exportMutexAcquired) SyncLock.isExporting = false;
+          AutoImporter2.updateStatus("\u23F8 \u5176\u4ED6\u6807\u7B7E\u9875\u6B63\u5728\u540C\u6B65\uFF0C\u672C\u8F6E\u81EA\u52A8\u5BFC\u5165\u8DF3\u8FC7");
+          return;
+        }
+        AutoImporter2._leaseLost = false;
+        const renewTimer = setInterval(() => {
+          let renewed;
+          try {
+            renewed = SyncLock.renewLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
+          } catch (renewError) {
+            console.warn("[LD-Notion] \u81EA\u52A8\u5BFC\u5165\u7EED\u7EA6\u5931\u8D25:", renewError);
+            renewed = false;
+          }
+          if (!renewed) {
+            AutoImporter2._leaseLost = true;
+            clearInterval(renewTimer);
+          }
+        }, 3e4);
+        const attemptAt = Date.now();
+        const exportBtn = document.querySelector("#ldb-export");
+        try {
+          SyncState2.updateLinuxDoState({
+            lastAttemptAt: attemptAt,
+            lastOutcome: "running",
+            lastError: "",
+            lastStats: {}
+          });
+          const username = await Utils2.getCurrentLinuxDoUsernameAsync();
+          if (!username) {
+            const errorMessage = "\u65E0\u6CD5\u83B7\u53D6\u5F53\u524D Linux.do \u7528\u6237\u540D";
+            SyncState2.updateLinuxDoState({
+              lastAttemptAt: attemptAt,
+              lastOutcome: "error",
+              lastError: errorMessage,
+              lastStats: {}
+            });
+            AutoImporter2.updateStatus(`\u274C ${errorMessage}`);
+            return { importedCount: 0, failedCount: 0, errors: [`${errorMessage}\uFF1A\u8BF7\u5237\u65B0 linux.do \u9875\u9762\u5E76\u786E\u8BA4\u5DF2\u767B\u5F55\u540E\u91CD\u8BD5`] };
+          }
+          AutoImporter2.updateStatus("\u{1F4E7} \u6B63\u5728\u68C0\u67E5\u65B0\u6536\u85CF...");
+          const syncState = SyncState2.getLinuxDoState();
+          const bookmarks = await LinuxDoAPI2.fetchBookmarksSince(username, syncState.watermark);
+          const dedupStrict = Utils2.isLinuxDoDedupStrict();
+          const settings = AutoImporter2.buildSettings();
+          let remoteUrls = null;
+          try {
+            remoteUrls = await NotionAPI2.collectDatabaseUrls(settings.apiKey, settings.databaseId);
+          } catch (_) {
+            remoteUrls = null;
+          }
+          const newBookmarks = AutoImporter2.resolveNewBookmarks({ bookmarks, dedupStrict, remoteUrls });
+          AutoImporter2.markRemoteExistingTopics({ bookmarks, newBookmarks, remoteUrls, dedupStrict });
+          if (newBookmarks.length === 0) {
+            const statePatch2 = {
+              lastAttemptAt: attemptAt,
+              lastSuccessAt: Date.now(),
+              lastOutcome: "success",
+              lastError: "",
+              lastStats: {
+                scanned: bookmarks.length,
+                pending: 0,
+                success: 0,
+                failed: 0
+              }
+            };
+            if (bookmarks.length > 0) {
+              statePatch2.watermark = AutoImporter2.getWatermark(bookmarks);
+            }
+            SyncState2.updateLinuxDoState(statePatch2);
+            AutoImporter2.updateStatus(`\u2705 \u6CA1\u6709\u65B0\u6536\u85CF (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`);
+            return { importedCount: 0, failedCount: 0, errors: [] };
+          }
+          AutoImporter2.updateStatus(`\u{1F4EC} \u53D1\u73B0 ${newBookmarks.length} \u4E2A\u65B0\u6536\u85CF\uFF0C\u6B63\u5728\u5BFC\u5165...`);
+          if (exportBtn) exportBtn.disabled = true;
+          const obsExportBtn = document.querySelector("#ldb-obs-export");
+          if (obsExportBtn) obsExportBtn.disabled = true;
+          const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
+          const concurrency = settings.concurrency || 1;
+          let success = 0;
+          let failed = 0;
+          let autoImportAborted = false;
+          const successfulBookmarks = [];
+          const remaining = Array.from({ length: newBookmarks.length }, (_, k) => k);
+          const worker = async () => {
+            while (true) {
+              if (AutoImporter2._leaseLost || autoImportAborted) break;
+              const i = remaining.shift();
+              if (i === void 0) return;
+              const bookmark = newBookmarks[i];
+              const topicId = LinuxDoAPI2.resolveTopicId(bookmark);
+              const title = bookmark.title || bookmark.fancy_title || bookmark.name || `\u5E16\u5B50 ${topicId}`;
+              AutoImporter2.updateStatus(`\u{1F4EC} \u5BFC\u5165\u4E2D (${i + 1}/${newBookmarks.length}): ${title}`);
+              try {
+                settings.apiKey = NotionOAuth2.getAccessToken("");
+                await Exporter2.exportTopic(bookmark, settings);
+                success++;
+                successfulBookmarks.push(bookmark);
+              } catch (error) {
+                console.error(`[LD-Notion] \u81EA\u52A8\u5BFC\u5165\u5931\u8D25: ${title}`, error);
+                failed++;
+                if (Exporter2.isAuthTerminalError && Exporter2.isAuthTerminalError(error)) {
+                  autoImportAborted = { authCode: error.authCode || "unauthorized" };
+                  break;
+                }
+              }
+              if (delay > 0 && remaining.length > 0) {
+                await Utils2.sleep(delay);
+              }
+            }
+          };
+          const workerCount = Math.min(concurrency, newBookmarks.length);
+          const workers = [];
+          for (let w = 0; w < workerCount; w++) {
+            workers.push(worker());
+            if (w < workerCount - 1) await Utils2.sleep(100);
+          }
+          await Promise.all(workers);
+          const uiRef = null;
+          emit("bookmarks:updated");
+          const statePatch = {
+            lastAttemptAt: attemptAt,
+            lastOutcome: autoImportAborted ? "aborted" : failed > 0 ? "partial" : "success",
+            lastError: autoImportAborted ? "\u8BA4\u8BC1\u5931\u8D25\uFF0C\u5DF2\u4E2D\u6B62\u672C\u6B21\u81EA\u52A8\u5BFC\u5165\uFF08\u8BF7\u68C0\u67E5 Notion API Key / OAuth \u6388\u6743\uFF09" : "",
+            lastStats: {
+              scanned: bookmarks.length,
+              pending: newBookmarks.length,
+              success,
+              failed
+            }
+          };
+          if (successfulBookmarks.length > 0) {
+            const successIds = new Set(successfulBookmarks.map((bookmark) => LinuxDoAPI2.getBookmarkId(bookmark)));
+            const leadingSuccessfulBookmarks = SyncState2.takeLeadingItems(
+              newBookmarks,
+              (bookmark) => successIds.has(LinuxDoAPI2.getBookmarkId(bookmark))
+            );
+            if (leadingSuccessfulBookmarks.length > 0) {
+              statePatch.watermark = AutoImporter2.getWatermark(leadingSuccessfulBookmarks);
+            }
+            statePatch.lastSuccessAt = Date.now();
+          }
+          SyncState2.updateLinuxDoState(statePatch);
+          const authCode = String((autoImportAborted == null ? void 0 : autoImportAborted.authCode) || "").toLowerCase();
+          let abortText = `\u26D4 \u8BA4\u8BC1\u5931\u8D25\uFF0C\u5DF2\u4E2D\u6B62\u81EA\u52A8\u5BFC\u5165\uFF08\u6210\u529F ${success} \u4E2A\uFF1B\u5269\u4F59\u9879\u5C06\u5728\u4E0B\u6B21\u540C\u6B65\u91CD\u8BD5\u3002\u8BF7\u68C0\u67E5 Notion API Key / OAuth \u6388\u6743\uFF09 (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`;
+          if (authCode === "empty_token") {
+            abortText = `\u26D4 \u672A\u8BFB\u53D6\u5230 API Key\uFF0C\u5DF2\u4E2D\u6B62\u81EA\u52A8\u5BFC\u5165\uFF08\u6210\u529F ${success} \u4E2A\uFF1B\u8BF7\u91CD\u65B0\u4FDD\u5B58 API Key \u6216\u91CD\u65B0 OAuth \u6388\u6743\uFF09 (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`;
+          } else if (authCode === "unauthorized" || authCode === "invalid_bearer_token") {
+            abortText = `\u26D4 Notion \u62D2\u7EDD\u4E86\u8BE5 API Key\uFF0C\u5DF2\u4E2D\u6B62\u81EA\u52A8\u5BFC\u5165\uFF08\u6210\u529F ${success} \u4E2A\uFF1B\u8BF7\u91CD\u65B0\u590D\u5236\u4FDD\u5B58\u6216\u91CD\u65B0 OAuth \u6388\u6743\uFF09 (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`;
+          }
+          AutoImporter2.updateStatus(
+            autoImportAborted ? abortText : `\u2705 \u81EA\u52A8\u5BFC\u5165\u5B8C\u6210: ${success} \u4E2A\u6210\u529F${failed > 0 ? `\uFF0C${failed} \u4E2A\u5931\u8D25` : ""} (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`
+          );
+          if (success > 0 && typeof GM_notification === "function") {
+            GM_notification({
+              title: "\u81EA\u52A8\u5BFC\u5165\u5B8C\u6210",
+              text: `\u6210\u529F\u5BFC\u5165 ${success} \u4E2A\u65B0\u6536\u85CF\u5230 Notion`,
+              timeout: 5e3
+            });
+          }
+          return {
+            importedCount: success,
+            failedCount: failed,
+            errors: autoImportAborted ? [String((autoImportAborted == null ? void 0 : autoImportAborted.message) || "\u8BA4\u8BC1\u5931\u8D25\uFF0C\u5DF2\u4E2D\u6B62\u81EA\u52A8\u5BFC\u5165\uFF08\u8BF7\u68C0\u67E5 Notion API Key / OAuth \u6388\u6743\uFF09")] : []
+          };
+        } catch (error) {
+          console.error("[LD-Notion] \u81EA\u52A8\u5BFC\u5165\u51FA\u9519:", error);
+          SyncState2.updateLinuxDoState({
+            lastAttemptAt: attemptAt,
+            lastOutcome: "error",
+            lastError: (error == null ? void 0 : error.message) || String(error),
+            lastStats: {}
+          });
+          AutoImporter2.updateStatus(`\u274C \u81EA\u52A8\u5BFC\u5165\u51FA\u9519: ${error.message}`);
+          return { importedCount: 0, failedCount: 0, errors: [(error == null ? void 0 : error.message) || String(error)] };
+        } finally {
+          clearInterval(renewTimer);
+          SyncLock.releaseLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
+          AutoImporter2._leaseLost = false;
+          AutoImporter2.isRunning = false;
+          if (exportMutexAcquired) SyncLock.isExporting = false;
+          if (exportBtn) exportBtn.disabled = false;
+          const obsExportBtn2 = document.querySelector("#ldb-obs-export");
+          if (obsExportBtn2) obsExportBtn2.disabled = false;
+          emit("sync:center-summary-updated");
+        }
+      };
+      module.exports = { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2 };
+    }
+  });
+
   // src/adapter/SyncScheduler.js
   var require_SyncScheduler = __commonJS({
     "src/adapter/SyncScheduler.js"(exports, module) {
@@ -14374,36 +15724,22 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
       var { SyncStateV2 } = require_SyncState();
       var SOURCE_INTERVAL_KEYS = {
         linuxdo: CONFIG2.STORAGE_KEYS.SYNC_INTERVAL_LINUXDO,
-        "github-stars": CONFIG2.STORAGE_KEYS.SYNC_INTERVAL_GITHUB,
-        "github-repos": CONFIG2.STORAGE_KEYS.SYNC_INTERVAL_GITHUB,
-        "github-forks": CONFIG2.STORAGE_KEYS.SYNC_INTERVAL_GITHUB,
-        "github-gists": CONFIG2.STORAGE_KEYS.SYNC_INTERVAL_GITHUB,
         bookmark: CONFIG2.STORAGE_KEYS.SYNC_INTERVAL_BOOKMARKS
+        // v3.17: GitHub 收藏源已移除 —— 历史 github-* 键保留在 CONFIG(历史存储兼容),
+        // 此处不再映射, 残留定时/状态走默认间隔与 isEnabled=false 静默跳过。
       };
       var SOURCE_INTERVAL_DEFAULTS = {
         linuxdo: CONFIG2.DEFAULTS.syncIntervalLinuxdo,
-        "github-stars": CONFIG2.DEFAULTS.syncIntervalGithub,
-        "github-repos": CONFIG2.DEFAULTS.syncIntervalGithub,
-        "github-forks": CONFIG2.DEFAULTS.syncIntervalGithub,
-        "github-gists": CONFIG2.DEFAULTS.syncIntervalGithub,
         bookmark: CONFIG2.DEFAULTS.syncIntervalBookmarks
       };
       var SOURCE_ENABLED_KEYS = {
         linuxdo: CONFIG2.STORAGE_KEYS.AUTO_IMPORT_ENABLED,
-        "github-stars": CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED,
-        "github-repos": CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED,
-        "github-forks": CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED,
-        "github-gists": CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED,
         bookmark: CONFIG2.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED
       };
       var RETRY_DELAYS = [5 * 60 * 1e3, 15 * 60 * 1e3, 60 * 60 * 1e3];
       var MAX_RETRIES = RETRY_DELAYS.length + 2;
       var SOURCE_RUNNERS = {
         linuxdo: () => require_import().AutoImporter.run(),
-        "github-stars": () => require_import().GitHubAutoImporter.run(),
-        "github-repos": () => require_import().GitHubAutoImporter.run(),
-        "github-forks": () => require_import().GitHubAutoImporter.run(),
-        "github-gists": () => require_import().GitHubAutoImporter.run(),
         bookmark: () => require_bridge().BookmarkAutoImporter.run()
       };
       var SyncScheduler = {
@@ -14701,7 +16037,7 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
         // 谁在何时建/更/归档了哪些页面可事后追溯。与归档 canExecute 闸门（3.7.7）互补：
         // 闸门管权限，审计管可观测性。
         // actor/source 经 context 注入以支持用户触发路径复用（ISS-20260724-011：导出路径
-        // 传 actor="user"/source="bookmark-export"|"github-export"）；未传时保持自动同步默认值，
+        // 传 actor="user"/source="bookmark-export"）；未传时保持自动同步默认值，
         // 向后兼容现有调用方。
         _auditAutoSync: (operation, status, context = {}) => {
           try {
@@ -15644,3220 +16980,6 @@ JSON \u683C\u5F0F\uFF1A{"title":"...","summary":"..."}
     }
   });
 
-  // src/export/page-file.js
-  var require_page_file = __commonJS({
-    "src/export/page-file.js"(exports, module) {
-      "use strict";
-      var { Utils: Utils2 } = require_utils();
-      var { SiteDetector: SiteDetector2, HTMLToMarkdown: HTMLToMarkdown2 } = require_api();
-      var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, LinuxDoAPI: LinuxDoAPI2 } = require_extract();
-      var sanitizeFileName = (name, fallback = "page") => {
-        const base = String(name || "").trim().replace(/[\\/:*?"<>|]/g, "_").substring(0, 80);
-        return base || fallback;
-      };
-      var MAX_PUBLISH_RAW_LENGTH = 6e4;
-      var MIN_PUBLISH_TITLE_LENGTH = 5;
-      var PageFileExporter = {
-        MAX_PUBLISH_RAW_LENGTH,
-        MIN_PUBLISH_TITLE_LENGTH,
-        sanitizeFileName,
-        // —— Markdown 装配（三种来源） ——
-        // 通用页：meta + 正文 HTML → markdown
-        buildMarkdownFromGeneric: (meta = {}, bodyHtml = "") => {
-          const safeMeta = {
-            title: meta.title || "\u65E0\u6807\u9898",
-            url: meta.url || (typeof location !== "undefined" ? location.href : ""),
-            author: meta.author || "",
-            source: meta.source || meta.siteName || "\u901A\u7528\u9875\u9762",
-            sourceType: meta.sourceType || "\u7F51\u9875"
-          };
-          let md = HTMLToMarkdown2.buildFrontmatter(safeMeta);
-          md += `> [!info] \u9875\u9762\u4FE1\u606F
-> - **\u6765\u6E90**: ${Utils2.mdText(safeMeta.source)}
-> - **\u94FE\u63A5**: ${Utils2.mdLink(safeMeta.title, safeMeta.url)}
-`;
-          if (safeMeta.author) md += `> - **\u4F5C\u8005**: ${Utils2.mdText(safeMeta.author)}
-`;
-          md += `> - **\u5BFC\u51FA\u65F6\u95F4**: ${(/* @__PURE__ */ new Date()).toLocaleString("zh-CN")}
-
-`;
-          if (bodyHtml) md += `${HTMLToMarkdown2.convert(bodyHtml)}
-`;
-          return { meta: safeMeta, markdown: md };
-        },
-        // 知乎内容对象（ZhihuAPI.extractContent 形态）→ markdown（与 generic-ui Obsidian 分支同构）
-        buildMarkdownFromZhihu: (content = {}) => {
-          const title = content.title || "\u65E0\u6807\u9898";
-          const safeMeta = {
-            title,
-            url: content.url || (typeof location !== "undefined" ? location.href : ""),
-            author: content.author || "",
-            source: "\u77E5\u4E4E",
-            sourceType: content.type === "answer" ? "\u56DE\u7B54" : content.type === "question" ? "\u95EE\u9898" : "\u6587\u7AE0"
-          };
-          let md = HTMLToMarkdown2.buildFrontmatter(safeMeta);
-          md += `> [!info] \u9875\u9762\u4FE1\u606F
-> - **\u6765\u6E90**: \u77E5\u4E4E
-> - **\u94FE\u63A5**: ${Utils2.mdLink(title, safeMeta.url)}
-> - **\u4F5C\u8005**: ${Utils2.mdText(content.author || "\u672A\u77E5")}
-> - **\u5BFC\u51FA\u65F6\u95F4**: ${(/* @__PURE__ */ new Date()).toLocaleString("zh-CN")}
-
-`;
-          if (content.detail && content.type === "question") md += `${HTMLToMarkdown2.convert(content.detail)}
-
-`;
-          if (content.html) md += `${HTMLToMarkdown2.convert(content.html)}
-
-`;
-          if (Array.isArray(content.answers)) {
-            content.answers.forEach((ans, i) => {
-              md += `> [!note]+ #${i + 1} ${Utils2.mdText(ans.author || "\u533F\u540D")} \xB7 \u{1F44D} ${ans.voteCount || 0}
-`;
-              const lines = HTMLToMarkdown2.convert(ans.html || "").trim().split("\n");
-              md += lines.map((l) => `> ${l}`).join("\n") + "\n\n";
-            });
-          }
-          return { meta: safeMeta, markdown: md };
-        },
-        // linux.do 话题（fetchAllPosts 形态）→ markdown（与 Obsidian 批量导出同构）
-        buildMarkdownFromPosts: (topic = {}, posts = []) => {
-          const safeMeta = {
-            title: topic.title || "\u65E0\u6807\u9898",
-            url: topic.url || "",
-            author: topic.opUsername || "",
-            source: "Linux.do",
-            sourceType: "\u5E16\u5B50",
-            topicId: topic.topicId || topic.topic_id || "",
-            category: topic.categoryName || topic.category || "",
-            tags: topic.tags || [],
-            floors: posts.length
-          };
-          let md = HTMLToMarkdown2.buildFrontmatter(safeMeta);
-          md += `> [!info] \u5E16\u5B50\u4FE1\u606F
-`;
-          md += `> - **\u539F\u59CB\u94FE\u63A5**: ${Utils2.mdLink(safeMeta.title, safeMeta.url)}
-`;
-          md += `> - **\u697C\u4E3B**: @${Utils2.mdText(safeMeta.author || "\u672A\u77E5")}
-`;
-          md += `> - **\u5206\u7C7B**: ${Utils2.mdText(safeMeta.category || "\u65E0")}
-`;
-          md += `> - **\u6807\u7B7E**: ${Utils2.mdText((safeMeta.tags || []).join(", ") || "\u65E0")}
-`;
-          md += `> - **\u5BFC\u51FA\u65F6\u95F4**: ${(/* @__PURE__ */ new Date()).toLocaleString("zh-CN")}
-
-`;
-          posts.forEach((post, idx) => {
-            const isOp = post.username === topic.opUsername;
-            md += HTMLToMarkdown2.buildPostCallout(post, idx, isOp);
-          });
-          return { meta: safeMeta, markdown: md };
-        },
-        // —— 当前页面统一装配（来源路由与 GenericExporter.exportCurrentPage 同口径） ——
-        buildCurrentPage: async () => {
-          var _a;
-          const site = SiteDetector2.detect();
-          if (site === SiteDetector2.SITES.ZHIHU) {
-            const content = ZhihuAPI2.extractContent();
-            if (content) return PageFileExporter.buildMarkdownFromZhihu(content);
-          }
-          if (site === SiteDetector2.SITES.LINUX_DO) {
-            const pathSegments = window.location.pathname.split("/").filter(Boolean);
-            const tIndex = pathSegments.indexOf("t");
-            const numericTopicId = tIndex >= 0 ? pathSegments.slice(tIndex + 1).find((seg) => /^\d+$/.test(seg)) : null;
-            const topicId = numericTopicId || ((_a = window.location.pathname.match(/\/t\/([^/]+)/)) == null ? void 0 : _a[1]) || "";
-            if (topicId) {
-              const { topic, posts } = await LinuxDoAPI2.fetchAllPosts(topicId);
-              return PageFileExporter.buildMarkdownFromPosts(topic, posts);
-            }
-          }
-          const meta = GenericExtractor2.extractMeta();
-          const contentEl = GenericExtractor2.extractContent();
-          return PageFileExporter.buildMarkdownFromGeneric(meta, contentEl ? contentEl.innerHTML : "");
-        },
-        // —— 文件载荷 ——
-        // 独立 HTML：标题/链接头 + 正文原 HTML（本地存档可直接打开）
-        buildStandaloneHtml: (meta = {}, bodyHtml = "") => {
-          const title = Utils2.escapeHtml(meta.title || "\u65E0\u6807\u9898");
-          const url = Utils2.escapeHtml(meta.url || "");
-          return `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<title>${title}</title>
-</head>
-<body>
-<h1>${title}</h1>
-<p>\u6765\u6E90\uFF1A<a href="${url}">${title}</a></p>
-<article>
-${bodyHtml || ""}
-</article>
-</body>
-</html>
-`;
-        },
-        // JSON 载荷：meta + markdown（可再生，机器可读）
-        buildJsonPayload: (meta = {}, markdown = "") => {
-          return JSON.stringify({
-            kind: "ld-notion-page-file",
-            version: 1,
-            exportedAt: (/* @__PURE__ */ new Date()).toISOString(),
-            meta,
-            markdown
-          }, null, 2);
-        },
-        // format: md | html | json → { filename, content, mime }
-        buildFilePayload: (built = {}, format = "md", bodyHtml = "") => {
-          const { meta = {}, markdown = "" } = built;
-          const base = PageFileExporter.sanitizeFileName(meta.title, "page");
-          if (format === "html") {
-            return {
-              filename: `${base}.html`,
-              content: PageFileExporter.buildStandaloneHtml(meta, bodyHtml),
-              mime: "text/html;charset=utf-8"
-            };
-          }
-          if (format === "json") {
-            return {
-              filename: `${base}.json`,
-              content: PageFileExporter.buildJsonPayload(meta, markdown),
-              mime: "application/json;charset=utf-8"
-            };
-          }
-          return {
-            filename: `${base}.md`,
-            content: markdown,
-            mime: "text/markdown;charset=utf-8"
-          };
-        },
-        // 本地下载触发（BookmarkOrganizer.backup / workspace 报告先例：Blob + a.click）
-        downloadFile: (filename, content, mime) => {
-          if (typeof document === "undefined" || typeof Blob === "undefined") {
-            throw new Error("\u5F53\u524D\u73AF\u5883\u4E0D\u652F\u6301\u6587\u4EF6\u4E0B\u8F7D");
-          }
-          const objectUrlApi = typeof window !== "undefined" && window.URL && typeof window.URL.createObjectURL === "function" ? window.URL : typeof URL !== "undefined" && typeof URL.createObjectURL === "function" ? URL : null;
-          if (!objectUrlApi) throw new Error("\u5F53\u524D\u73AF\u5883\u4E0D\u652F\u6301\u6587\u4EF6\u4E0B\u8F7D");
-          const blob = new Blob([content], { type: mime || "text/plain;charset=utf-8" });
-          const href = objectUrlApi.createObjectURL(blob);
-          try {
-            const link = document.createElement("a");
-            link.href = href;
-            link.download = filename;
-            link.style.display = "none";
-            document.body.appendChild(link);
-            link.click();
-            if (typeof link.remove === "function") link.remove();
-          } finally {
-            if (typeof objectUrlApi.revokeObjectURL === "function") {
-              setTimeout(() => objectUrlApi.revokeObjectURL(href), 5e3);
-            }
-          }
-          return filename;
-        },
-        // —— 发往 linux.do 的参数组装（纯函数，可单测） ——
-        // mode: "topic" | "reply"
-        buildPublishParams: ({ mode = "topic", title = "", raw = "", category = "", topicId = "" } = {}) => {
-          const cleanTitle = String(title || "").trim();
-          const cleanRaw = String(raw || "").trim();
-          if (mode === "reply") {
-            const tid = String(topicId || "").trim();
-            if (!/^\d+$/.test(tid)) throw new Error("\u56DE\u590D\u6A21\u5F0F\u9700\u586B\u5199\u6570\u5B57\u8BDD\u9898 ID");
-            if (cleanRaw.length < 10) throw new Error("\u6B63\u6587\u8FC7\u77ED\uFF08\u81F3\u5C11 10 \u4E2A\u5B57\u7B26\uFF09");
-            if (cleanRaw.length > MAX_PUBLISH_RAW_LENGTH) {
-              throw new Error(`\u6B63\u6587\u8D85\u957F\uFF08${cleanRaw.length} > ${MAX_PUBLISH_RAW_LENGTH}\uFF09\uFF0C\u8BF7\u6539\u5B58\u672C\u5730\u6587\u4EF6`);
-            }
-            return { mode, topic_id: tid, raw: cleanRaw };
-          }
-          if (cleanTitle.length < MIN_PUBLISH_TITLE_LENGTH) {
-            throw new Error(`\u6807\u9898\u8FC7\u77ED\uFF08\u81F3\u5C11 ${MIN_PUBLISH_TITLE_LENGTH} \u4E2A\u5B57\u7B26\uFF09`);
-          }
-          if (cleanRaw.length < 10) throw new Error("\u6B63\u6587\u8FC7\u77ED\uFF08\u81F3\u5C11 10 \u4E2A\u5B57\u7B26\uFF09");
-          if (cleanRaw.length > MAX_PUBLISH_RAW_LENGTH) {
-            throw new Error(`\u6B63\u6587\u8D85\u957F\uFF08${cleanRaw.length} > ${MAX_PUBLISH_RAW_LENGTH}\uFF09\uFF0C\u8BF7\u6539\u5B58\u672C\u5730\u6587\u4EF6`);
-          }
-          const params = { mode, title: cleanTitle.slice(0, 255), raw: cleanRaw, archetype: "regular" };
-          const cat = String(category || "").trim();
-          if (cat !== "") {
-            if (!/^\d+$/.test(cat)) throw new Error("\u5206\u7C7B\u9700\u586B\u5199\u6570\u5B57 ID\uFF08\u7559\u7A7A\u5219\u7531\u7AD9\u70B9\u9ED8\u8BA4\uFF09");
-            params.category = cat;
-          }
-          return params;
-        }
-      };
-      module.exports = { PageFileExporter };
-    }
-  });
-
-  // src/export/index.js
-  var require_export = __commonJS({
-    "src/export/index.js"(exports, module) {
-      "use strict";
-      var { CONFIG: CONFIG2, MSG: MSG2, getFileCategory: getFileCategory2 } = require_config();
-      var { Utils: Utils2 } = require_utils();
-      var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
-      var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
-      var { NotionAPI: NotionAPI2, DOMToNotion: DOMToNotion2, HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2, SiteDetector: SiteDetector2, EMOJI_MAP: EMOJI_MAP2 } = require_api();
-      var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2 } = require_security();
-      var { BookmarkExporter: BookmarkExporter2 } = require_bridge();
-      var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2 } = require_extract();
-      var { AIAssistant: AIAssistant2 } = require_ai();
-      var { SyncLock } = require_sync_lock();
-      var GenericExporter2 = {
-        resolveUnifiedSource: (meta = {}) => {
-          const explicitSource = GenericExporter2.normalizeSourceLabel(meta.source || "");
-          if (explicitSource) return explicitSource;
-          const siteDerived = GenericExporter2.normalizeSourceLabel(meta.siteName || "");
-          return siteDerived === "\u77E5\u4E4E" ? "\u77E5\u4E4E" : "\u901A\u7528\u9875\u9762";
-        },
-        normalizeSourceLabel: (value) => {
-          const raw = BookmarkExporter2.normalizeText(String(value || "").trim(), 100);
-          if (!raw) return "";
-          const lower = raw.toLowerCase();
-          if (lower.includes("zhihu") || raw.includes("\u77E5\u4E4E")) return "\u77E5\u4E4E";
-          return raw;
-        },
-        normalizeSourceTypeLabel: (value, source = "") => {
-          const raw = BookmarkExporter2.normalizeText(String(value || "").trim(), 40);
-          if (!raw) {
-            if (source === "\u77E5\u4E4E") return "\u7F51\u9875";
-            return "\u7F51\u9875";
-          }
-          const lower = raw.toLowerCase();
-          if (["answer", "\u56DE\u7B54"].includes(lower) || raw.includes("\u56DE\u7B54")) return "\u56DE\u7B54";
-          if (["question", "\u95EE\u9898", "\u95EE\u7B54"].includes(lower) || raw.includes("\u95EE\u9898") || raw.includes("\u95EE\u7B54")) return "\u95EE\u9898";
-          if (["article", "column_article", "\u6587\u7AE0", "\u4E13\u680F\u6587\u7AE0"].includes(lower) || raw.includes("\u6587\u7AE0")) return "\u6587\u7AE0";
-          if (["web", "webpage", "web page", "page", "\u7F51\u9875"].includes(lower) || raw.includes("\u7F51\u9875")) return "\u7F51\u9875";
-          return raw;
-        },
-        stripHtml: (html) => BookmarkExporter2.normalizeText(
-          String(html || "").replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " "),
-          500
-        ),
-        extractSummaryText: (meta = {}) => {
-          const chunks = [
-            meta.description,
-            meta.detail,
-            meta.html,
-            ...Array.isArray(meta.answers) ? meta.answers.map((answer) => (answer == null ? void 0 : answer.html) || "") : []
-          ];
-          for (const chunk of chunks) {
-            const text = GenericExporter2.stripHtml(chunk);
-            if (text) return text;
-          }
-          return "";
-        },
-        inferTags: (meta = {}) => {
-          const tags = [];
-          const source = GenericExporter2.normalizeSourceLabel(meta.source || meta.siteName || "");
-          const sourceType = GenericExporter2.normalizeSourceTypeLabel(meta.sourceType || "", source);
-          try {
-            const host = new URL(meta.url || "").hostname.replace(/^www\./, "");
-            if (host) tags.push(host);
-          } catch {
-          }
-          if (source) tags.push(source);
-          if (sourceType) tags.push(sourceType);
-          if (meta.siteName && meta.siteName !== source) {
-            tags.push(BookmarkExporter2.normalizeText(meta.siteName, 60));
-          }
-          const uniq = [];
-          for (const tag of tags) {
-            const clean = BookmarkExporter2.normalizeText(tag, 80);
-            if (!clean || uniq.includes(clean)) continue;
-            uniq.push(clean);
-            if (uniq.length >= 8) break;
-          }
-          return uniq;
-        },
-        enrichMeta: async (meta = {}, settings = {}) => {
-          const source = GenericExporter2.resolveUnifiedSource(meta);
-          const siteName = BookmarkExporter2.normalizeText(meta.siteName || "", 100) || source;
-          const sourceType = GenericExporter2.normalizeSourceTypeLabel(meta.sourceType || "", source);
-          const description = GenericExporter2.extractSummaryText(meta);
-          const enriched = {
-            ...meta,
-            title: BookmarkExporter2.normalizeText(meta.title || "\u65E0\u6807\u9898", 200) || "\u65E0\u6807\u9898",
-            // Canonicalize clipper URL (strip hash + tracking query) so DedupStore / Notion 链接 share one key
-            url: Utils2.normalizeDedupUrl(String(meta.url || (typeof location !== "undefined" ? location.href : "") || "").trim()),
-            author: BookmarkExporter2.normalizeText(meta.author || "", 100),
-            publishDate: BookmarkExporter2.normalizeText(meta.publishDate || "", 40),
-            siteName,
-            source,
-            sourceType,
-            description
-          };
-          const insight = {
-            title: enriched.title,
-            summary: enriched.description || "",
-            siteName: enriched.siteName || enriched.source || ""
-          };
-          const bookmarkLike = {
-            title: enriched.title,
-            url: enriched.url,
-            folderPath: `${enriched.source} ${enriched.sourceType}`.trim()
-          };
-          let inferredCategory = BookmarkExporter2.inferCategoryHeuristic(
-            bookmarkLike,
-            insight,
-            (settings == null ? void 0 : settings.categories) || []
-          );
-          const canUseAI = !!((settings == null ? void 0 : settings.aiApiKey) && (settings == null ? void 0 : settings.aiService) && Array.isArray(settings == null ? void 0 : settings.categories) && settings.categories.length > 0);
-          if (canUseAI) {
-            const aiCategory = await BookmarkExporter2.generateAICategory(bookmarkLike, insight, settings);
-            if (aiCategory) inferredCategory = aiCategory;
-          }
-          return {
-            ...enriched,
-            inferredCategory,
-            inferredTags: GenericExporter2.inferTags(enriched)
-          };
-        },
-        // 链接属性安全校验 —— 仅 http(s) 公网(拒内网/169.254/非 http 协议)
-        // 与 BookmarkExporter(hy3 LOW) 对称: exporter 写入侧统一防线
-        _safeUrl: (url) => {
-          const raw = String(url || "").trim();
-          if (!raw) return null;
-          const { UrlValidator } = require_UrlValidator();
-          return UrlValidator.validatePageExternalUrl(raw) ? raw.slice(0, 2e3) : null;
-        },
-        // 构建通用网页的 Notion 属性
-        buildProperties: (meta) => {
-          const source = GenericExporter2.resolveUnifiedSource(meta);
-          const sourceType = GenericExporter2.normalizeSourceTypeLabel(meta.sourceType || "", source);
-          const props = {
-            "\u6807\u9898": {
-              title: [{ text: { content: meta.title || "\u65E0\u6807\u9898" } }]
-            },
-            "\u94FE\u63A5": {
-              // U1(uibackend review): 仅 http(s) 公网才写入 url 属性; javascript:/data:/内网 置 null
-              url: GenericExporter2._safeUrl(meta.url)
-            },
-            "\u6765\u6E90": {
-              rich_text: [{ text: { content: source } }]
-            },
-            "\u6765\u6E90\u7C7B\u578B": {
-              rich_text: [{ text: { content: sourceType } }]
-            },
-            "\u4F5C\u8005": {
-              rich_text: [{ text: { content: meta.author || "" } }]
-            }
-          };
-          if (meta.publishDate) {
-            props["\u53D1\u5E03\u65E5\u671F"] = { date: { start: meta.publishDate } };
-          }
-          if (meta.description) {
-            props["\u6458\u8981"] = {
-              rich_text: [{ text: { content: meta.description.substring(0, 2e3) } }]
-            };
-          }
-          if (meta.inferredCategory) {
-            props["\u5206\u7C7B"] = {
-              rich_text: [{ text: { content: BookmarkExporter2.normalizeText(meta.inferredCategory, 300) } }]
-            };
-          }
-          const tags = Array.isArray(meta.inferredTags) ? meta.inferredTags : [];
-          if (tags.length > 0) {
-            props["\u6807\u7B7E"] = {
-              multi_select: tags.map((tag) => BookmarkExporter2.normalizeText(tag, 100)).filter(Boolean).map((name) => ({ name })).slice(0, 8)
-            };
-          }
-          return props;
-        },
-        // Clipper（知乎/通用页）去重：与 ZhihuAdapter/GenericAdapter.getDedupKey 同构。
-        // 此前 GenericUI.doExport 成功后不 markSeen → 连点/重导出必建重复 Notion 页。
-        resolveClipperDedup: (meta = {}) => {
-          const url = Utils2.normalizeDedupUrl(String(meta.url || (typeof location !== "undefined" ? location.href : "") || "").trim());
-          const site = SiteDetector2.detect();
-          if (site === SiteDetector2.SITES.ZHIHU || GenericExporter2.resolveUnifiedSource(meta) === "\u77E5\u4E4E") {
-            return { sourceType: "zhihu", dedupKey: url ? `zhihu:${url}` : "" };
-          }
-          return { sourceType: "generic", dedupKey: url ? `generic:${url}` : "" };
-        },
-        isClipperExported: (meta = {}) => {
-          const { DedupStore } = require_storage();
-          const { sourceType, dedupKey } = GenericExporter2.resolveClipperDedup(meta);
-          if (!dedupKey) return false;
-          return DedupStore.isDuplicate(sourceType, dedupKey);
-        },
-        // ISS-20260914-001: Clipper(知乎/通用页)远端对账 —— 远端「链接」索引是 ground truth。
-        // 与 BookmarkExporter/GitHubAutoImporter 同构,但 dedupKey 为 `zhihu:<normUrl>`/`generic:<normUrl>`
-        // 形式(非裸 URL),故单独抽 URL 段与远端集合比对,不硬套 URL 索引模板。
-        // 返回值三态:
-        //   { remote: Set }            → 远端可达, exported 字段以远端为准(本地账本 hit 被覆盖)
-        //   { remote: null, exported } → 远端不可达, 降级本地 DedupStore.isDuplicate(旧语义,防查询故障误放行)
-        checkClipperRemote: async (apiKey, databaseId, meta = {}) => {
-          const { sourceType, dedupKey } = GenericExporter2.resolveClipperDedup(meta);
-          if (!dedupKey || !apiKey || !databaseId) return { remote: null, exported: GenericExporter2.isClipperExported(meta), dedupKey };
-          let remoteUrls = null;
-          try {
-            remoteUrls = await NotionAPI2.collectDatabaseUrls(apiKey, databaseId);
-          } catch (_) {
-            remoteUrls = null;
-          }
-          if (!remoteUrls) {
-            return { remote: null, exported: GenericExporter2.isClipperExported(meta), dedupKey };
-          }
-          const urlPart = dedupKey.slice(dedupKey.indexOf(":") + 1);
-          const normRemote = (u) => String(u || "").trim().replace(/\/+$/, "");
-          const key = normRemote(urlPart);
-          const exported = key ? [...remoteUrls].some((u) => normRemote(u) === key) : false;
-          return { remote: remoteUrls, exported, dedupKey };
-        },
-        markClipperExported: (meta = {}) => {
-          const { DedupStore } = require_storage();
-          const { sourceType, dedupKey } = GenericExporter2.resolveClipperDedup(meta);
-          if (!dedupKey) return;
-          DedupStore.markSeen(sourceType, dedupKey);
-        },
-        // 导出当前页面
-        exportCurrentPage: async (settings) => {
-          var _a;
-          let meta, blocks;
-          if (SiteDetector2.detect() === SiteDetector2.SITES.ZHIHU) {
-            const content = ZhihuAPI2.extractContent();
-            if (content) {
-              meta = {
-                title: content.title,
-                url: content.url,
-                source: "\u77E5\u4E4E",
-                siteName: "\u77E5\u4E4E",
-                sourceType: content.type === "answer" ? "\u56DE\u7B54" : content.type === "question" ? "\u95EE\u9898" : "\u6587\u7AE0",
-                author: content.author,
-                description: GenericExporter2.extractSummaryText(content),
-                detail: content.detail || "",
-                html: content.html || "",
-                answers: content.answers || []
-              };
-              blocks = ZhihuAPI2.htmlToBlocks(content.html || "");
-              if (content.type === "question" && content.detail) {
-                const detailBlocks = ZhihuAPI2.htmlToBlocks(content.detail);
-                if (detailBlocks.length > 0) {
-                  blocks.push({
-                    type: "callout",
-                    callout: {
-                      icon: { type: "emoji", emoji: "\u2753" },
-                      rich_text: [{ type: "text", text: { content: "\u95EE\u9898\u63CF\u8FF0" } }]
-                    }
-                  });
-                  blocks.push(...detailBlocks);
-                }
-              }
-              if (content.type === "question" && content.answers) {
-                for (const ans of content.answers) {
-                  const ansBlocks = ZhihuAPI2.htmlToBlocks(ans.html || "");
-                  blocks.push({
-                    type: "divider",
-                    divider: {}
-                  });
-                  blocks.push({
-                    type: "callout",
-                    callout: {
-                      icon: { type: "emoji", emoji: "\u{1F464}" },
-                      rich_text: [{ type: "text", text: { content: `${ans.author} \xB7 \u{1F44D} ${ans.voteCount}` } }]
-                    }
-                  });
-                  blocks.push(...ansBlocks);
-                }
-              }
-            } else {
-              meta = GenericExtractor2.extractMeta();
-              const contentEl = GenericExtractor2.extractContent();
-              blocks = GenericExtractor2.toNotionBlocks(contentEl, settings.imgMode || CONFIG2.DEFAULTS.imgMode);
-            }
-          } else if (SiteDetector2.detect() === SiteDetector2.SITES.LINUX_DO) {
-            const pathSegments = window.location.pathname.split("/").filter(Boolean);
-            const tIndex = pathSegments.indexOf("t");
-            const numericTopicId = tIndex >= 0 ? pathSegments.slice(tIndex + 1).find((seg) => /^\d+$/.test(seg)) : null;
-            const topicId = numericTopicId || ((_a = window.location.pathname.match(/\/t\/([^/]+)/)) == null ? void 0 : _a[1]) || "";
-            if (topicId) {
-              const { topic, posts } = await LinuxDoAPI2.fetchAllPosts(topicId);
-              const filteredPosts = Exporter2.filterPosts(posts, topic, settings);
-              meta = {
-                title: topic.title || "\u65E0\u6807\u9898",
-                url: topic.url || window.location.href,
-                source: "Linux.do",
-                siteName: "Linux.do",
-                sourceType: "\u5E16\u5B50",
-                author: topic.opUsername || "",
-                description: topic.title || "",
-                detail: "",
-                html: "",
-                answers: filteredPosts.map((post) => ({
-                  author: post.name || post.username || "\u533F\u540D",
-                  username: post.username || "",
-                  html: post.cooked || "",
-                  voteCount: post.like_count || 0,
-                  postNumber: post.post_number || 0,
-                  createdAt: post.created_at || ""
-                }))
-              };
-              blocks = Exporter2.buildContentBlocks(filteredPosts, topic, settings);
-            } else {
-              meta = GenericExtractor2.extractMeta();
-              const contentEl = GenericExtractor2.extractContent();
-              blocks = GenericExtractor2.toNotionBlocks(contentEl, settings.imgMode || CONFIG2.DEFAULTS.imgMode);
-            }
-          } else {
-            meta = GenericExtractor2.extractMeta();
-            const contentEl = GenericExtractor2.extractContent();
-            blocks = GenericExtractor2.toNotionBlocks(contentEl, settings.imgMode || CONFIG2.DEFAULTS.imgMode);
-          }
-          meta = await GenericExporter2.enrichMeta(meta, settings);
-          if (!blocks || blocks.length === 0) {
-            blocks = [{
-              type: "paragraph",
-              paragraph: { rich_text: [{ type: "text", text: { content: meta.url } }] }
-            }];
-          }
-          const sourcePrefix = "\u6765\u6E90: ";
-          blocks.unshift({
-            type: "callout",
-            callout: {
-              icon: { type: "emoji", emoji: "\u{1F517}" },
-              // P4 收敛(c08): 与属性侧同口径截断 —— 超 rich_text 2000 上限会让整页导出被 Notion 拒
-              rich_text: [{
-                type: "text",
-                text: { content: `${sourcePrefix}${String(meta.url || "").trim().slice(0, 2e3 - sourcePrefix.length)}` }
-              }]
-            }
-          });
-          if (settings.imgMode === "upload") {
-            await Exporter2.processImageUploads(blocks, settings.apiKey, null);
-          }
-          let page;
-          if (settings.exportTargetType === CONFIG2.EXPORT_TARGET_TYPES.PAGE) {
-            page = await AIAssistant2._executeGuardedPageWrite(
-              "createDatabasePage",
-              { id: settings.parentPageId, name: meta.title },
-              () => NotionAPI2.createChildPage(
-                settings.parentPageId,
-                meta.title,
-                blocks,
-                settings.apiKey
-              ),
-              settings,
-              { itemName: meta.title, pageId: settings.parentPageId }
-            );
-          } else {
-            const properties = GenericExporter2.buildProperties(meta);
-            page = await AIAssistant2._executeGuardedDatabaseWrite(
-              "createDatabasePage",
-              settings.databaseId,
-              () => NotionAPI2.createDatabasePage(
-                settings.databaseId,
-                properties,
-                blocks,
-                settings.apiKey
-              ),
-              settings,
-              { itemName: meta.title }
-            );
-          }
-          return { page, meta };
-        },
-        // 自动设置通用数据库属性
-        setupDatabaseProperties: async (databaseId, apiKey) => {
-          const requiredProperties = {
-            "\u6807\u9898": { typeName: "title", schema: { title: {} } },
-            "\u94FE\u63A5": { typeName: "url", schema: { url: {} } },
-            "\u6765\u6E90": { typeName: "rich_text", schema: { rich_text: {} } },
-            "\u6765\u6E90\u7C7B\u578B": { typeName: "rich_text", schema: { rich_text: {} } },
-            "\u4F5C\u8005": { typeName: "rich_text", schema: { rich_text: {} } },
-            "\u53D1\u5E03\u65E5\u671F": { typeName: "date", schema: { date: {} } },
-            "\u6458\u8981": { typeName: "rich_text", schema: { rich_text: {} } },
-            "\u5206\u7C7B": { typeName: "rich_text", schema: { rich_text: {} } },
-            "\u6807\u7B7E": { typeName: "multi_select", schema: { multi_select: { options: [] } } }
-          };
-          try {
-            const database = await NotionAPI2.request("GET", `/databases/${databaseId}`, null, apiKey);
-            const existingProps = database.properties || {};
-            const propsToAdd = {};
-            const propsToUpdate = /* @__PURE__ */ Object.create(null);
-            const typeConflicts = [];
-            for (const [name, { typeName, schema }] of Object.entries(requiredProperties)) {
-              const existingProp = existingProps[name];
-              if (!existingProp) {
-                if (typeName === "title") {
-                  const existingTitle = Object.entries(existingProps).find(([_, prop]) => prop.type === "title");
-                  if (existingTitle && existingTitle[0] !== name) {
-                    propsToUpdate[existingTitle[0]] = { name };
-                  }
-                } else {
-                  propsToAdd[name] = schema;
-                }
-              } else if (existingProp.type !== typeName) {
-                typeConflicts.push(`\u300C${name}\u300D\u671F\u671B ${typeName}\uFF0C\u5B9E\u9645 ${existingProp.type}`);
-              }
-            }
-            if (typeConflicts.length > 0) {
-              return {
-                success: false,
-                message: `\u5C5E\u6027\u7C7B\u578B\u51B2\u7A81: ${typeConflicts.join("\uFF1B")}\uFF0C\u8BF7\u624B\u52A8\u4FEE\u6539\u6570\u636E\u5E93\u5C5E\u6027\u540E\u91CD\u8BD5`
-              };
-            }
-            const allChanges = { ...propsToAdd, ...propsToUpdate };
-            if (Object.keys(allChanges).length === 0) {
-              return { success: true, message: "\u5C5E\u6027\u5DF2\u6B63\u786E\u914D\u7F6E" };
-            }
-            await NotionAPI2.request("PATCH", `/databases/${databaseId}`, {
-              properties: allChanges
-            }, apiKey);
-            return { success: true, message: `\u5DF2\u6DFB\u52A0 ${Object.keys(propsToAdd).length} \u4E2A\u5C5E\u6027` };
-          } catch (error) {
-            return { success: false, error: error.message };
-          }
-        }
-      };
-      var { LinuxDoAPI: LinuxDoAPI2 } = require_extract();
-      var Exporter2 = {
-        // 筛选帖子
-        filterPosts: (posts, topic, settings) => {
-          const wantUsers = (settings.filterUsers || "").split(/[,;，；\s]+/).filter(Boolean).map((u) => u.toLowerCase());
-          const includeKws = (settings.filterInclude || "").split(/[,;，；\s]+/).filter(Boolean).map((k) => k.toLowerCase());
-          const excludeKws = (settings.filterExclude || "").split(/[,;，；\s]+/).filter(Boolean).map((k) => k.toLowerCase());
-          const minLen = settings.filterMinLen || 0;
-          return posts.filter((post) => {
-            const postNum = post.post_number;
-            if (postNum < settings.rangeStart || postNum > settings.rangeEnd) return false;
-            if (settings.onlyFirst && postNum !== 1) return false;
-            if (settings.onlyOp && post.username !== topic.opUsername) return false;
-            if (wantUsers.length && !wantUsers.includes((post.username || "").toLowerCase())) return false;
-            if (settings.imgFilter === "only_img" && !(post.cooked || "").includes("<img")) return false;
-            if (settings.imgFilter === "no_img" && (post.cooked || "").includes("<img")) return false;
-            if (includeKws.length || excludeKws.length || minLen > 0) {
-              const parser = new DOMParser();
-              const doc = parser.parseFromString(post.cooked || "", "text/html");
-              const plainText = (doc.body.textContent || "").trim();
-              if (minLen > 0 && plainText.length < minLen) return false;
-              if (includeKws.length && !includeKws.some((k) => plainText.toLowerCase().includes(k))) return false;
-              if (excludeKws.length && excludeKws.some((k) => plainText.toLowerCase().includes(k))) return false;
-            }
-            return true;
-          });
-        },
-        // 构建 Notion 页面属性
-        buildProperties: (topic, bookmark) => {
-          return {
-            "\u6807\u9898": {
-              title: [{ text: { content: topic.title || "\u65E0\u6807\u9898" } }]
-            },
-            "\u94FE\u63A5": {
-              url: topic.url
-            },
-            "\u5206\u7C7B": {
-              rich_text: [{ text: { content: topic.categoryName || topic.category || "" } }]
-            },
-            "\u6807\u7B7E": {
-              multi_select: (topic.tags || []).map((tag) => ({
-                name: typeof tag === "string" ? tag : tag.name || ""
-              })).filter((t) => t.name)
-            },
-            "\u4F5C\u8005": {
-              rich_text: [{ text: { content: topic.opUsername || "" } }]
-            },
-            "\u6536\u85CF\u65F6\u95F4": (bookmark == null ? void 0 : bookmark.created_at) ? {
-              date: { start: bookmark.created_at.split("T")[0] }
-            } : void 0,
-            "\u5E16\u5B50\u6570": {
-              number: topic.postsCount || 0
-            },
-            "\u6D4F\u89C8\u6570": {
-              number: topic.views || 0
-            },
-            "\u70B9\u8D5E\u6570": {
-              number: topic.likeCount || 0
-            }
-          };
-        },
-        // 构建帖子内容 blocks
-        buildContentBlocks: (posts, topic, settings) => {
-          const blocks = [];
-          const metaLines = [
-            { label: "\u539F\u59CB\u94FE\u63A5", value: topic.url, link: true },
-            { label: "\u4E3B\u9898 ID", value: String(topic.topicId || topic.topic_id || "") },
-            { label: "\u697C\u4E3B", value: `@${topic.opUsername || "\u672A\u77E5"}` },
-            { label: "\u5206\u7C7B", value: topic.categoryName || topic.category || "\u65E0" },
-            { label: "\u6807\u7B7E", value: (topic.tags || []).join(", ") || "\u65E0" },
-            { label: "\u5BFC\u51FA\u65F6\u95F4", value: (/* @__PURE__ */ new Date()).toLocaleString("zh-CN") },
-            { label: "\u697C\u5C42\u6570", value: String(posts.length) }
-          ];
-          const metaRichText = [];
-          metaLines.forEach((line, i) => {
-            if (i > 0) metaRichText.push({ type: "text", text: { content: "\n" } });
-            metaRichText.push({ type: "text", text: { content: `${line.label}: ` }, annotations: { bold: true } });
-            if (line.link && line.value) {
-              metaRichText.push({ type: "text", text: { content: line.value, link: { url: line.value } } });
-            } else {
-              metaRichText.push({ type: "text", text: { content: line.value || "\u65E0" } });
-            }
-          });
-          blocks.push({
-            type: "callout",
-            callout: {
-              icon: { type: "emoji", emoji: "\u{1F4CB}" },
-              rich_text: metaRichText
-            }
-          });
-          for (const post of posts) {
-            const isOp = post.username === topic.opUsername;
-            const dateStr = Utils2.formatDate(post.created_at);
-            const emoji = isOp ? "\u{1F3E0}" : "\u{1F4AC}";
-            let title = `#${post.post_number} ${post.name || post.username || "\u533F\u540D"}`;
-            if (isOp) title += " \u697C\u4E3B";
-            if (dateStr) title += ` \xB7 ${dateStr}`;
-            const contentBlocks = DOMToNotion2.cookedToBlocks(post.cooked, settings.imgMode);
-            const children = [];
-            if (post.reply_to_post_number) {
-              children.push({
-                type: "paragraph",
-                paragraph: {
-                  rich_text: [{ type: "text", text: { content: `\u21A9\uFE0F \u56DE\u590D #${post.reply_to_post_number}\u697C` } }]
-                }
-              });
-            }
-            children.push(...contentBlocks);
-            if (children.length === 0) {
-              children.push({
-                type: "paragraph",
-                paragraph: {
-                  rich_text: [{ type: "text", text: { content: "\uFF08\u5185\u5BB9\u4E3A\u7A7A\u6216\u65E0\u6CD5\u89E3\u6790\uFF09" } }]
-                }
-              });
-            }
-            const maxChildren = 100;
-            for (let i = 0; i < children.length; i += maxChildren) {
-              const chunk = children.slice(i, i + maxChildren);
-              const isFirst = i === 0;
-              const partNum = Math.floor(i / maxChildren) + 1;
-              const totalParts = Math.ceil(children.length / maxChildren);
-              blocks.push({
-                type: "callout",
-                callout: {
-                  icon: { type: "emoji", emoji: isFirst ? emoji : "\u{1F4CE}" },
-                  rich_text: [{
-                    type: "text",
-                    text: {
-                      content: isFirst ? title : `#${post.post_number}\u697C \u7EED\uFF08${partNum}/${totalParts}\uFF09`
-                    }
-                  }],
-                  children: chunk
-                }
-              });
-            }
-          }
-          return blocks;
-        },
-        // 处理文件上传（图片、视频、音频、附件）
-        // 支持 URL 去重 + 受控并发 + 递归子 block
-        processImageUploads: async (blocks, apiKey, onProgress, _fileUrlCache) => {
-          const fileUrlCache = _fileUrlCache || /* @__PURE__ */ new Map();
-          const pendingBlocks = [];
-          const collectPending = (items) => {
-            for (const block of items || []) {
-              if (block._needsUpload && block._originalUrl) {
-                pendingBlocks.push(block);
-              }
-              const containers = Exporter2._getChildContainers(block);
-              for (const c of containers) {
-                collectPending(c.children);
-              }
-            }
-          };
-          collectPending(blocks);
-          if (pendingBlocks.length === 0) return;
-          const uniqueUrls = [...new Set(pendingBlocks.map((b) => b._originalUrl))];
-          let uploaded = 0;
-          const CONCURRENCY = 3;
-          const uploadWithRetry = async (url) => {
-            try {
-              const result = await NotionAPI2.uploadFileToNotion(url, apiKey);
-              fileUrlCache.set(url, result);
-            } catch (e) {
-              if (Exporter2.isAuthTerminalError(e)) throw e;
-              console.warn("[LD-Notion] \u6587\u4EF6\u4E0A\u4F20\u5931\u8D25:", url, e.message);
-              fileUrlCache.set(url, null);
-            }
-            uploaded++;
-            if (onProgress) onProgress(uploaded, uniqueUrls.length);
-          };
-          for (let i = 0; i < uniqueUrls.length; i += CONCURRENCY) {
-            const batch = uniqueUrls.slice(i, i + CONCURRENCY);
-            let didNetworkWork = false;
-            await Promise.all(batch.map((url) => {
-              if (fileUrlCache.has(url)) {
-                uploaded++;
-                if (onProgress) onProgress(uploaded, uniqueUrls.length);
-                return Promise.resolve();
-              }
-              didNetworkWork = true;
-              return uploadWithRetry(url);
-            }));
-            if (didNetworkWork && i + CONCURRENCY < uniqueUrls.length) {
-              await Utils2.sleep(300);
-            }
-          }
-          const applyUploadedRefs = (items) => {
-            var _a;
-            for (const block of items || []) {
-              if (block._needsUpload && block._originalUrl) {
-                const uploadResult = fileUrlCache.get(block._originalUrl);
-                const originalCaption = block._fileType === "file" ? (_a = block.file) == null ? void 0 : _a.caption : null;
-                if (uploadResult == null ? void 0 : uploadResult.fileId) {
-                  const blockType = uploadResult.blockType || block._fileType || "image";
-                  const blockKey = blockType === "image" ? "image" : blockType === "video" ? "video" : blockType === "audio" ? "audio" : "file";
-                  block[blockKey] = { type: "file_upload", file_upload: { id: uploadResult.fileId } };
-                  ["image", "file", "video", "audio"].forEach((k) => {
-                    if (k !== blockKey) delete block[k];
-                  });
-                  if (blockKey === "file" && originalCaption) {
-                    block[blockKey].caption = originalCaption;
-                  }
-                  block.type = blockKey;
-                  block._uploaded = true;
-                } else {
-                  const fallbackKey = block._fileType || "image";
-                  const ext = (block._originalUrl.split(".").pop() || "").toLowerCase();
-                  const category = getFileCategory2(ext);
-                  const fallbackBlockKey = category === "video" ? "video" : category === "audio" ? "audio" : fallbackKey === "file" ? "file" : "image";
-                  block[fallbackBlockKey] = {
-                    type: "external",
-                    external: { url: block._originalUrl }
-                  };
-                  if (fallbackKey === "file" && originalCaption) {
-                    block[fallbackBlockKey].caption = originalCaption;
-                  }
-                  ["image", "file", "video", "audio"].forEach((k) => {
-                    if (k !== fallbackBlockKey) delete block[k];
-                  });
-                  block.type = fallbackBlockKey;
-                }
-                delete block._needsUpload;
-                delete block._originalUrl;
-                delete block._uploaded;
-                delete block._fileType;
-                delete block._fileName;
-              }
-              const containers = Exporter2._getChildContainers(block);
-              for (const c of containers) {
-                applyUploadedRefs(c.children);
-              }
-            }
-          };
-          applyUploadedRefs(blocks);
-        },
-        _getChildContainers: (block) => {
-          var _a, _b, _c, _d, _e, _f;
-          const containers = [];
-          if ((_a = block.callout) == null ? void 0 : _a.children) containers.push(block.callout);
-          if ((_b = block.quote) == null ? void 0 : _b.children) containers.push(block.quote);
-          if ((_c = block.synced_block) == null ? void 0 : _c.children) containers.push(block.synced_block);
-          if ((_d = block.column_list) == null ? void 0 : _d.children) containers.push(block.column_list);
-          if ((_e = block.column) == null ? void 0 : _e.children) containers.push(block.column);
-          if ((_f = block.toggle) == null ? void 0 : _f.children) containers.push(block.toggle);
-          return containers;
-        },
-        // 导出单个帖子
-        exportTopic: async (bookmark, settings, onProgress) => {
-          const topicId = LinuxDoAPI2.resolveTopicId(bookmark);
-          if (!topicId) {
-            throw new Error(`\u65E0\u6CD5\u89E3\u6790\u8BDD\u9898 ID(\u6536\u85CF\u9879\u7F3A\u5C11 topic_id/bookmarkable_url): ${(bookmark == null ? void 0 : bookmark.title) || (bookmark == null ? void 0 : bookmark.name) || (bookmark == null ? void 0 : bookmark.fancy_title) || "\u672A\u77E5\u6807\u9898"}`);
-          }
-          onProgress == null ? void 0 : onProgress({ stage: "fetch", message: "\u83B7\u53D6\u5E16\u5B50\u6570\u636E..." });
-          const { topic, posts } = await LinuxDoAPI2.fetchAllPosts(topicId, (current, total) => {
-            onProgress == null ? void 0 : onProgress({ stage: "fetch", message: `\u83B7\u53D6\u697C\u5C42 ${current}/${total}` });
-          });
-          const filteredPosts = Exporter2.filterPosts(posts, topic, settings);
-          onProgress == null ? void 0 : onProgress({ stage: "convert", message: "\u8F6C\u6362\u5185\u5BB9\u683C\u5F0F..." });
-          const blocks = Exporter2.buildContentBlocks(filteredPosts, topic, settings);
-          if (settings.imgMode === "upload") {
-            onProgress == null ? void 0 : onProgress({ stage: "upload", message: "\u4E0A\u4F20\u56FE\u7247..." });
-            await Exporter2.processImageUploads(blocks, settings.apiKey, (current, total) => {
-              onProgress == null ? void 0 : onProgress({ stage: "upload", message: `\u4E0A\u4F20\u56FE\u7247 ${current}/${total}` });
-            });
-          }
-          onProgress == null ? void 0 : onProgress({ stage: "create", message: "\u521B\u5EFA Notion \u9875\u9762..." });
-          let page;
-          if (settings.exportTargetType === CONFIG2.EXPORT_TARGET_TYPES.PAGE) {
-            page = await AIAssistant2._executeGuardedPageWrite(
-              "createDatabasePage",
-              { id: settings.parentPageId, name: topic.title },
-              () => NotionAPI2.createChildPage(
-                settings.parentPageId,
-                topic.title,
-                blocks,
-                settings.apiKey
-              ),
-              settings,
-              { itemName: topic.title, pageId: settings.parentPageId }
-            );
-          } else {
-            const properties = Exporter2.buildProperties(topic, bookmark);
-            page = await AIAssistant2._executeGuardedDatabaseWrite(
-              "createDatabasePage",
-              settings.databaseId,
-              () => NotionAPI2.createDatabasePage(
-                settings.databaseId,
-                properties,
-                blocks,
-                settings.apiKey
-              ),
-              settings,
-              { itemName: topic.title }
-            );
-          }
-          Storage2.markTopicExported(topicId);
-          return page;
-        },
-        // 批量导出 (支持暂停/继续)
-        isPaused: false,
-        isCancelled: false,
-        currentIndex: 0,
-        pause: () => {
-          Exporter2.isPaused = true;
-        },
-        resume: () => {
-          Exporter2.isPaused = false;
-        },
-        cancel: () => {
-          Exporter2.isCancelled = true;
-          Exporter2.isPaused = false;
-        },
-        reset: () => {
-          Exporter2.isPaused = false;
-          Exporter2.isCancelled = false;
-          Exporter2.currentIndex = 0;
-        },
-        // 批量导出:认证终态错误(不可续签的 401)标记检测——系统性失败应中止批次而非逐项重试
-        // v3.14.7 (AUD-ARCH-11 回归修复): 仅信 error.isAuthTerminal 标记, 不再用消息子串匹配——
-        // api 层对瞬态续签失败(网络/超时/429/5xx)不带标记只设 60s 冷却, 消息前缀与终态相同,
-        // 子串匹配会把一次网络抖动误判为认证终态而中止整批(用户报「几分钟后全部失败」主因)。
-        isAuthTerminalError: (error) => !!(error && error.isAuthTerminal === true),
-        // 认证中止时的剩余项收集:与取消路径同构,但保留原因说明供 UI 报告展示
-        // 经 resolveTopicId 统一话题 ID 口径(Post 收藏 bookmarkable_id 为 postId 不可直用)。
-        _collectSkippedFrom: (bookmarks, remaining) => remaining.map((i) => {
-          const b = bookmarks[i];
-          const topicId = LinuxDoAPI2.resolveTopicId(b);
-          return {
-            topicId,
-            title: b.title || b.fancy_title || b.name || `\u5E16\u5B50 ${topicId}`
-          };
-        }),
-        // 报告/跳过项统一话题 ID 口径 + 新版 serializer 标题回退(fancy_title)。
-        _bookmarkReportOf: (b) => {
-          const topicId = LinuxDoAPI2.resolveTopicId(b);
-          return {
-            topicId,
-            title: b.title || b.fancy_title || b.name || `\u5E16\u5B50 ${topicId}`
-          };
-        },
-        exportBookmarks: async (bookmarks, settings, onProgress, startIndex = 0) => {
-          if (SyncLock.isExporting) {
-            return {
-              success: [],
-              failed: [],
-              skipped: bookmarks.slice(startIndex).map((b) => Exporter2._bookmarkReportOf(b)),
-              message: "\u5DF2\u6709\u5BFC\u51FA\u8FDB\u884C\u4E2D\uFF0C\u5DF2\u8DF3\u8FC7\u672C\u6B21\u8BF7\u6C42"
-            };
-          }
-          SyncLock.isExporting = true;
-          Exporter2.reset();
-          const lease = await SyncLock.acquireLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE);
-          if (!lease) {
-            SyncLock.isExporting = false;
-            return {
-              success: [],
-              failed: [],
-              skipped: bookmarks.slice(startIndex).map((b) => Exporter2._bookmarkReportOf(b)),
-              message: "\u5176\u4ED6\u6807\u7B7E\u9875\u6B63\u5728\u5BFC\u51FA/\u540C\u6B65\uFF0C\u5DF2\u8DF3\u8FC7\u672C\u6B21\u8BF7\u6C42"
-            };
-          }
-          const results = { success: [], failed: [], skipped: [] };
-          let leaseLost = false;
-          const renewTimer = setInterval(() => {
-            let renewed;
-            try {
-              renewed = SyncLock.renewLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
-            } catch (renewError) {
-              console.warn("[LD-Notion] \u5BFC\u51FA\u7EED\u7EA6\u5931\u8D25:", renewError);
-              renewed = false;
-            }
-            if (!renewed) {
-              leaseLost = true;
-              clearInterval(renewTimer);
-            }
-          }, 3e4);
-          Exporter2.currentIndex = startIndex;
-          const concurrency = settings.concurrency || 1;
-          const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-          const remaining = [];
-          for (let i = startIndex; i < bookmarks.length; i++) remaining.push(i);
-          let completedCount = 0;
-          const worker = async () => {
-            const abortIfLeaseLost = () => {
-              if (!leaseLost) return false;
-              Exporter2.cancel();
-              results.leaseLost = true;
-              return true;
-            };
-            while (true) {
-              while (Exporter2.isPaused) {
-                await Utils2.sleep(200);
-                if (Exporter2.isCancelled) return;
-                if (abortIfLeaseLost()) return;
-              }
-              if (Exporter2.isCancelled) return;
-              if (abortIfLeaseLost()) return;
-              const i = remaining.shift();
-              if (i === void 0) return;
-              const bookmark = bookmarks[i];
-              const topicId = LinuxDoAPI2.resolveTopicId(bookmark);
-              const title = bookmark.title || bookmark.fancy_title || bookmark.name || `\u5E16\u5B50 ${topicId}`;
-              const taskNum = i - startIndex + 1;
-              try {
-                onProgress == null ? void 0 : onProgress({
-                  current: taskNum,
-                  total: bookmarks.length,
-                  title,
-                  stage: "start",
-                  isPaused: Exporter2.isPaused
-                });
-              } catch (progressError) {
-                console.warn("[LD-Notion] onProgress \u56DE\u8C03\u5F02\u5E38:", progressError);
-              }
-              try {
-                if (!settings.liveApiKey) {
-                  settings.apiKey = NotionOAuth2.getAccessToken("");
-                }
-                await Exporter2.exportTopic(bookmark, settings, (detail) => {
-                  try {
-                    onProgress == null ? void 0 : onProgress({
-                      current: taskNum,
-                      total: bookmarks.length,
-                      title,
-                      isPaused: Exporter2.isPaused,
-                      ...detail
-                    });
-                  } catch (progressError) {
-                    console.warn("[LD-Notion] onProgress \u56DE\u8C03\u5F02\u5E38:", progressError);
-                  }
-                });
-                results.success.push({ topicId, title, url: `https://linux.do/t/${topicId}` });
-              } catch (error) {
-                console.error(`[LD-Notion] \u5BFC\u51FA\u5931\u8D25: ${title}`, error);
-                results.failed.push({ topicId, title, error: error.message, ux: error.ux || void 0 });
-                if (Exporter2.isAuthTerminalError(error)) {
-                  Exporter2.cancel();
-                  results.authAborted = {
-                    reason: error.message,
-                    at: completedCount + startIndex,
-                    // v3.14.12 (三模型共识): 透传 authCode 供 UI 分支文案
-                    authCode: error.authCode || "unauthorized"
-                  };
-                  return;
-                }
-              }
-              completedCount++;
-              Exporter2.currentIndex = completedCount + startIndex;
-              if (delay > 0 && remaining.length > 0 && !Exporter2.isCancelled) {
-                await Utils2.sleep(delay);
-              }
-            }
-          };
-          const workerCount = Math.min(concurrency, bookmarks.length - startIndex);
-          const workers = [];
-          try {
-            for (let w = 0; w < workerCount; w++) {
-              workers.push(worker());
-              if (w < workerCount - 1) await Utils2.sleep(100);
-            }
-            await Promise.all(workers);
-          } finally {
-            clearInterval(renewTimer);
-            SyncLock.releaseLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
-            SyncLock.isExporting = false;
-          }
-          if (Exporter2.isCancelled && remaining.length > 0) {
-            results.skipped.push(...Exporter2._collectSkippedFrom(bookmarks, remaining));
-          }
-          return results;
-        }
-      };
-      var { PageFileExporter } = require_page_file();
-      module.exports = { GenericExporter: GenericExporter2, LinuxDoAPI: LinuxDoAPI2, Exporter: Exporter2, PageFileExporter };
-    }
-  });
-
-  // src/import/UpdateChecker.js
-  var require_UpdateChecker = __commonJS({
-    "src/import/UpdateChecker.js"(exports, module) {
-      "use strict";
-      var { CONFIG: CONFIG2 } = require_config();
-      var { Utils: Utils2 } = require_utils();
-      var { Storage: Storage2 } = require_storage();
-      var { emit } = require_event_bus();
-      var UpdateChecker2 = {
-        timerId: null,
-        isChecking: false,
-        _epoch: 0,
-        shouldCheckNow: (intervalHours) => {
-          const intervalMs = (parseInt(intervalHours, 10) || 0) * 60 * 60 * 1e3;
-          if (intervalMs <= 0) return true;
-          const lastCheckAt = parseInt(Storage2.get(CONFIG2.STORAGE_KEYS.UPDATE_LAST_CHECK_AT, 0), 10) || 0;
-          return !lastCheckAt || Date.now() - lastCheckAt >= intervalMs;
-        },
-        getCurrentVersion: () => {
-          var _a;
-          if (typeof GM_info !== "undefined" && ((_a = GM_info == null ? void 0 : GM_info.script) == null ? void 0 : _a.version)) {
-            return GM_info.script.version;
-          }
-          return CONFIG2.SCRIPT_VERSION || "3.14.10";
-        },
-        compareVersions: (a, b) => {
-          const parse = (v) => String(v || "0").replace(/^v/i, "").split(".").map((n) => parseInt(n, 10) || 0);
-          const va = parse(a);
-          const vb = parse(b);
-          const len = Math.max(va.length, vb.length);
-          for (let i = 0; i < len; i++) {
-            const na = va[i] || 0;
-            const nb = vb[i] || 0;
-            if (na > nb) return 1;
-            if (na < nb) return -1;
-          }
-          return 0;
-        },
-        fetchLatestVersion: () => {
-          return new Promise((resolve, reject) => {
-            GM_xmlhttpRequest({
-              method: "GET",
-              url: "https://api.github.com/repos/Smith-106/LD-Notion/releases/latest",
-              headers: {
-                "Accept": "application/vnd.github+json",
-                "User-Agent": "LD-Notion-UserScript"
-              },
-              timeout: 15e3,
-              onload: (response) => {
-                const status = response == null ? void 0 : response.status;
-                if (status !== 200) {
-                  reject(new Error(`\u66F4\u65B0\u68C0\u67E5\u5931\u8D25: HTTP ${status ?? "\u65E0\u54CD\u5E94"}`));
-                  return;
-                }
-                try {
-                  const data = JSON.parse((response == null ? void 0 : response.responseText) || "{}");
-                  const version = String(data.tag_name || data.name || "").replace(/^v/i, "").trim();
-                  if (!version) {
-                    reject(new Error("\u672A\u83B7\u53D6\u5230\u7248\u672C\u53F7"));
-                    return;
-                  }
-                  resolve(version);
-                } catch {
-                  reject(new Error("\u89E3\u6790\u66F4\u65B0\u4FE1\u606F\u5931\u8D25"));
-                }
-              },
-              ontimeout: () => reject(new Error("\u66F4\u65B0\u68C0\u67E5\u8D85\u65F6")),
-              onerror: () => reject(new Error("\u7F51\u7EDC\u9519\u8BEF\uFF0C\u65E0\u6CD5\u68C0\u67E5\u66F4\u65B0")),
-              // 2/3 共识(dsf+qwen): 缺少 onabort 时请求被中止 → Promise 永不 settle,
-              // isChecking 永久为 true 阻塞后续检查。
-              onabort: () => reject(new Error("\u66F4\u65B0\u68C0\u67E5\u5DF2\u4E2D\u6B62"))
-            });
-          });
-        },
-        saveResult: (result) => {
-          const checkedAt = Date.now();
-          Storage2.set(CONFIG2.STORAGE_KEYS.UPDATE_LAST_CHECK_AT, checkedAt);
-          Storage2.set(CONFIG2.STORAGE_KEYS.UPDATE_LAST_RESULT, JSON.stringify({ ...result, checkedAt }));
-          if (result.latestVersion) {
-            Storage2.set(CONFIG2.STORAGE_KEYS.UPDATE_LAST_SEEN_VERSION, result.latestVersion);
-          }
-        },
-        updateStatusText: (text) => {
-          const el = document.querySelector("#ldb-update-check-status");
-          if (el) el.textContent = text;
-        },
-        renderLastStatus: () => {
-          const raw = Storage2.get(CONFIG2.STORAGE_KEYS.UPDATE_LAST_RESULT, "");
-          if (!raw) {
-            UpdateChecker2.updateStatusText("\u5C1A\u672A\u68C0\u67E5\u66F4\u65B0");
-            return;
-          }
-          try {
-            const result = JSON.parse(raw);
-            const checkedAtText = result.checkedAt ? new Date(result.checkedAt).toLocaleString("zh-CN") : "\u672A\u77E5\u65F6\u95F4";
-            const latestText = result.latestVersion ? `\uFF0C\u6700\u65B0 v${result.latestVersion}` : "";
-            if (result.status === "update-available") {
-              UpdateChecker2.updateStatusText(`\u53D1\u73B0\u65B0\u7248\u672C\uFF08\u4E0A\u6B21\u68C0\u67E5\uFF1A${checkedAtText}${latestText}\uFF09`);
-            } else if (result.status === "up-to-date") {
-              UpdateChecker2.updateStatusText(`\u5DF2\u662F\u6700\u65B0\uFF08\u4E0A\u6B21\u68C0\u67E5\uFF1A${checkedAtText}${latestText}\uFF09`);
-            } else if (result.status === "error") {
-              UpdateChecker2.updateStatusText(`\u4E0A\u6B21\u68C0\u67E5\u5931\u8D25\uFF1A${result.message || "\u672A\u77E5\u9519\u8BEF"}`);
-            } else {
-              UpdateChecker2.updateStatusText(`\u4E0A\u6B21\u68C0\u67E5\uFF1A${checkedAtText}`);
-            }
-          } catch {
-            UpdateChecker2.updateStatusText("\u66F4\u65B0\u72B6\u6001\u8BFB\u53D6\u5931\u8D25");
-          }
-        },
-        check: async ({ manual = false } = {}) => {
-          if (UpdateChecker2.isChecking) return;
-          UpdateChecker2.isChecking = true;
-          if (manual) {
-            emit("notify", { message: "\u6B63\u5728\u68C0\u67E5\u66F4\u65B0...", type: "info" });
-          }
-          try {
-            const currentVersion = UpdateChecker2.getCurrentVersion();
-            const latestVersion = await UpdateChecker2.fetchLatestVersion();
-            const cmp = UpdateChecker2.compareVersions(latestVersion, currentVersion);
-            if (cmp > 0) {
-              const message = `\u53D1\u73B0\u65B0\u7248\u672C v${latestVersion}\uFF08\u5F53\u524D v${currentVersion}\uFF09\u3002\u811A\u672C\u53EF\u76F4\u63A5\u66F4\u65B0\uFF1BZIP/\u89E3\u538B\u6269\u5C55\u9700\u624B\u52A8\u91CD\u65B0\u5B89\u88C5\u6216\u5728\u6269\u5C55\u9875\u91CD\u65B0\u52A0\u8F7D\u3002`;
-              UpdateChecker2.saveResult({
-                status: "update-available",
-                latestVersion,
-                currentVersion,
-                message
-              });
-              UpdateChecker2.renderLastStatus();
-              if (manual) emit("notify", { message, type: "info" });
-            } else {
-              const message = `\u5F53\u524D\u5DF2\u662F\u6700\u65B0\u7248\u672C v${currentVersion}`;
-              UpdateChecker2.saveResult({
-                status: "up-to-date",
-                latestVersion,
-                currentVersion,
-                message
-              });
-              UpdateChecker2.renderLastStatus();
-              if (manual) emit("notify", { message, type: "success" });
-            }
-          } catch (error) {
-            const message = (error == null ? void 0 : error.message) || "\u66F4\u65B0\u68C0\u67E5\u5931\u8D25";
-            UpdateChecker2.saveResult({ status: "error", message });
-            UpdateChecker2.renderLastStatus();
-            if (manual) emit("notify", { message, type: "error" });
-          } finally {
-            UpdateChecker2.isChecking = false;
-          }
-        },
-        startPolling: (hours) => {
-          UpdateChecker2.stopPolling();
-          const intervalHours = parseInt(hours, 10) || 0;
-          if (intervalHours > 0) {
-            const intervalMs = Math.min(intervalHours * 60 * 60 * 1e3, 2147483647);
-            UpdateChecker2.timerId = setInterval(() => {
-              const epoch = UpdateChecker2._epoch;
-              Utils2.runWhenBrowserIdle(() => {
-                if (epoch !== UpdateChecker2._epoch) return;
-                UpdateChecker2.check({ manual: false });
-              });
-            }, intervalMs);
-          }
-        },
-        stopPolling: () => {
-          UpdateChecker2._epoch += 1;
-          if (UpdateChecker2.timerId) {
-            clearInterval(UpdateChecker2.timerId);
-            UpdateChecker2.timerId = null;
-          }
-        },
-        init: () => {
-          const enabled = Storage2.get(CONFIG2.STORAGE_KEYS.UPDATE_AUTO_CHECK_ENABLED, CONFIG2.DEFAULTS.updateAutoCheckEnabled);
-          const intervalHours = Storage2.get(CONFIG2.STORAGE_KEYS.UPDATE_CHECK_INTERVAL_HOURS, CONFIG2.DEFAULTS.updateCheckIntervalHours);
-          UpdateChecker2.stopPolling();
-          UpdateChecker2.renderLastStatus();
-          if (enabled) {
-            UpdateChecker2.startPolling(intervalHours);
-            if (UpdateChecker2.shouldCheckNow(intervalHours)) {
-              const epoch = UpdateChecker2._epoch;
-              Utils2.runWhenBrowserIdle(() => {
-                if (epoch !== UpdateChecker2._epoch) return;
-                UpdateChecker2.check({ manual: false });
-              });
-            }
-          }
-        }
-      };
-      module.exports = { UpdateChecker: UpdateChecker2 };
-    }
-  });
-
-  // src/import/GitHubAPI.js
-  var require_GitHubAPI = __commonJS({
-    "src/import/GitHubAPI.js"(exports, module) {
-      "use strict";
-      var { CONFIG: CONFIG2 } = require_config();
-      var { Utils: Utils2 } = require_utils();
-      var { Storage: Storage2 } = require_storage();
-      var GitHubAPI2 = {
-        _readmeCache: {},
-        // FIFO 上限（PERF-005）：_readmeCache 原为无界普通对象，长会话累积内存泄漏。
-        // 超 MAX_README_CACHE 时删最旧 key（Object.keys 保插入顺序），仿 AgentTrace.MAX_TRACES=50 的 FIFO rotate 模式。
-        MAX_README_CACHE: 50,
-        // 已导出集合缓存（H6：消除循环内逐条 JSON.parse 的 O(N²)，与 BookmarkExporter._exportedCache 同模式）。
-        _exportedCache: null,
-        _exportedGistsCache: null,
-        _fetchPaginated: (url, token = "", label = "GitHub", options = {}) => {
-          return new Promise((resolve, reject) => {
-            const allItems = [];
-            const resolvePartial = () => {
-              try {
-                allItems.partial = true;
-              } catch (_) {
-              }
-              resolve(allItems);
-            };
-            let page = 1;
-            const perPage = 100;
-            const fetchPage = () => {
-              const separator = url.includes("?") ? "&" : "?";
-              const pagedUrl = `${url}${separator}per_page=${perPage}&page=${page}`;
-              const headers = {
-                "Accept": "application/vnd.github.v3+json",
-                "User-Agent": "LD-Notion-UserScript"
-              };
-              if (token) headers["Authorization"] = `Bearer ${token}`;
-              if (options.headers && typeof options.headers === "object") {
-                Object.assign(headers, options.headers);
-              }
-              GM_xmlhttpRequest({
-                method: "GET",
-                url: pagedUrl,
-                headers,
-                onload: (response) => {
-                  if (response.status === 200) {
-                    try {
-                      const items = JSON.parse(response.responseText);
-                      if (items.length === 0) return resolve(allItems);
-                      allItems.push(...items);
-                      if (items.length < perPage) return resolve(allItems);
-                      page++;
-                      setTimeout(fetchPage, 300);
-                    } catch (e) {
-                      reject(new Error(`\u89E3\u6790 ${label} \u54CD\u5E94\u5931\u8D25`));
-                    }
-                  } else if (response.status === 403) {
-                    reject(new Error(`${label} API \u901F\u7387\u9650\u5236\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5\u6216\u914D\u7F6E Token`));
-                  } else if (response.status === 401) {
-                    reject(new Error("GitHub Token \u65E0\u6548\u6216\u5DF2\u8FC7\u671F(401)\uFF1A\u8BF7\u5728 GitHub \u8BBE\u7F6E\u533A\u66F4\u65B0 Token\uFF0C\u6216\u6E05\u7A7A Token \u6539\u7528\u672A\u8BA4\u8BC1\u63A5\u53E3"));
-                  } else if (response.status === 404) {
-                    reject(new Error(`${label} \u8D44\u6E90\u4E0D\u5B58\u5728`));
-                  } else {
-                    reject(new Error(`${label} API \u9519\u8BEF: ${response.status}`));
-                  }
-                },
-                onerror: () => {
-                  if (allItems.length > 0) {
-                    console.warn(`[LD-Notion] ${label} \u5206\u9875\u62C9\u53D6\u7F51\u7EDC\u9519\u8BEF\uFF0C\u4FDD\u7559\u5DF2\u62C9 ${allItems.length} \u9879\uFF08partial\uFF09`);
-                    resolvePartial();
-                  } else {
-                    reject(new Error(`\u7F51\u7EDC\u9519\u8BEF\uFF0C\u65E0\u6CD5\u8FDE\u63A5 ${label}`));
-                  }
-                },
-                timeout: 3e4,
-                ontimeout: () => {
-                  if (allItems.length > 0) {
-                    console.warn(`[LD-Notion] ${label} \u5206\u9875\u62C9\u53D6\u8D85\u65F6\uFF0C\u4FDD\u7559\u5DF2\u62C9 ${allItems.length} \u9879\uFF08partial\uFF09`);
-                    resolvePartial();
-                  } else {
-                    reject(new Error("GitHub API \u8BF7\u6C42\u8D85\u65F6"));
-                  }
-                }
-              });
-            };
-            fetchPage();
-          });
-        },
-        // odyssey-debug 20260913: 404 用户域资源根因=未认证路径 /users/{name}/... 的用户名
-        // 不存在或已改名 —— 给出可行动指引(与 Notion 404 同型); token 路径(/user/...)的
-        // 404 与用户名无关, 不 enrich 防误导。
-        _wrapUserScoped404: (error, username) => {
-          if (!error || !username || !/资源不存在/.test(String((error == null ? void 0 : error.message) || ""))) return error;
-          if (String(username).includes("@")) {
-            return new Error(`${error.message} \u2014\u2014 GitHub \u7528\u6237\u540D\u4E0D\u5E94\u586B\u90AE\u7BB1\u300C${username}\u300D\uFF1A\u8BF7\u6539\u586B github.com/ \u540E\u9762\u90A3\u4E32\uFF08\u5982 octocat\uFF09\uFF1B\u6216\u586B\u5199 Token \u6539\u7528\u8BA4\u8BC1\u63A5\u53E3\uFF08\u65E0\u9700\u7528\u6237\u540D\uFF09`);
-          }
-          return new Error(`${error.message} \u2014\u2014 GitHub \u7528\u6237\u540D\u300C${username}\u300D\u53EF\u80FD\u4E0D\u5B58\u5728\u6216\u5DF2\u6539\u540D\uFF1A\u8BF7\u5728 GitHub \u8BBE\u7F6E\u533A\u4FEE\u6B63\u7528\u6237\u540D\uFF0C\u6216\u586B\u5199 Token \u6539\u7528\u8BA4\u8BC1\u63A5\u53E3`);
-        },
-        // 获取用户 starred repos（带分页）
-        fetchStarredRepos: async (username, token = "") => {
-          const url = token ? `https://api.github.com/user/starred?sort=created&direction=desc` : `https://api.github.com/users/${encodeURIComponent(username)}/starred?sort=created&direction=desc`;
-          let items;
-          try {
-            items = await GitHubAPI2._fetchPaginated(url, token, "GitHub Stars", {
-              headers: {
-                "Accept": "application/vnd.github.star+json, application/vnd.github+json"
-              }
-            });
-          } catch (error) {
-            throw GitHubAPI2._wrapUserScoped404(error, token ? null : username);
-          }
-          const mapped = items.map((item) => {
-            if ((item == null ? void 0 : item.repo) && (item == null ? void 0 : item.starred_at)) {
-              return {
-                ...item.repo,
-                starred_at: item.starred_at
-              };
-            }
-            return item;
-          });
-          if (items.partial === true) mapped.partial = true;
-          return mapped;
-        },
-        // 获取用户自己的仓库
-        fetchUserRepos: (username, token = "") => {
-          const url = token ? `https://api.github.com/user/repos?type=owner&sort=updated` : `https://api.github.com/users/${encodeURIComponent(username)}/repos?sort=updated`;
-          return GitHubAPI2._fetchPaginated(url, token, "GitHub Repos").catch((error) => {
-            throw GitHubAPI2._wrapUserScoped404(error, token ? null : username);
-          });
-        },
-        // 获取用户 fork 的仓库
-        fetchForkedRepos: async (username, token = "") => {
-          const allRepos = await GitHubAPI2.fetchUserRepos(username, token);
-          const forks = allRepos.filter((r) => r.fork);
-          if (allRepos.partial === true) forks.partial = true;
-          return forks;
-        },
-        // 获取用户的 Gists
-        fetchUserGists: (username, token = "") => {
-          const url = token ? `https://api.github.com/gists` : `https://api.github.com/users/${encodeURIComponent(username)}/gists`;
-          return GitHubAPI2._fetchPaginated(url, token, "GitHub Gists").catch((error) => {
-            throw GitHubAPI2._wrapUserScoped404(error, token ? null : username);
-          });
-        },
-        // F3 共识(缓存失效): 跨 tab 清除/其他 tab 标记必须置空内存缓存
-        _registerExportedWatcher: () => {
-          if (GitHubAPI2._exportedWatcherBound) return;
-          GitHubAPI2._exportedWatcherBound = true;
-          if (typeof GM_addValueChangeListener !== "function") return;
-          try {
-            GM_addValueChangeListener(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, () => {
-              GitHubAPI2._exportedCache = null;
-            });
-            GM_addValueChangeListener(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, () => {
-              GitHubAPI2._exportedGistsCache = null;
-            });
-          } catch (e) {
-          }
-        },
-        // 获取已导出的 repo 集合
-        getExported: () => {
-          if (GitHubAPI2._exportedCache) return GitHubAPI2._exportedCache;
-          GitHubAPI2._registerExportedWatcher();
-          try {
-            const parsed = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, "{}"));
-            GitHubAPI2._exportedCache = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
-          } catch {
-            GitHubAPI2._exportedCache = {};
-          }
-          return GitHubAPI2._exportedCache;
-        },
-        // 获取已导出的 gist 集合
-        getExportedGists: () => {
-          if (GitHubAPI2._exportedGistsCache) return GitHubAPI2._exportedGistsCache;
-          GitHubAPI2._registerExportedWatcher();
-          try {
-            const parsed = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, "{}"));
-            GitHubAPI2._exportedGistsCache = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
-          } catch {
-            GitHubAPI2._exportedGistsCache = {};
-          }
-          return GitHubAPI2._exportedGistsCache;
-        },
-        // 仅 mutate 内存缓存，不写存储（DISCOVER P3）：循环内逐条调用避免写侧 O(N²)。
-        // 单次调用场景须紧跟 flushExported() 持久化，或用 markExportedAndFlush。
-        markExported: (repoFullName) => {
-          const exported = GitHubAPI2.getExported();
-          exported[repoFullName] = Date.now();
-        },
-        markExportedAndFlush: (repoFullName) => {
-          GitHubAPI2.markExported(repoFullName);
-          GitHubAPI2.flushExported();
-        },
-        // 批量导出循环末尾单次回写已导出映射（DISCOVER P3 同类修复）：循环内仅 mutate 内存缓存，
-        // 避免逐条 JSON.stringify 整个不断增长映射的写侧 O(N²)。与 BookmarkExporter.flushExported 同构。
-        // v3.14.3: 导出账本改容量上限淘汰（repo full_name 天然有界），不再按 90 天时间 TTL 误删导出事实。
-        // v3.14.6 (CC-05): 写前 rebase(重读-并集-max ts) —— 跨 tab 他端新增键不可丢
-        // P4 收敛(c08): removedKeys —— 写前 rebase 会把存储旧值并集回写, 刚删除的键被复活
-        // (unmarkExported 返回 true 但账本仍含该项, 重新导出入口静默失效)
-        flushExported: (removedKeys = null) => {
-          if (GitHubAPI2._exportedCache) {
-            GitHubAPI2._evictByCapacity(GitHubAPI2._exportedCache);
-            let remote = {};
-            try {
-              remote = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, "{}")) || {};
-            } catch {
-              remote = {};
-            }
-            const merged = { ...remote };
-            if (removedKeys) for (const key of removedKeys) delete merged[key];
-            for (const [key, ts] of Object.entries(GitHubAPI2._exportedCache)) {
-              if (merged[key] === void 0 || Number(merged[key]) < Number(ts)) merged[key] = ts;
-            }
-            GitHubAPI2._evictByCapacity(merged);
-            GitHubAPI2._exportedCache = merged;
-            Storage2.set(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, JSON.stringify(merged));
-          }
-        },
-        // F-05 修复：清除已导出记录（清键 + 失效内存缓存，供数据管理 UI 调用）
-        clearExportedRecords: () => {
-          GitHubAPI2._exportedCache = null;
-          GitHubAPI2._exportedGistsCache = null;
-          Storage2.remove(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_REPOS);
-          Storage2.remove(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_GISTS);
-        },
-        markGistExported: (gistId) => {
-          const exported = GitHubAPI2.getExportedGists();
-          exported[gistId] = Date.now();
-        },
-        markGistExportedAndFlush: (gistId) => {
-          GitHubAPI2.markGistExported(gistId);
-          GitHubAPI2.flushGistsExported();
-        },
-        flushGistsExported: (removedKeys = null) => {
-          if (GitHubAPI2._exportedGistsCache) {
-            GitHubAPI2._evictByCapacity(GitHubAPI2._exportedGistsCache);
-            let remote = {};
-            try {
-              remote = JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, "{}")) || {};
-            } catch {
-              remote = {};
-            }
-            const merged = { ...remote };
-            if (removedKeys) for (const key of removedKeys) delete merged[key];
-            for (const [key, ts] of Object.entries(GitHubAPI2._exportedGistsCache)) {
-              if (merged[key] === void 0 || Number(merged[key]) < Number(ts)) merged[key] = ts;
-            }
-            GitHubAPI2._evictByCapacity(merged);
-            GitHubAPI2._exportedGistsCache = merged;
-            Storage2.set(CONFIG2.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, JSON.stringify(merged));
-          }
-        },
-        // v3.14.3: 导出账本容量上限（repo full_name / gist id 天然有界）——
-        // 仅在超过上限时淘汰最旧条目，避免 90 天时间窗误删导出事实致 UI 误判“待导出”。
-        _EXPORT_CAPACITY_LIMIT: 1e4,
-        _evictByCapacity: (set) => {
-          const keys = Object.keys(set);
-          const excess = keys.length - GitHubAPI2._EXPORT_CAPACITY_LIMIT;
-          if (excess <= 0) return;
-          keys.sort((a, b) => Number(set[a] || 0) - Number(set[b] || 0));
-          for (let i = 0; i < excess && i < keys.length; i++) {
-            delete set[keys[i]];
-          }
-        },
-        isExported: (repoFullName) => {
-          return !!GitHubAPI2.getExported()[repoFullName];
-        },
-        isGistExported: (gistId) => {
-          return !!GitHubAPI2.getExportedGists()[gistId];
-        },
-        // v3.14.4: 键级撤销已导出记录(与 Storage.unmarkTopicExported 对称), 供“重新导出”入口
-        // 修复对账误标后 GitHub 项无恢复路径的问题(此前只能清空全部账本)。
-        // 返回是否真正移除; 单次调用内 flush(与 markExportedAndFlush 对称)。
-        unmarkExported: (repoFullName) => {
-          const exported = GitHubAPI2.getExported();
-          if (!Object.prototype.hasOwnProperty.call(exported, repoFullName)) return false;
-          delete exported[repoFullName];
-          GitHubAPI2.flushExported([repoFullName]);
-          return true;
-        },
-        unmarkGistExported: (gistId) => {
-          const exported = GitHubAPI2.getExportedGists();
-          if (!Object.prototype.hasOwnProperty.call(exported, gistId)) return false;
-          delete exported[gistId];
-          GitHubAPI2.flushGistsExported([gistId]);
-          return true;
-        },
-        // 获取启用的导入类型
-        getImportTypes: () => {
-          try {
-            return JSON.parse(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_IMPORT_TYPES, CONFIG2.DEFAULTS.githubImportTypes));
-          } catch {
-            return ["stars"];
-          }
-        },
-        setImportTypes: (types) => {
-          Storage2.set(CONFIG2.STORAGE_KEYS.GITHUB_IMPORT_TYPES, JSON.stringify(types));
-        },
-        // 写入 readme 缓存并执行 FIFO 淘汰（PERF-005）：统一所有写入点，超 MAX_README_CACHE 删最旧 key。
-        _cacheReadme: (cacheKey, text) => {
-          const keys = Object.keys(GitHubAPI2._readmeCache);
-          if (!Object.prototype.hasOwnProperty.call(GitHubAPI2._readmeCache, cacheKey) && keys.length >= GitHubAPI2.MAX_README_CACHE) {
-            delete GitHubAPI2._readmeCache[keys[0]];
-          }
-          GitHubAPI2._readmeCache[cacheKey] = text;
-        },
-        fetchRepoReadme: (repoFullName, token = "") => {
-          if (!repoFullName) return Promise.resolve("");
-          const cacheKey = `${repoFullName}::${token ? Utils2.apiKeyHash(token) : "anon"}`;
-          if (Object.prototype.hasOwnProperty.call(GitHubAPI2._readmeCache, cacheKey)) {
-            return Promise.resolve(GitHubAPI2._readmeCache[cacheKey]);
-          }
-          return new Promise((resolve, reject) => {
-            const headers = {
-              "Accept": "application/vnd.github.v3+json",
-              "User-Agent": "LD-Notion-UserScript"
-            };
-            if (token) headers["Authorization"] = `Bearer ${token}`;
-            GM_xmlhttpRequest({
-              method: "GET",
-              url: `https://api.github.com/repos/${repoFullName}/readme`,
-              headers,
-              onload: (response) => {
-                if (response.status === 200) {
-                  try {
-                    const data = JSON.parse(response.responseText || "{}");
-                    const decoded = Utils2.base64DecodeUnicode(data.content || "");
-                    const text = String(decoded || "").replace(/\r\n/g, "\n");
-                    GitHubAPI2._cacheReadme(cacheKey, text);
-                    resolve(text);
-                    return;
-                  } catch {
-                    GitHubAPI2._cacheReadme(cacheKey, "");
-                    resolve("");
-                    return;
-                  }
-                }
-                if (response.status === 404) GitHubAPI2._cacheReadme(cacheKey, "");
-                resolve("");
-              },
-              onerror: () => {
-                resolve("");
-              },
-              timeout: 15e3,
-              ontimeout: () => {
-                resolve("");
-              }
-            });
-          });
-        }
-      };
-      module.exports = { GitHubAPI: GitHubAPI2 };
-    }
-  });
-
-  // src/import/GitHubExporter.js
-  var require_GitHubExporter = __commonJS({
-    "src/import/GitHubExporter.js"(exports, module) {
-      "use strict";
-      var { CONFIG: CONFIG2 } = require_config();
-      var { Utils: Utils2 } = require_utils();
-      var { Storage: Storage2 } = require_storage();
-      var { NotionAPI: NotionAPI2 } = require_api();
-      var { GitHubAPI: GitHubAPI2 } = require_GitHubAPI();
-      var { Exporter: Exporter2 } = require_export();
-      var { SyncLock } = require_sync_lock();
-      var { AIService: AIService2 } = require_ai();
-      var GitHubExporter2 = {
-        // 用户触发导出的写入审计（ISS-20260724-011，CWE-862/778）。与 BookmarkAutoImporter._auditAutoSync
-        // 同模式但信任边界不同：用户主动触发（actor="user"）而非系统自动同步（actor="system"）。
-        // canExecute 非阻塞闸门管权限，审计管可观测性——谁在何时建/改了哪些页面可事后追溯。
-        _auditExport: (operation, status, context = {}) => {
-          try {
-            const { OperationLog: OperationLog2 } = require_security();
-            OperationLog2.add({
-              audit_event: OperationLog2.inferAuditEvent(operation, status),
-              actor: "user",
-              source: "github-export",
-              operationName: operation,
-              status,
-              context
-            });
-          } catch (e) {
-            console.warn("[LD-Notion] GitHub \u5BFC\u51FA\u5BA1\u8BA1\u5199\u5165\u5931\u8D25:", e);
-          }
-        },
-        normalizeText: (text, maxLen = 280) => {
-          if (!text) return "";
-          const normalized = String(text).replace(/\s+/g, " ").trim();
-          return normalized.substring(0, maxLen);
-        },
-        composeTitleWithPrefix: (prefix, candidate, maxLen = 180) => {
-          const safePrefix = GitHubExporter2.normalizeText(prefix, maxLen);
-          const safeCandidate = GitHubExporter2.normalizeText(candidate, maxLen);
-          if (!safePrefix) return safeCandidate || "\u65E0\u6807\u9898";
-          if (!safeCandidate || safeCandidate === safePrefix) return safePrefix;
-          if (safeCandidate.startsWith(`${safePrefix} - `) || safeCandidate.startsWith(`${safePrefix} \xB7 `)) {
-            return safeCandidate.substring(0, maxLen);
-          }
-          return `${safePrefix} \xB7 ${safeCandidate}`.substring(0, maxLen);
-        },
-        extractReadmeInsight: (readmeText = "") => {
-          const text = String(readmeText || "").replace(/\r\n/g, "\n");
-          if (!text) return { title: "", summary: "" };
-          const headingMatch = text.match(/^#{1,3}\s+(.+)$/m);
-          const title = GitHubExporter2.normalizeText((headingMatch == null ? void 0 : headingMatch[1]) || "", 120);
-          const lines = text.split("\n").map((line) => line.trim()).filter((line) => line && !line.startsWith("#") && !line.startsWith("```"));
-          const summary = GitHubExporter2.normalizeText(lines.slice(0, 8).join(" "), 320);
-          return { title, summary };
-        },
-        inferRepoCategoryHeuristic: (repo, insight, categories = []) => {
-          const available = (categories || []).map((c) => String(c || "").trim()).filter(Boolean);
-          if (available.length === 0) return "";
-          const text = `${repo.full_name || ""} ${repo.name || ""} ${repo.description || ""} ${(repo.topics || []).join(" ")} ${repo.language || ""} ${insight.title || ""} ${insight.summary || ""}`.toLowerCase();
-          for (const cat of available) {
-            if (text.includes(cat.toLowerCase())) return cat;
-          }
-          const rules = [
-            { keys: ["llm", "openai", "anthropic", "prompt", "rag", "ai", "agent"], hints: ["ai", "\u4EBA\u5DE5\u667A\u80FD"] },
-            { keys: ["react", "vue", "next", "svelte", "frontend", "ui", "css", "tailwind"], hints: ["\u524D\u7AEF", "ui"] },
-            { keys: ["node", "express", "fastapi", "backend", "server", "api", "spring"], hints: ["\u540E\u7AEF", "\u670D\u52A1\u7AEF", "api"] },
-            { keys: ["devops", "docker", "kubernetes", "k8s", "terraform", "ci", "cd"], hints: ["\u8FD0\u7EF4", "devops"] },
-            { keys: ["docs", "guide", "tutorial", "awesome", "resource", "\u5B66\u4E60", "\u6559\u7A0B"], hints: ["\u6587\u6863", "\u8D44\u6E90", "\u5B66\u4E60"] }
-          ];
-          for (const rule of rules) {
-            if (!rule.keys.some((k) => text.includes(k))) continue;
-            const matched = available.find((cat) => rule.hints.some((h) => cat.toLowerCase().includes(h.toLowerCase())));
-            if (matched) return matched;
-          }
-          const fallback = available.find((cat) => cat.includes("\u5176\u4ED6"));
-          return fallback || available[available.length - 1];
-        },
-        inferRepoTags: (repo, insight) => {
-          const tags = [];
-          const pushTag = (value) => {
-            const clean = GitHubExporter2.normalizeText(value, 80);
-            if (!clean) return;
-            if (tags.includes(clean)) return;
-            tags.push(clean);
-          };
-          (repo.topics || []).forEach(pushTag);
-          pushTag(repo.language || "");
-          const owner = String(repo.full_name || "").split("/")[0] || "";
-          pushTag(owner);
-          const lowerText = `${insight.title || ""} ${insight.summary || ""}`.toLowerCase();
-          const keywordTags = ["ai", "llm", "rag", "agent", "react", "vue", "nextjs", "nodejs", "python", "rust", "go", "docker", "kubernetes", "notion", "github", "automation"];
-          keywordTags.forEach((kw) => {
-            if (lowerText.includes(kw)) pushTag(kw);
-          });
-          return tags.slice(0, 20);
-        },
-        generateAIRepoCategory: async (repo, insight, settings) => {
-          const categories = Array.isArray(settings == null ? void 0 : settings.categories) ? settings.categories.filter(Boolean) : [];
-          if (!(settings == null ? void 0 : settings.aiApiKey) || !(settings == null ? void 0 : settings.aiService) || categories.length === 0) return "";
-          try {
-            return await AIService2.classify(
-              `${repo.full_name || repo.name || ""} ${insight.title || ""}`,
-              `${repo.description || ""}
-${insight.summary || ""}`,
-              categories,
-              settings
-            );
-          } catch (error) {
-            console.warn("[LD-Notion] AI \u4ED3\u5E93\u5206\u7C7B\u5931\u8D25, \u964D\u7EA7\u8DF3\u8FC7\u5206\u7C7B:", repo.full_name || repo.name || "?", String((error == null ? void 0 : error.message) || error).slice(0, 120));
-            return "";
-          }
-        },
-        enrichRepo: async (repo, settings, context = {}) => {
-          const enriched = { ...repo };
-          const prefix = GitHubExporter2.normalizeText(repo.full_name || repo.name || "", 120) || "\u65E0\u6807\u9898";
-          let insight = { title: "", summary: "" };
-          try {
-            const readme = await GitHubAPI2.fetchRepoReadme(repo.full_name, (settings == null ? void 0 : settings.token) || "");
-            insight = GitHubExporter2.extractReadmeInsight(readme);
-          } catch (error) {
-            console.warn("[LD-Notion] \u4ED3\u5E93 README \u6458\u8981\u5931\u8D25, \u964D\u7EA7\u7A7A\u6458\u8981:", repo.full_name || repo.name || "?", String((error == null ? void 0 : error.message) || error).slice(0, 120));
-            insight = { title: "", summary: "" };
-          }
-          const defaultSuffix = insight.title || GitHubExporter2.normalizeText(repo.description || "", 80);
-          enriched.generatedTitle = GitHubExporter2.composeTitleWithPrefix(prefix, defaultSuffix, 180);
-          let inferredCategory = GitHubExporter2.inferRepoCategoryHeuristic(repo, insight, (settings == null ? void 0 : settings.categories) || []);
-          const canUseAI = !!((settings == null ? void 0 : settings.aiApiKey) && (settings == null ? void 0 : settings.aiService));
-          const aiMaxItems = Number.isFinite(context.aiMaxItems) ? context.aiMaxItems : 20;
-          if (canUseAI && (context.aiUsedCount || 0) < aiMaxItems) {
-            const aiCategory = await GitHubExporter2.generateAIRepoCategory(repo, insight, settings);
-            if (aiCategory) inferredCategory = aiCategory;
-            context.aiUsedCount = (context.aiUsedCount || 0) + 1;
-          }
-          enriched.inferredCategory = inferredCategory;
-          enriched.inferredTags = GitHubExporter2.inferRepoTags(repo, insight);
-          enriched.readmeSummary = GitHubExporter2.normalizeText(insight.summary || "", 1e3);
-          return enriched;
-        },
-        // 构建 Notion 数据库属性 (repos/stars/forks)
-        buildRepoProperties: (repo, sourceType = "Star") => {
-          const titlePrefix = GitHubExporter2.normalizeText(repo.full_name || repo.name || "\u65E0\u6807\u9898", 120) || "\u65E0\u6807\u9898";
-          const titleContent = GitHubExporter2.composeTitleWithPrefix(titlePrefix, repo.generatedTitle || "", 2e3);
-          const summaryText = GitHubExporter2.normalizeText(repo.readmeSummary || "", 1600);
-          const descCandidate = GitHubExporter2.normalizeText(repo.description || "", 1200);
-          const description = [descCandidate, summaryText].filter(Boolean).join("\n\n").substring(0, 2e3);
-          const props = {
-            "\u6807\u9898": {
-              title: [{ text: { content: titleContent } }]
-            },
-            "\u94FE\u63A5": {
-              url: repo.html_url
-            },
-            "\u63CF\u8FF0": {
-              rich_text: [{ text: { content: description } }]
-            },
-            "\u8BED\u8A00": {
-              rich_text: [{ text: { content: repo.language || "" } }]
-            },
-            "Stars": {
-              number: repo.stargazers_count || 0
-            },
-            "\u6765\u6E90": {
-              rich_text: [{ text: { content: "GitHub" } }]
-            },
-            "\u6765\u6E90\u7C7B\u578B": {
-              rich_text: [{ text: { content: sourceType } }]
-            }
-          };
-          const topicTags = Array.isArray(repo.topics) ? repo.topics.slice(0, 20) : [];
-          const inferredTags = Array.isArray(repo.inferredTags) ? repo.inferredTags : [];
-          const mergedTags = [];
-          [...topicTags, ...inferredTags].forEach((tag) => {
-            const clean = GitHubExporter2.normalizeText(tag, 100);
-            if (!clean) return;
-            if (mergedTags.includes(clean)) return;
-            mergedTags.push(clean);
-          });
-          if (mergedTags.length > 0) {
-            props["\u6807\u7B7E"] = {
-              multi_select: mergedTags.slice(0, 20).map((t) => ({ name: t }))
-            };
-          }
-          if (repo.inferredCategory) {
-            props["\u5206\u7C7B"] = {
-              rich_text: [{ text: { content: GitHubExporter2.normalizeText(repo.inferredCategory, 300) } }]
-            };
-          }
-          if (repo.pushed_at) {
-            props["\u66F4\u65B0\u65F6\u95F4"] = { date: { start: repo.pushed_at } };
-          }
-          return props;
-        },
-        // 构建 Gist 属性
-        buildGistProperties: (gist) => {
-          var _a, _b;
-          const files = Object.keys(gist.files || {});
-          const title = gist.description || files[0] || "\u65E0\u6807\u9898 Gist";
-          const language = ((_b = (_a = gist.files) == null ? void 0 : _a[files[0]]) == null ? void 0 : _b.language) || "";
-          return {
-            "\u6807\u9898": {
-              title: [{ text: { content: title.substring(0, 2e3) } }]
-            },
-            "\u94FE\u63A5": {
-              url: gist.html_url
-            },
-            "\u63CF\u8FF0": {
-              rich_text: [{ text: { content: `\u6587\u4EF6: ${files.join(", ")}`.substring(0, 2e3) } }]
-            },
-            "\u8BED\u8A00": {
-              rich_text: [{ text: { content: language } }]
-            },
-            "Stars": {
-              number: 0
-            },
-            "\u6765\u6E90": {
-              rich_text: [{ text: { content: "GitHub" } }]
-            },
-            "\u6765\u6E90\u7C7B\u578B": {
-              rich_text: [{ text: { content: "Gist" } }]
-            },
-            "\u66F4\u65B0\u65F6\u95F4": gist.updated_at ? { date: { start: gist.updated_at } } : void 0
-          };
-        },
-        // 向后兼容：原 buildProperties 映射到 buildRepoProperties
-        buildProperties: (repo) => GitHubExporter2.buildRepoProperties(repo, "Star"),
-        // 配置数据库属性结构
-        setupDatabaseProperties: async (databaseId, apiKey) => {
-          const requiredProperties = {
-            "\u6807\u9898": { typeName: "title", schema: { title: {} } },
-            "\u94FE\u63A5": { typeName: "url", schema: { url: {} } },
-            "\u63CF\u8FF0": { typeName: "rich_text", schema: { rich_text: {} } },
-            "\u8BED\u8A00": { typeName: "rich_text", schema: { rich_text: {} } },
-            "Stars": { typeName: "number", schema: { number: { format: "number" } } },
-            "\u6807\u7B7E": { typeName: "multi_select", schema: { multi_select: { options: [] } } },
-            "\u6765\u6E90": { typeName: "rich_text", schema: { rich_text: {} } },
-            "\u6765\u6E90\u7C7B\u578B": { typeName: "rich_text", schema: { rich_text: {} } },
-            "\u66F4\u65B0\u65F6\u95F4": { typeName: "date", schema: { date: {} } },
-            "\u5206\u7C7B": { typeName: "rich_text", schema: { rich_text: {} } }
-          };
-          try {
-            const database = await NotionAPI2.request("GET", `/databases/${databaseId}`, null, apiKey);
-            const existingProps = database.properties || {};
-            const propsToAdd = {};
-            const propsToUpdate = {};
-            const typeConflicts = [];
-            for (const [name, { typeName, schema }] of Object.entries(requiredProperties)) {
-              const existingProp = existingProps[name];
-              if (!existingProp) {
-                if (typeName === "title") {
-                  const existingTitle = Object.entries(existingProps).find(([_, prop]) => prop.type === "title");
-                  if (existingTitle && existingTitle[0] !== name) {
-                    propsToUpdate[existingTitle[0]] = { name };
-                  }
-                } else {
-                  propsToAdd[name] = schema;
-                }
-              } else if (existingProp.type !== typeName) {
-                typeConflicts.push({ name, expected: typeName, actual: existingProp.type });
-              }
-            }
-            if (typeConflicts.length > 0) {
-              const details = typeConflicts.map((c) => `"${c.name}": \u671F\u671B ${c.expected}\uFF0C\u5B9E\u9645 ${c.actual}`).join("; ");
-              return { success: false, error: `\u5C5E\u6027\u7C7B\u578B\u4E0D\u5339\u914D: ${details}\u3002\u8BF7\u624B\u52A8\u4FEE\u6539\u8FD9\u4E9B\u5C5E\u6027\u7684\u7C7B\u578B\u3002` };
-            }
-            const allChanges = { ...propsToAdd, ...propsToUpdate };
-            if (Object.keys(allChanges).length > 0) {
-              const { OperationGuard: OperationGuard2 } = require_security();
-              if (!OperationGuard2.canExecute("updateDatabase")) {
-                GitHubExporter2._auditExport(
-                  "updateDatabase",
-                  "denied",
-                  { databaseId, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u5BFC\u51FA\u914D\u7F6E\u6570\u636E\u5E93\u7ED3\u6784\u9700 level\u22651", changes: Object.keys(allChanges) }
-                );
-                return { success: false, error: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u65E0\u6CD5\u4FEE\u6539\u6570\u636E\u5E93\u7ED3\u6784\uFF08\u9700 level\u22651\uFF09" };
-              }
-              await NotionAPI2.request("PATCH", `/databases/${databaseId}`, {
-                properties: allChanges
-              }, apiKey);
-              GitHubExporter2._auditExport(
-                "updateDatabase",
-                "success",
-                { databaseId, added: Object.keys(propsToAdd), renamed: Object.keys(propsToUpdate) }
-              );
-            }
-            return { success: true, added: Object.keys(propsToAdd), renamed: Object.keys(propsToUpdate) };
-          } catch (error) {
-            return { success: false, error: error.message };
-          }
-        },
-        // 通用导出方法
-        _exportItems: async (items, settings, sourceType, buildFn, isExportedFn, markExportedFn, getKeyFn, onProgress, flushFn) => {
-          const { apiKey, databaseId } = settings;
-          const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-          const newItems = items.filter((item) => !isExportedFn(getKeyFn(item)));
-          if (newItems.length === 0) {
-            return { total: items.length, exported: 0, failed: 0, message: `\u6CA1\u6709\u65B0\u7684 ${sourceType} \u9700\u8981\u5BFC\u51FA` };
-          }
-          const exportMutexAcquired = SyncLock.isExporting !== true;
-          SyncLock.isExporting = true;
-          let lease = null;
-          try {
-            lease = await SyncLock.acquireLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE);
-          } catch (leaseError) {
-            if (exportMutexAcquired) SyncLock.isExporting = false;
-            throw leaseError;
-          }
-          if (!lease) {
-            if (exportMutexAcquired) SyncLock.isExporting = false;
-            return {
-              total: items.length,
-              exported: 0,
-              failed: 0,
-              skipped: newItems.length,
-              message: "\u5176\u4ED6\u6807\u7B7E\u9875\u6B63\u5728\u5BFC\u51FA/\u540C\u6B65\uFF0C\u5DF2\u8DF3\u8FC7\u672C\u6B21\u8BF7\u6C42"
-            };
-          }
-          let leaseLost = false;
-          const renewTimer = setInterval(() => {
-            let renewed;
-            try {
-              renewed = SyncLock.renewLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
-            } catch (renewError) {
-              console.warn("[LD-Notion] GitHub \u5BFC\u51FA\u7EED\u7EA6\u5931\u8D25:", renewError);
-              renewed = false;
-            }
-            if (!renewed) {
-              leaseLost = true;
-              clearInterval(renewTimer);
-            }
-          }, 3e4);
-          let success = 0, failed = 0;
-          let authAbortInfo = null;
-          const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
-          try {
-            for (let i = 0; i < newItems.length; i++) {
-              if (leaseLost) break;
-              const item = newItems[i];
-              const key = getKeyFn(item);
-              const pct = Math.round(10 + i / newItems.length * 85);
-              try {
-                if (onProgress) onProgress(`\u6B63\u5728\u5BFC\u51FA ${sourceType} (${i + 1}/${newItems.length}): ${key}`, pct);
-              } catch (progressError) {
-                console.warn(`[GitHubExporter] onProgress \u56DE\u8C03\u5F02\u5E38 (${key}):`, progressError);
-              }
-              try {
-                const enriched = sourceType === "Gist" ? item : await GitHubExporter2.enrichRepo(item, settings, enrichContext);
-                const properties = buildFn(enriched);
-                for (const k of Object.keys(properties)) {
-                  if (properties[k] === void 0) delete properties[k];
-                }
-                const { OperationGuard: OperationGuard2 } = require_security();
-                if (!OperationGuard2.canExecute("createDatabasePage")) {
-                  GitHubExporter2._auditExport(
-                    "createDatabasePage",
-                    "denied",
-                    { itemKey: key, sourceType, itemName: item.full_name || key, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u5BFC\u51FA\u5EFA\u9875\u9700 level\u22651" }
-                  );
-                  failed++;
-                  continue;
-                }
-                const page = await NotionAPI2.request("POST", "/pages", {
-                  parent: { database_id: databaseId },
-                  properties
-                }, apiKey);
-                markExportedFn(key);
-                GitHubExporter2._auditExport(
-                  "createDatabasePage",
-                  "success",
-                  { pageId: String((page == null ? void 0 : page.id) || ""), itemKey: key, sourceType, databaseId }
-                );
-                success++;
-              } catch (e) {
-                console.warn(`[GitHubExporter] \u5BFC\u51FA\u5931\u8D25: ${key}`, e);
-                GitHubExporter2._auditExport(
-                  "createDatabasePage",
-                  "failed",
-                  { itemKey: key, sourceType, reason: String((e == null ? void 0 : e.message) || e) }
-                );
-                if (Exporter2.isAuthTerminalError(e)) {
-                  authAbortInfo = { reason: e.message, at: i + 1 };
-                  break;
-                }
-                failed++;
-              }
-              if (i < newItems.length - 1) {
-                await Utils2.sleep(delay);
-              }
-            }
-          } finally {
-            clearInterval(renewTimer);
-            SyncLock.releaseLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
-            if (exportMutexAcquired) SyncLock.isExporting = false;
-            if (flushFn) flushFn();
-          }
-          return authAbortInfo ? { total: items.length, exported: success, failed, skipped: newItems.length - success - failed, authAborted: authAbortInfo, newCount: newItems.length } : { total: items.length, exported: success, failed, newCount: newItems.length };
-        },
-        // 导出 stars 到 Notion
-        exportStars: async (settings, onProgress) => {
-          const { apiKey, databaseId, username, token } = settings;
-          if (!apiKey || !databaseId || !username) {
-            throw new Error("\u8BF7\u5148\u914D\u7F6E GitHub \u7528\u6237\u540D\u548C Notion \u6570\u636E\u5E93");
-          }
-          if (onProgress) onProgress("\u6B63\u5728\u914D\u7F6E\u6570\u636E\u5E93\u7ED3\u6784...", 0);
-          const setupResult = await GitHubExporter2.setupDatabaseProperties(databaseId, apiKey);
-          if (!setupResult.success) {
-            throw new Error(`\u6570\u636E\u5E93\u914D\u7F6E\u5931\u8D25: ${setupResult.error}`);
-          }
-          if (onProgress) onProgress("\u6B63\u5728\u83B7\u53D6 GitHub Stars...", 5);
-          const repos = await GitHubAPI2.fetchStarredRepos(username, token);
-          return GitHubExporter2._exportItems(
-            repos,
-            settings,
-            "Star",
-            (r) => GitHubExporter2.buildRepoProperties(r, "Star"),
-            GitHubAPI2.isExported,
-            GitHubAPI2.markExported,
-            (r) => r.full_name,
-            onProgress,
-            GitHubAPI2.flushExported
-          );
-        },
-        // 导出用户仓库到 Notion
-        exportRepos: async (settings, onProgress) => {
-          const { apiKey, databaseId, username, token } = settings;
-          if (!apiKey || !databaseId || !username) {
-            throw new Error("\u8BF7\u5148\u914D\u7F6E GitHub \u7528\u6237\u540D\u548C Notion \u6570\u636E\u5E93");
-          }
-          if (onProgress) onProgress("\u6B63\u5728\u914D\u7F6E\u6570\u636E\u5E93\u7ED3\u6784...", 0);
-          const setupResult = await GitHubExporter2.setupDatabaseProperties(databaseId, apiKey);
-          if (!setupResult.success) {
-            throw new Error(`\u6570\u636E\u5E93\u914D\u7F6E\u5931\u8D25: ${setupResult.error}`);
-          }
-          if (onProgress) onProgress("\u6B63\u5728\u83B7\u53D6 GitHub Repos...", 5);
-          const repos = await GitHubAPI2.fetchUserRepos(username, token);
-          const ownRepos = repos.filter((r) => !r.fork);
-          return GitHubExporter2._exportItems(
-            ownRepos,
-            settings,
-            "Repo",
-            (r) => GitHubExporter2.buildRepoProperties(r, "Repo"),
-            GitHubAPI2.isExported,
-            GitHubAPI2.markExported,
-            (r) => r.full_name,
-            onProgress,
-            GitHubAPI2.flushExported
-          );
-        },
-        // 导出 fork 的仓库到 Notion
-        exportForks: async (settings, onProgress) => {
-          const { apiKey, databaseId, username, token } = settings;
-          if (!apiKey || !databaseId || !username) {
-            throw new Error("\u8BF7\u5148\u914D\u7F6E GitHub \u7528\u6237\u540D\u548C Notion \u6570\u636E\u5E93");
-          }
-          if (onProgress) onProgress("\u6B63\u5728\u914D\u7F6E\u6570\u636E\u5E93\u7ED3\u6784...", 0);
-          const setupResult = await GitHubExporter2.setupDatabaseProperties(databaseId, apiKey);
-          if (!setupResult.success) {
-            throw new Error(`\u6570\u636E\u5E93\u914D\u7F6E\u5931\u8D25: ${setupResult.error}`);
-          }
-          if (onProgress) onProgress("\u6B63\u5728\u83B7\u53D6 GitHub Forks...", 5);
-          const forks = await GitHubAPI2.fetchForkedRepos(username, token);
-          return GitHubExporter2._exportItems(
-            forks,
-            settings,
-            "Fork",
-            (r) => GitHubExporter2.buildRepoProperties(r, "Fork"),
-            GitHubAPI2.isExported,
-            GitHubAPI2.markExported,
-            (r) => r.full_name,
-            onProgress,
-            GitHubAPI2.flushExported
-          );
-        },
-        // 导出 Gists 到 Notion
-        exportGists: async (settings, onProgress) => {
-          const { apiKey, databaseId, username, token } = settings;
-          if (!apiKey || !databaseId || !username) {
-            throw new Error("\u8BF7\u5148\u914D\u7F6E GitHub \u7528\u6237\u540D\u548C Notion \u6570\u636E\u5E93");
-          }
-          if (onProgress) onProgress("\u6B63\u5728\u914D\u7F6E\u6570\u636E\u5E93\u7ED3\u6784...", 0);
-          const setupResult = await GitHubExporter2.setupDatabaseProperties(databaseId, apiKey);
-          if (!setupResult.success) {
-            throw new Error(`\u6570\u636E\u5E93\u914D\u7F6E\u5931\u8D25: ${setupResult.error}`);
-          }
-          if (onProgress) onProgress("\u6B63\u5728\u83B7\u53D6 GitHub Gists...", 5);
-          const gists = await GitHubAPI2.fetchUserGists(username, token);
-          return GitHubExporter2._exportItems(
-            gists,
-            settings,
-            "Gist",
-            GitHubExporter2.buildGistProperties,
-            GitHubAPI2.isGistExported,
-            GitHubAPI2.markGistExported,
-            (g) => g.id,
-            onProgress,
-            GitHubAPI2.flushGistsExported
-          );
-        },
-        // 按用户选择的类型批量导出
-        exportAll: async (settings, onProgress) => {
-          const types = GitHubAPI2.getImportTypes();
-          const results = {};
-          const totalTypes = types.length;
-          let typeIndex = 0;
-          for (const type of types) {
-            const typeProgress = (msg, pct) => {
-              const overallPct = Math.round(typeIndex / totalTypes * 100 + pct / totalTypes);
-              if (onProgress) onProgress(`[${type}] ${msg}`, overallPct);
-            };
-            try {
-              switch (type) {
-                case "stars":
-                  results.stars = await GitHubExporter2.exportStars(settings, typeProgress);
-                  break;
-                case "repos":
-                  results.repos = await GitHubExporter2.exportRepos(settings, typeProgress);
-                  break;
-                case "forks":
-                  results.forks = await GitHubExporter2.exportForks(settings, typeProgress);
-                  break;
-                case "gists":
-                  results.gists = await GitHubExporter2.exportGists(settings, typeProgress);
-                  break;
-              }
-            } catch (e) {
-              results[type] = { error: e.message };
-            }
-            typeIndex++;
-          }
-          return results;
-        },
-        // AI 分类已导出的 GitHub repos
-        classifyRepos: async (settings, onProgress) => {
-          var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q;
-          const { apiKey, databaseId, aiApiKey, aiService, aiModel, aiBaseUrl, categories } = settings;
-          if (!apiKey || !databaseId) throw new Error("\u8BF7\u5148\u914D\u7F6E Notion \u6570\u636E\u5E93");
-          if (!aiApiKey) throw new Error("\u8BF7\u5148\u914D\u7F6E AI API Key");
-          if (onProgress) onProgress("\u6B63\u5728\u83B7\u53D6\u5F85\u5206\u7C7B\u7684\u4ED3\u5E93...", 0);
-          const response = await NotionAPI2.request("POST", `/databases/${databaseId}/query`, {
-            filter: {
-              or: [
-                { property: "\u5206\u7C7B", rich_text: { is_empty: true } },
-                { property: "\u5206\u7C7B", rich_text: { equals: "" } }
-              ]
-            },
-            page_size: 100
-          }, apiKey);
-          const pages = response.results || [];
-          if (pages.length === 0) {
-            return { classified: 0, message: "\u6CA1\u6709\u5F85\u5206\u7C7B\u7684\u4ED3\u5E93" };
-          }
-          const hasMore = response.has_more === true;
-          let classified = 0;
-          for (let i = 0; i < pages.length; i++) {
-            const page = pages[i];
-            const pct = Math.round(i / pages.length * 100);
-            const title = ((_e = (_d = (_c = (_b = (_a = page.properties) == null ? void 0 : _a["\u6807\u9898"]) == null ? void 0 : _b.title) == null ? void 0 : _c[0]) == null ? void 0 : _d.text) == null ? void 0 : _e.content) || "";
-            const desc = ((_j = (_i = (_h = (_g = (_f = page.properties) == null ? void 0 : _f["\u63CF\u8FF0"]) == null ? void 0 : _g.rich_text) == null ? void 0 : _h[0]) == null ? void 0 : _i.text) == null ? void 0 : _j.content) || "";
-            const lang = ((_o = (_n = (_m = (_l = (_k = page.properties) == null ? void 0 : _k["\u8BED\u8A00"]) == null ? void 0 : _l.rich_text) == null ? void 0 : _m[0]) == null ? void 0 : _n.text) == null ? void 0 : _o.content) || "";
-            const tags = (((_q = (_p = page.properties) == null ? void 0 : _p["\u6807\u7B7E"]) == null ? void 0 : _q.multi_select) || []).map((t) => t.name).join(", ");
-            if (onProgress) onProgress(`\u6B63\u5728\u5206\u7C7B (${i + 1}/${pages.length}): ${title}`, pct);
-            try {
-              const prompt2 = `\u8BF7\u6839\u636E\u4EE5\u4E0B GitHub \u4ED3\u5E93\u4FE1\u606F\uFF0C\u4ECE\u8FD9\u4E9B\u5206\u7C7B\u4E2D\u9009\u62E9\u6700\u5408\u9002\u7684\u4E00\u4E2A: [${categories.join(", ")}]
-
-\u4ED3\u5E93\u540D: ${AIService2.isolateContent(title)}
-\u63CF\u8FF0: ${AIService2.isolateContent(desc)}
-\u8BED\u8A00: ${AIService2.isolateContent(lang)}
-\u6807\u7B7E: ${AIService2.isolateContent(tags)}
-
-\u53EA\u56DE\u590D\u5206\u7C7B\u540D\uFF0C\u4E0D\u8981\u5176\u4ED6\u5185\u5BB9\u3002`;
-              const category = await AIService2.request(prompt2, {
-                aiService,
-                aiApiKey,
-                aiModel,
-                aiBaseUrl
-              });
-              const trimmedCategory = String(category || "").trim();
-              const matched = categories.includes(trimmedCategory) ? trimmedCategory : categories.filter((c) => trimmedCategory.includes(c)).sort((a, b) => String(b).length - String(a).length)[0];
-              if (!matched) {
-                GitHubExporter2._auditExport(
-                  "updatePage",
-                  "skipped",
-                  { pageId: page.id, itemName: title, reason: `AI \u5206\u7C7B\u300C${trimmedCategory.slice(0, 50)}\u300D\u4E0D\u5728\u767D\u540D\u5355\uFF0C\u8DF3\u8FC7` }
-                );
-                continue;
-              }
-              const { OperationGuard: OperationGuard2 } = require_security();
-              if (!OperationGuard2.canExecute("updatePage")) {
-                GitHubExporter2._auditExport(
-                  "updatePage",
-                  "denied",
-                  { pageId: page.id, itemName: title, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u5206\u7C7B\u5199\u5165\u9700 level\u22651" }
-                );
-                continue;
-              }
-              await NotionAPI2.request("PATCH", `/pages/${page.id}`, {
-                properties: {
-                  "\u5206\u7C7B": { rich_text: [{ text: { content: matched } }] }
-                }
-              }, apiKey);
-              GitHubExporter2._auditExport(
-                "updatePage",
-                "success",
-                { pageId: page.id, itemName: title, category: matched }
-              );
-              classified++;
-            } catch (e) {
-              console.warn(`[GitHubExporter] \u5206\u7C7B\u5931\u8D25: ${title}`, e);
-              GitHubExporter2._auditExport(
-                "updatePage",
-                "failed",
-                { pageId: page == null ? void 0 : page.id, itemName: title, reason: String((e == null ? void 0 : e.message) || e) }
-              );
-              if (Exporter2.isAuthTerminalError(e)) {
-                return { classified, total: pages.length, authAborted: { reason: e.message, at: i + 1 } };
-              }
-            }
-            await Utils2.sleep(500);
-          }
-          return {
-            classified,
-            total: pages.length,
-            hasMore,
-            message: hasMore ? `\u5DF2\u5206\u7C7B ${classified} \u4E2A\u4ED3\u5E93\uFF08\u8FD8\u6709\u66F4\u591A\u5F85\u5206\u7C7B\u6761\u76EE\uFF0C\u8BF7\u518D\u6B21\u8FD0\u884C\u4EE5\u7EE7\u7EED\uFF09` : `\u5DF2\u5206\u7C7B ${classified} \u4E2A\u4ED3\u5E93`
-          };
-        }
-      };
-      module.exports = { GitHubExporter: GitHubExporter2 };
-    }
-  });
-
-  // src/import/GitHubAutoImporter.js
-  var require_GitHubAutoImporter = __commonJS({
-    "src/import/GitHubAutoImporter.js"(exports, module) {
-      "use strict";
-      var { CONFIG: CONFIG2 } = require_config();
-      var { Utils: Utils2 } = require_utils();
-      var { Storage: Storage2, SyncState: SyncState2 } = require_storage();
-      var { NotionOAuth: NotionOAuth2 } = require_auth();
-      var { GitHubAPI: GitHubAPI2 } = require_GitHubAPI();
-      var { NotionAPI: NotionAPI2 } = require_api();
-      var { emit } = require_event_bus();
-      var { SyncLock } = require_sync_lock();
-      var GitHubAutoImporter2 = {
-        isRunning: false,
-        timerId: null,
-        initTimerId: null,
-        // glm P1 共识: 租约丢失标志需下沉到模块级 —— 批量写页在 _exportViaGitHubExporter
-        // 内逐项执行, 原先仅类型循环边界可见 leaseLost, 单类型内继续写 Notion
-        _leaseLost: false,
-        deferredWhileHidden: false,
-        visibilityListenerBound: false,
-        lastRunAt: 0,
-        minimumRunGapMs: 60 * 1e3,
-        canStart: () => {
-          if (!Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED, false)) return false;
-          const username = Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, "");
-          const token = Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "");
-          if (!username && !token) return false;
-          const apiKey = NotionOAuth2.getAccessToken("");
-          const databaseId = Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_DATABASE_ID, "");
-          return !!(apiKey && databaseId);
-        },
-        updateStatus: (text) => {
-          const el = document.querySelector("#ldb-auto-import-status");
-          if (el) el.textContent = text;
-        },
-        buildSettings: () => {
-          return {
-            apiKey: NotionOAuth2.getAccessToken(""),
-            databaseId: Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_DATABASE_ID, ""),
-            username: Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, ""),
-            token: Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "")
-          };
-        },
-        getTypeMeta: (type) => {
-          const metaMap = {
-            stars: {
-              label: "Stars",
-              getTime: (item) => (item == null ? void 0 : item.starred_at) || (item == null ? void 0 : item.created_at) || (item == null ? void 0 : item.updated_at) || "",
-              getId: (item) => String((item == null ? void 0 : item.full_name) || (item == null ? void 0 : item.name) || "")
-            },
-            repos: {
-              label: "Repos",
-              getTime: (item) => (item == null ? void 0 : item.pushed_at) || (item == null ? void 0 : item.updated_at) || (item == null ? void 0 : item.created_at) || "",
-              getId: (item) => String((item == null ? void 0 : item.full_name) || (item == null ? void 0 : item.name) || "")
-            },
-            forks: {
-              label: "Forks",
-              getTime: (item) => (item == null ? void 0 : item.pushed_at) || (item == null ? void 0 : item.updated_at) || (item == null ? void 0 : item.created_at) || "",
-              getId: (item) => String((item == null ? void 0 : item.full_name) || (item == null ? void 0 : item.name) || "")
-            },
-            gists: {
-              label: "Gists",
-              getTime: (item) => (item == null ? void 0 : item.updated_at) || (item == null ? void 0 : item.created_at) || "",
-              getId: (item) => String((item == null ? void 0 : item.id) || "")
-            }
-          };
-          return metaMap[type] || metaMap.stars;
-        },
-        fetchTypeItems: async (type, settings) => {
-          if (type === "stars") {
-            return await GitHubAPI2.fetchStarredRepos(settings.username, settings.token);
-          }
-          if (type === "repos") {
-            const repos = await GitHubAPI2.fetchUserRepos(settings.username, settings.token);
-            return repos.filter((repo) => !repo.fork);
-          }
-          if (type === "forks") {
-            return await GitHubAPI2.fetchForkedRepos(settings.username, settings.token);
-          }
-          if (type === "gists") {
-            return await GitHubAPI2.fetchUserGists(settings.username, settings.token);
-          }
-          return [];
-        },
-        ensureVisibilityListener: () => {
-          if (GitHubAutoImporter2.visibilityListenerBound) return;
-          document.addEventListener("visibilitychange", () => {
-            if (!document.hidden && GitHubAutoImporter2.deferredWhileHidden) {
-              GitHubAutoImporter2.deferredWhileHidden = false;
-              Utils2.runWhenBrowserIdle(() => {
-                if (!Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED, false)) return;
-                GitHubAutoImporter2.run();
-              });
-            }
-          });
-          GitHubAutoImporter2.visibilityListenerBound = true;
-        },
-        startPolling: (intervalMinutes) => {
-          const { SyncScheduler } = require_SyncScheduler();
-          const types = GitHubAPI2.getImportTypes();
-          for (const type of types) {
-            SyncScheduler.start(`github-${type}`, intervalMinutes);
-          }
-        },
-        stopPolling: () => {
-          if (GitHubAutoImporter2.initTimerId) {
-            clearTimeout(GitHubAutoImporter2.initTimerId);
-            GitHubAutoImporter2.initTimerId = null;
-          }
-          GitHubAutoImporter2.deferredWhileHidden = false;
-          const { SyncScheduler } = require_SyncScheduler();
-          const types = GitHubAPI2.getImportTypes();
-          for (const type of types) {
-            SyncScheduler.stop(`github-${type}`);
-          }
-        },
-        init: () => {
-          if (!GitHubAutoImporter2.canStart()) return;
-          GitHubAutoImporter2.ensureVisibilityListener();
-          if (GitHubAutoImporter2.initTimerId) clearTimeout(GitHubAutoImporter2.initTimerId);
-          GitHubAutoImporter2.initTimerId = setTimeout(() => {
-            GitHubAutoImporter2.initTimerId = null;
-            if (!Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED, false)) return;
-            Utils2.runWhenBrowserIdle(() => {
-              if (!Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED, false)) return;
-              GitHubAutoImporter2.run();
-            });
-            const interval = Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL, CONFIG2.DEFAULTS.githubAutoImportInterval);
-            if (interval > 0) GitHubAutoImporter2.startPolling(interval);
-          }, 3e3);
-        }
-      };
-      GitHubAutoImporter2._mapItemsToBookmarks = (incrementalItems, type, meta) => {
-        return incrementalItems.map((item) => ({
-          itemKey: meta.getId(item),
-          raw: item,
-          title: item.full_name || item.name || "",
-          url: item.html_url || "",
-          description: item.description || "",
-          tags: item.language ? [`lang:${item.language}`] : [],
-          source: "github",
-          sourceType: type
-        }));
-      };
-      GitHubAutoImporter2._exportViaGitHubExporter = async (mappedItems, type, meta, settings) => {
-        const { GitHubExporter: GitHubExporter2 } = require_GitHubExporter();
-        const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-        const successEntries = [];
-        const failedEntries = [];
-        const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
-        let remoteUrls = null;
-        try {
-          remoteUrls = await NotionAPI2.collectDatabaseUrls(settings.apiKey, settings.databaseId);
-        } catch (_) {
-          remoteUrls = null;
-        }
-        const normUrl = (u) => String(u || "").trim().replace(/\/+$/, "");
-        const toExport = [];
-        for (const item of mappedItems) {
-          const itemKey = item.itemKey || (item.raw ? meta.getId(item.raw) : "");
-          let already = false;
-          if (remoteUrls) {
-            const itemUrl = normUrl(item.url || (item.raw ? item.raw.html_url : ""));
-            already = !!(itemUrl && remoteUrls.has(itemUrl));
-          } else if (itemKey) {
-            already = type === "gists" ? GitHubAPI2.isGistExported(itemKey) : GitHubAPI2.isExported(itemKey);
-          }
-          if (already) {
-            if (itemKey) {
-              if (type === "gists") {
-                GitHubAPI2.markGistExported(itemKey);
-              } else {
-                GitHubAPI2.markExported(itemKey);
-              }
-            }
-            successEntries.push({ itemKey, skippedExisting: true });
-            continue;
-          }
-          toExport.push(item);
-        }
-        try {
-          for (let i = 0; i < toExport.length; i++) {
-            if (GitHubAutoImporter2._leaseLost) break;
-            const item = toExport[i];
-            const itemKey = item.itemKey || (item.raw ? meta.getId(item.raw) : "");
-            try {
-              const raw = item.raw || item;
-              const { OperationGuard: OperationGuard2, OperationLog: OperationLog2 } = require_security();
-              if (!OperationGuard2.canExecute("createDatabasePage")) {
-                OperationLog2.add({
-                  audit_event: OperationLog2.inferAuditEvent("createDatabasePage", "denied"),
-                  actor: "system",
-                  source: "github-auto-sync",
-                  operationName: "createDatabasePage",
-                  status: "denied",
-                  context: { itemKey, itemName: meta.getId(raw), reason: "\u6743\u9650\u4E0D\u8DB3\uFF1AGitHub \u81EA\u52A8\u540C\u6B65\u5EFA\u9875\u9700 level\u22651" }
-                });
-                failedEntries.push({ itemKey, title: item.title || itemKey });
-                continue;
-              }
-              const enriched = type === "gists" ? raw : await GitHubExporter2.enrichRepo(raw, settings, enrichContext);
-              const buildFn = type === "gists" ? GitHubExporter2.buildGistProperties : (r) => GitHubExporter2.buildRepoProperties(r, meta.label);
-              const properties = buildFn(enriched);
-              for (const k of Object.keys(properties)) {
-                if (properties[k] === void 0) delete properties[k];
-              }
-              settings.apiKey = NotionOAuth2.getAccessToken("");
-              const page = await NotionAPI2.request("POST", "/pages", {
-                parent: { database_id: settings.databaseId },
-                properties
-              }, settings.apiKey);
-              OperationLog2.add({
-                audit_event: OperationLog2.inferAuditEvent("createDatabasePage", "success"),
-                actor: "system",
-                source: "github-auto-sync",
-                operationName: "createDatabasePage",
-                status: "success",
-                context: { pageId: String((page == null ? void 0 : page.id) || "").trim(), itemKey, itemName: meta.getId(raw), databaseId: settings.databaseId }
-              });
-              if (type === "gists") {
-                GitHubAPI2.markGistExported(meta.getId(raw));
-              } else {
-                GitHubAPI2.markExported(meta.getId(raw));
-              }
-              successEntries.push({ itemKey });
-            } catch (e) {
-              const authTerminal = e && e.isAuthTerminal === true;
-              console.warn(`[GitHubAutoImporter] \u5BFC\u51FA\u5931\u8D25: ${itemKey}`, e);
-              try {
-                const { OperationLog: OperationLog2 } = require_security();
-                OperationLog2.add({
-                  audit_event: OperationLog2.inferAuditEvent("createDatabasePage", "failed"),
-                  actor: "system",
-                  source: "github-auto-sync",
-                  operationName: "createDatabasePage",
-                  status: "failed",
-                  context: { itemKey, reason: String((e == null ? void 0 : e.message) || e) }
-                });
-              } catch (_) {
-              }
-              failedEntries.push({ itemKey, title: item.title || itemKey });
-              if (authTerminal) break;
-            }
-            if (i < toExport.length - 1) {
-              await Utils2.sleep(delay);
-            }
-          }
-        } finally {
-          GitHubAPI2.flushExported();
-          GitHubAPI2.flushGistsExported();
-        }
-        const createdEntries = successEntries.filter((e) => !e.skippedExisting);
-        return {
-          success: successEntries,
-          // 含 skippedExisting, 供 watermark 推进
-          created: createdEntries,
-          failed: failedEntries
-        };
-      };
-      GitHubAutoImporter2._exportMappedItems = async (mappedItems, type, meta, settings) => {
-        return await GitHubAutoImporter2._exportViaGitHubExporter(mappedItems, type, meta, settings);
-      };
-      GitHubAutoImporter2._syncSingleType = async (type, settings, attemptAt) => {
-        const meta = GitHubAutoImporter2.getTypeMeta(type);
-        const typeAttemptAt = Date.now();
-        try {
-          SyncState2.updateGitHubState(type, {
-            lastAttemptAt: typeAttemptAt,
-            lastOutcome: "running",
-            lastError: "",
-            lastStats: {}
-          });
-          GitHubAutoImporter2.updateStatus(`\u{1F4E7} \u6B63\u5728\u68C0\u67E5 GitHub ${meta.label}...`);
-          const syncState = SyncState2.getGitHubState(type);
-          const items = await GitHubAutoImporter2.fetchTypeItems(type, settings);
-          const itemsPartial = items && items.partial === true;
-          const partialNote = itemsPartial ? `${meta.label} \u5217\u8868\u62C9\u53D6\u4E0D\u5B8C\u6574(\u7F51\u7EDC\u9519\u8BEF/\u8D85\u65F6,\u5DF2\u4FDD\u7559\u5DF2\u62C9\u9879)` : "";
-          const incrementalItems = SyncState2.filterOrderedItems(
-            items,
-            syncState.watermark,
-            meta.getTime,
-            meta.getId
-          );
-          if (incrementalItems.length === 0) {
-            SyncState2.updateGitHubState(type, {
-              lastAttemptAt: typeAttemptAt,
-              lastSuccessAt: itemsPartial ? syncState.lastSuccessAt : Date.now(),
-              lastOutcome: itemsPartial ? "partial" : "success",
-              lastError: partialNote,
-              lastStats: {
-                scanned: items.length,
-                pending: 0,
-                exported: 0,
-                failed: 0
-              }
-            });
-            return { pending: false, success: 0, failed: 0, syncError: partialNote };
-          }
-          const mappedItems = GitHubAutoImporter2._mapItemsToBookmarks(incrementalItems, type, meta);
-          if (mappedItems.length === 0) {
-            SyncState2.updateGitHubState(type, {
-              watermark: itemsPartial ? syncState.watermark : SyncState2.buildWatermark(incrementalItems, meta.getTime, meta.getId),
-              lastAttemptAt: typeAttemptAt,
-              lastSuccessAt: itemsPartial ? syncState.lastSuccessAt : Date.now(),
-              lastOutcome: itemsPartial ? "partial" : "success",
-              lastError: partialNote,
-              lastStats: {
-                scanned: items.length,
-                pending: incrementalItems.length,
-                exported: 0,
-                failed: 0
-              }
-            });
-            return { pending: true, success: 0, failed: 0, syncError: partialNote };
-          }
-          const result = await GitHubAutoImporter2._exportMappedItems(mappedItems, type, meta, settings);
-          const successKeys = new Set(
-            (result.success || []).map((entry) => String(entry.itemKey || "")).filter(Boolean)
-          );
-          const successfulItems = mappedItems.filter((item) => successKeys.has(String(item.itemKey || ""))).map((item) => item.raw);
-          const typeStatePatch = {
-            lastAttemptAt: typeAttemptAt,
-            lastOutcome: result.failed.length > 0 ? result.success.length > 0 ? "partial" : "error" : itemsPartial ? "partial" : "success",
-            lastError: result.success.length === 0 && result.failed.length > 0 ? `${meta.label} \u5BFC\u51FA\u5931\u8D25 ${result.failed.length} \u9879` : partialNote,
-            lastStats: {
-              scanned: items.length,
-              pending: incrementalItems.length,
-              exported: (result.created || result.success.filter((e) => !e.skippedExisting)).length,
-              failed: result.failed.length,
-              skippedExisting: result.success.filter((e) => e.skippedExisting).length
-            }
-          };
-          if (successfulItems.length > 0) {
-            const successfulIds = new Set(successfulItems.map((item) => meta.getId(item)));
-            const leadingSuccessfulItems = SyncState2.takeLeadingItems(
-              incrementalItems,
-              (item) => {
-                const itemKey = meta.getId(item);
-                if (successfulIds.has(itemKey)) return true;
-                const mapped = mappedItems.find((entry) => meta.getId(entry.raw) === itemKey);
-                return !mapped;
-              }
-            );
-            if (leadingSuccessfulItems.length > 0) {
-              if (!itemsPartial) {
-                typeStatePatch.watermark = SyncState2.buildWatermark(leadingSuccessfulItems, meta.getTime, meta.getId);
-              }
-            }
-            if (!itemsPartial) typeStatePatch.lastSuccessAt = Date.now();
-          }
-          SyncState2.updateGitHubState(type, typeStatePatch);
-          const createdCount = (result.created || result.success.filter((e) => !e.skippedExisting)).length;
-          return { pending: true, success: createdCount, failed: result.failed.length, syncError: partialNote };
-        } catch (error) {
-          SyncState2.updateGitHubState(type, {
-            lastAttemptAt: typeAttemptAt,
-            lastOutcome: "error",
-            lastError: (error == null ? void 0 : error.message) || String(error),
-            lastStats: {}
-          });
-          console.error(`[LD-Notion] GitHub ${type} \u81EA\u52A8\u5BFC\u5165\u5931\u8D25:`, error);
-          return { pending: false, success: 0, failed: 0, syncError: `${meta.label}: ${error.message}` };
-        }
-      };
-      GitHubAutoImporter2._aggregateMetaState = (types, successCount, failedCount, syncErrors, attemptAt) => {
-        if (!syncErrors.length && successCount === 0 && failedCount === 0) {
-          SyncState2.updateGitHubMeta({
-            lastAttemptAt: attemptAt,
-            lastSuccessAt: Date.now(),
-            lastOutcome: "success",
-            lastError: "",
-            lastStats: {
-              enabledTypes: types.length,
-              exported: 0,
-              failed: 0,
-              syncErrors: 0
-            }
-          });
-          GitHubAutoImporter2.updateStatus(`\u2705 \u6CA1\u6709\u65B0\u7684 GitHub \u6536\u85CF (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`);
-          return;
-        }
-        if (successCount === 0 && failedCount === 0 && syncErrors.length > 0) {
-          throw new Error(syncErrors[0]);
-        }
-        const metaStatePatch = {
-          lastAttemptAt: attemptAt,
-          lastOutcome: syncErrors.length > 0 || failedCount > 0 ? successCount > 0 ? "partial" : "error" : "success",
-          lastError: syncErrors.join("\uFF1B"),
-          lastStats: {
-            enabledTypes: types.length,
-            exported: successCount,
-            failed: failedCount,
-            syncErrors: syncErrors.length
-          }
-        };
-        if (metaStatePatch.lastOutcome === "success" || successCount > 0) {
-          metaStatePatch.lastSuccessAt = Date.now();
-        }
-        SyncState2.updateGitHubMeta(metaStatePatch);
-        GitHubAutoImporter2.updateStatus(
-          `\u2705 GitHub \u81EA\u52A8\u5BFC\u5165\u5B8C\u6210: \u6210\u529F ${successCount} \u9879${failedCount > 0 ? `\uFF0C\u5931\u8D25 ${failedCount} \u9879` : ""}${syncErrors.length > 0 ? `\uFF0C\u5F02\u5E38 ${syncErrors.length} \u7C7B` : ""} (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`
-        );
-      };
-      GitHubAutoImporter2.run = async () => {
-        if (document.hidden) {
-          GitHubAutoImporter2.deferredWhileHidden = true;
-          return;
-        }
-        if (GitHubAutoImporter2.isRunning) return;
-        if (SyncLock.isExporting) return;
-        const settings = GitHubAutoImporter2.buildSettings();
-        if (!settings.apiKey || !settings.databaseId) {
-          GitHubAutoImporter2.updateStatus("\u8BF7\u5148\u914D\u7F6E Notion API Key \u548C\u6570\u636E\u5E93 ID");
-          return { importedCount: 0, failedCount: 0, errors: ["\u8BF7\u5148\u914D\u7F6E Notion API Key \u548C\u6570\u636E\u5E93 ID"] };
-        }
-        if (!settings.username && !settings.token) {
-          GitHubAutoImporter2.updateStatus("\u8BF7\u5148\u914D\u7F6E GitHub \u7528\u6237\u540D\u6216 Token");
-          return { importedCount: 0, failedCount: 0, errors: ["\u8BF7\u5148\u914D\u7F6E GitHub \u7528\u6237\u540D\u6216 Token"] };
-        }
-        if (!settings.token && settings.username && String(settings.username).includes("@")) {
-          GitHubAutoImporter2.updateStatus("GitHub \u7528\u6237\u540D\u4E0D\u5E94\u586B\u90AE\u7BB1");
-          return { importedCount: 0, failedCount: 0, errors: [`GitHub \u7528\u6237\u540D\u4E0D\u5E94\u586B\u90AE\u7BB1\u300C${settings.username}\u300D\uFF1A\u8BF7\u6539\u586B github.com/ \u540E\u9762\u90A3\u4E32\uFF08\u5982 octocat\uFF09\uFF1B\u6216\u586B\u5199 Token \u6539\u7528\u8BA4\u8BC1\u63A5\u53E3\uFF08\u65E0\u9700\u7528\u6237\u540D\uFF09`] };
-        }
-        const now = Date.now();
-        if (now - GitHubAutoImporter2.lastRunAt < GitHubAutoImporter2.minimumRunGapMs) return;
-        GitHubAutoImporter2.lastRunAt = now;
-        GitHubAutoImporter2.isRunning = true;
-        const attemptAt = Date.now();
-        let lease = null;
-        try {
-          lease = await SyncLock.acquireLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE);
-        } catch (leaseError) {
-          GitHubAutoImporter2.isRunning = false;
-          console.error("[LD-Notion] GitHub \u81EA\u52A8\u5BFC\u5165\u83B7\u53D6\u79DF\u7EA6\u5931\u8D25:", leaseError);
-          GitHubAutoImporter2.updateStatus("\u274C \u83B7\u53D6\u540C\u6B65\u79DF\u7EA6\u5931\u8D25\uFF0C\u672C\u8F6E\u8DF3\u8FC7");
-          return;
-        }
-        if (!lease) {
-          GitHubAutoImporter2.isRunning = false;
-          GitHubAutoImporter2.updateStatus("\u23F8 \u5176\u4ED6\u6807\u7B7E\u9875\u6B63\u5728\u540C\u6B65\uFF0C\u672C\u8F6E GitHub \u540C\u6B65\u8DF3\u8FC7");
-          return;
-        }
-        const exportMutexAcquired = SyncLock.isExporting !== true;
-        SyncLock.isExporting = true;
-        GitHubAutoImporter2._leaseLost = false;
-        const renewTimer = setInterval(() => {
-          let renewed;
-          try {
-            renewed = SyncLock.renewLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
-          } catch (renewError) {
-            console.warn("[LD-Notion] GitHub \u81EA\u52A8\u5BFC\u5165\u7EED\u7EA6\u5931\u8D25:", renewError);
-            renewed = false;
-          }
-          if (!renewed) {
-            GitHubAutoImporter2._leaseLost = true;
-            clearInterval(renewTimer);
-          }
-        }, 3e4);
-        try {
-          GitHubAutoImporter2.updateStatus("\u{1F4E7} \u6B63\u5728\u68C0\u67E5 GitHub \u65B0\u6536\u85CF...");
-          const types = GitHubAPI2.getImportTypes();
-          SyncState2.updateGitHubMeta({
-            lastAttemptAt: attemptAt,
-            lastOutcome: "running",
-            lastError: "",
-            lastStats: {
-              enabledTypes: types.length,
-              exported: 0,
-              failed: 0,
-              syncErrors: 0
-            }
-          });
-          let successCount = 0;
-          let failedCount = 0;
-          const syncErrors = [];
-          for (const type of types) {
-            if (GitHubAutoImporter2._leaseLost) break;
-            const r = await GitHubAutoImporter2._syncSingleType(type, settings, attemptAt);
-            successCount += r.success;
-            failedCount += r.failed;
-            if (r.syncError) syncErrors.push(r.syncError);
-          }
-          const hasPending = successCount > 0 || failedCount > 0;
-          if (!hasPending && syncErrors.length === 0) {
-            GitHubAutoImporter2._aggregateMetaState(types, 0, 0, [], attemptAt);
-            return { importedCount: 0, failedCount: 0, errors: [] };
-          }
-          GitHubAutoImporter2._aggregateMetaState(types, successCount, failedCount, syncErrors, attemptAt);
-          return { importedCount: successCount, failedCount, errors: syncErrors };
-        } catch (error) {
-          console.error("[LD-Notion] GitHub \u81EA\u52A8\u5BFC\u5165\u51FA\u9519:", error);
-          SyncState2.updateGitHubMeta({
-            lastAttemptAt: attemptAt,
-            lastOutcome: "error",
-            lastError: (error == null ? void 0 : error.message) || String(error),
-            lastStats: {
-              enabledTypes: (GitHubAPI2.getImportTypes() || []).length,
-              exported: 0,
-              failed: 0,
-              syncErrors: 1
-            }
-          });
-          GitHubAutoImporter2.updateStatus(`\u274C GitHub \u81EA\u52A8\u5BFC\u5165\u51FA\u9519: ${error.message}`);
-          return { importedCount: 0, failedCount: 0, errors: [(error == null ? void 0 : error.message) || String(error)] };
-        } finally {
-          clearInterval(renewTimer);
-          SyncLock.releaseLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
-          if (exportMutexAcquired) SyncLock.isExporting = false;
-          GitHubAutoImporter2._leaseLost = false;
-          GitHubAutoImporter2.isRunning = false;
-          emit("bookmarks:updated");
-          emit("sync:center-summary-updated");
-        }
-      };
-      module.exports = { GitHubAutoImporter: GitHubAutoImporter2 };
-    }
-  });
-
-  // src/import/index.js
-  var require_import = __commonJS({
-    "src/import/index.js"(exports, module) {
-      "use strict";
-      var { CONFIG: CONFIG2 } = require_config();
-      var { Utils: Utils2 } = require_utils();
-      var { Storage: Storage2, SyncState: SyncState2, DedupStore } = require_storage();
-      var { NotionOAuth: NotionOAuth2 } = require_auth();
-      var { NotionAPI: NotionAPI2 } = require_api();
-      var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2 } = require_export();
-      var { SyncLock } = require_sync_lock();
-      var { UpdateChecker: UpdateChecker2 } = require_UpdateChecker();
-      var { GitHubAutoImporter: GitHubAutoImporter2 } = require_GitHubAutoImporter();
-      var { GitHubAPI: GitHubAPI2 } = require_GitHubAPI();
-      var { GitHubExporter: GitHubExporter2 } = require_GitHubExporter();
-      var { emit } = require_event_bus();
-      var AutoImporter2 = {
-        isRunning: false,
-        timerId: null,
-        deferredWhileHidden: false,
-        visibilityListenerBound: false,
-        lastRunAt: 0,
-        minimumRunGapMs: 60 * 1e3,
-        // 从 Storage 读取导出设置（不依赖 UI DOM）
-        // 20260914: 新收藏判定(纯函数, 可单测) —— 远端「链接」索引是 ground truth:
-        // 命中 https://linux.do/t/{id} → 库内已存在跳过; 未命中 → 导出(账本残留不阻断, 换库场景);
-        // remoteUrls=null(查询失败) → 降级本地账本(旧语义)。allow_duplicates 时不做任何去重过滤。
-        resolveNewBookmarks: ({ bookmarks = [], dedupStrict = true, remoteUrls = null } = {}) => {
-          if (!dedupStrict) return bookmarks.slice();
-          return bookmarks.filter((bookmark) => {
-            const topicId = LinuxDoAPI2.resolveTopicId(bookmark);
-            if (remoteUrls) return !remoteUrls.has(`https://linux.do/t/${topicId}`);
-            return !Storage2.isTopicExported(topicId);
-          });
-        },
-        // 20260914: 远端命中项回写导出账本(仅 strict; 远端是 ground truth, 三定律) ——
-        // skip 语义必须落账, 否则账本缺失项每轮 skip 而永不落账, 本地账本驱动的待导出计数恒冻结。
-        // batch 纪律同 workspace-insight 对账回填: beginBatch→逐条 mark→endBatch+缓存失效(消除写侧 O(N²))。
-        markRemoteExistingTopics: ({ bookmarks = [], newBookmarks = [], remoteUrls = null, dedupStrict = true } = {}) => {
-          if (!remoteUrls || !dedupStrict || bookmarks.length <= newBookmarks.length) return 0;
-          const newIds = new Set(newBookmarks.map((b) => LinuxDoAPI2.resolveTopicId(b)));
-          let marked = 0;
-          let linuxdoBatchOpened = false;
-          try {
-            DedupStore.beginBatch("linuxdo");
-            linuxdoBatchOpened = true;
-          } catch {
-          }
-          try {
-            bookmarks.forEach((b) => {
-              const topicId = LinuxDoAPI2.resolveTopicId(b);
-              if (!topicId || newIds.has(topicId)) return;
-              if (remoteUrls.has(`https://linux.do/t/${topicId}`)) {
-                Storage2.markTopicExported(topicId);
-                marked++;
-              }
-            });
-          } finally {
-            if (linuxdoBatchOpened) {
-              try {
-                DedupStore.endBatch("linuxdo");
-              } catch {
-              }
-              Storage2._exportedTopicsCache = null;
-            }
-          }
-          return marked;
-        },
-        buildSettings: () => {
-          const exportTargetType = Storage2.get(CONFIG2.STORAGE_KEYS.EXPORT_TARGET_TYPE, CONFIG2.DEFAULTS.exportTargetType);
-          return {
-            // 与 Bookmark AutoImporter 对齐：经 getAccessToken 读取，避免绕过 OAuth 语义
-            apiKey: NotionOAuth2.getAccessToken(""),
-            databaseId: Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_DATABASE_ID, ""),
-            parentPageId: Storage2.get(CONFIG2.STORAGE_KEYS.PARENT_PAGE_ID, ""),
-            exportTargetType,
-            onlyFirst: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_ONLY_FIRST, false),
-            onlyOp: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_ONLY_OP, false),
-            rangeStart: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_RANGE_START, 1),
-            rangeEnd: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_RANGE_END, 999999),
-            imgFilter: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_IMG, CONFIG2.DEFAULTS.imgFilter),
-            filterUsers: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_USERS, CONFIG2.DEFAULTS.filterUsers),
-            filterInclude: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_INCLUDE, CONFIG2.DEFAULTS.filterInclude),
-            filterExclude: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_EXCLUDE, CONFIG2.DEFAULTS.filterExclude),
-            filterMinLen: Storage2.get(CONFIG2.STORAGE_KEYS.FILTER_MINLEN, CONFIG2.DEFAULTS.filterMinLen),
-            imgMode: Storage2.get(CONFIG2.STORAGE_KEYS.IMG_MODE, CONFIG2.DEFAULTS.imgMode),
-            concurrency: Storage2.get(CONFIG2.STORAGE_KEYS.EXPORT_CONCURRENCY, CONFIG2.DEFAULTS.exportConcurrency)
-          };
-        },
-        // 检查配置是否足够
-        canStart: () => {
-          if (!Storage2.get(CONFIG2.STORAGE_KEYS.AUTO_IMPORT_ENABLED, false)) return false;
-          const apiKey = NotionOAuth2.getAccessToken();
-          if (!apiKey) return false;
-          const exportTargetType = Storage2.get(CONFIG2.STORAGE_KEYS.EXPORT_TARGET_TYPE, CONFIG2.DEFAULTS.exportTargetType);
-          if (exportTargetType === "database") {
-            return !!Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_DATABASE_ID, "");
-          } else {
-            return !!Storage2.get(CONFIG2.STORAGE_KEYS.PARENT_PAGE_ID, "");
-          }
-        },
-        // 更新状态栏
-        updateStatus: (text) => {
-          const el = document.querySelector("#ldb-auto-import-status");
-          if (el) el.textContent = text;
-        },
-        getWatermark: (bookmarks = []) => SyncState2.buildWatermark(
-          bookmarks,
-          LinuxDoAPI2.getBookmarkSyncTime,
-          LinuxDoAPI2.getBookmarkId
-        ),
-        startPolling: (intervalMinutes) => {
-          const { SyncScheduler } = require_SyncScheduler();
-          SyncScheduler.start("linuxdo", intervalMinutes);
-        },
-        ensureVisibilityListener: () => {
-          if (AutoImporter2.visibilityListenerBound) return;
-          document.addEventListener("visibilitychange", () => {
-            if (!document.hidden && AutoImporter2.deferredWhileHidden) {
-              AutoImporter2.deferredWhileHidden = false;
-              if (!AutoImporter2.canStart()) return;
-              Utils2.runWhenBrowserIdle(() => {
-                if (AutoImporter2.canStart()) AutoImporter2.run();
-              });
-            }
-          });
-          AutoImporter2.visibilityListenerBound = true;
-        },
-        stopPolling: () => {
-          if (AutoImporter2._initTimer) {
-            clearTimeout(AutoImporter2._initTimer);
-            AutoImporter2._initTimer = null;
-          }
-          const { SyncScheduler } = require_SyncScheduler();
-          SyncScheduler.stop("linuxdo");
-        },
-        init: () => {
-          if (!AutoImporter2.canStart()) return;
-          AutoImporter2.ensureVisibilityListener();
-          AutoImporter2._initTimer = setTimeout(() => {
-            AutoImporter2._initTimer = null;
-            if (!AutoImporter2.canStart()) return;
-            Utils2.runWhenBrowserIdle(() => {
-              if (AutoImporter2.canStart()) AutoImporter2.run();
-            });
-            const interval = Storage2.get(CONFIG2.STORAGE_KEYS.AUTO_IMPORT_INTERVAL, CONFIG2.DEFAULTS.autoImportInterval);
-            if (interval > 0) AutoImporter2.startPolling(interval);
-          }, 3e3);
-        }
-      };
-      AutoImporter2.run = async () => {
-        if (document.hidden) {
-          AutoImporter2.deferredWhileHidden = true;
-          return;
-        }
-        if (AutoImporter2.isRunning) return;
-        if (SyncLock.isExporting) return;
-        const apiKey = NotionOAuth2.getAccessToken("");
-        if (!apiKey) {
-          AutoImporter2.updateStatus("\u8BF7\u5148\u914D\u7F6E Notion API Key");
-          return { importedCount: 0, failedCount: 0, errors: ["\u8BF7\u5148\u914D\u7F6E Notion API Key"] };
-        }
-        const exportTargetType = Storage2.get(CONFIG2.STORAGE_KEYS.EXPORT_TARGET_TYPE, CONFIG2.DEFAULTS.exportTargetType);
-        if (exportTargetType === "database" && !Storage2.get(CONFIG2.STORAGE_KEYS.NOTION_DATABASE_ID, "")) {
-          AutoImporter2.updateStatus("\u8BF7\u5148\u914D\u7F6E Notion \u6570\u636E\u5E93 ID");
-          return { importedCount: 0, failedCount: 0, errors: ["\u8BF7\u5148\u914D\u7F6E Notion \u6570\u636E\u5E93 ID"] };
-        }
-        if (exportTargetType === "page" && !Storage2.get(CONFIG2.STORAGE_KEYS.PARENT_PAGE_ID, "")) {
-          AutoImporter2.updateStatus("\u8BF7\u5148\u914D\u7F6E\u7236\u9875\u9762 ID");
-          return { importedCount: 0, failedCount: 0, errors: ["\u8BF7\u5148\u914D\u7F6E\u7236\u9875\u9762 ID"] };
-        }
-        const now = Date.now();
-        if (now - AutoImporter2.lastRunAt < AutoImporter2.minimumRunGapMs) return;
-        AutoImporter2.lastRunAt = now;
-        AutoImporter2.isRunning = true;
-        const exportMutexAcquired = SyncLock.isExporting !== true;
-        SyncLock.isExporting = true;
-        let lease = null;
-        try {
-          lease = await SyncLock.acquireLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE);
-        } catch (leaseError) {
-          AutoImporter2.isRunning = false;
-          if (exportMutexAcquired) SyncLock.isExporting = false;
-          console.error("[LD-Notion] \u81EA\u52A8\u5BFC\u5165\u83B7\u53D6\u79DF\u7EA6\u5931\u8D25:", leaseError);
-          AutoImporter2.updateStatus("\u274C \u83B7\u53D6\u540C\u6B65\u79DF\u7EA6\u5931\u8D25\uFF0C\u672C\u8F6E\u8DF3\u8FC7");
-          return;
-        }
-        if (!lease) {
-          AutoImporter2.isRunning = false;
-          if (exportMutexAcquired) SyncLock.isExporting = false;
-          AutoImporter2.updateStatus("\u23F8 \u5176\u4ED6\u6807\u7B7E\u9875\u6B63\u5728\u540C\u6B65\uFF0C\u672C\u8F6E\u81EA\u52A8\u5BFC\u5165\u8DF3\u8FC7");
-          return;
-        }
-        AutoImporter2._leaseLost = false;
-        const renewTimer = setInterval(() => {
-          let renewed;
-          try {
-            renewed = SyncLock.renewLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
-          } catch (renewError) {
-            console.warn("[LD-Notion] \u81EA\u52A8\u5BFC\u5165\u7EED\u7EA6\u5931\u8D25:", renewError);
-            renewed = false;
-          }
-          if (!renewed) {
-            AutoImporter2._leaseLost = true;
-            clearInterval(renewTimer);
-          }
-        }, 3e4);
-        const attemptAt = Date.now();
-        const exportBtn = document.querySelector("#ldb-export");
-        try {
-          SyncState2.updateLinuxDoState({
-            lastAttemptAt: attemptAt,
-            lastOutcome: "running",
-            lastError: "",
-            lastStats: {}
-          });
-          const username = await Utils2.getCurrentLinuxDoUsernameAsync();
-          if (!username) {
-            const errorMessage = "\u65E0\u6CD5\u83B7\u53D6\u5F53\u524D Linux.do \u7528\u6237\u540D";
-            SyncState2.updateLinuxDoState({
-              lastAttemptAt: attemptAt,
-              lastOutcome: "error",
-              lastError: errorMessage,
-              lastStats: {}
-            });
-            AutoImporter2.updateStatus(`\u274C ${errorMessage}`);
-            return { importedCount: 0, failedCount: 0, errors: [`${errorMessage}\uFF1A\u8BF7\u5237\u65B0 linux.do \u9875\u9762\u5E76\u786E\u8BA4\u5DF2\u767B\u5F55\u540E\u91CD\u8BD5`] };
-          }
-          AutoImporter2.updateStatus("\u{1F4E7} \u6B63\u5728\u68C0\u67E5\u65B0\u6536\u85CF...");
-          const syncState = SyncState2.getLinuxDoState();
-          const bookmarks = await LinuxDoAPI2.fetchBookmarksSince(username, syncState.watermark);
-          const dedupStrict = Utils2.isLinuxDoDedupStrict();
-          const settings = AutoImporter2.buildSettings();
-          let remoteUrls = null;
-          try {
-            remoteUrls = await NotionAPI2.collectDatabaseUrls(settings.apiKey, settings.databaseId);
-          } catch (_) {
-            remoteUrls = null;
-          }
-          const newBookmarks = AutoImporter2.resolveNewBookmarks({ bookmarks, dedupStrict, remoteUrls });
-          AutoImporter2.markRemoteExistingTopics({ bookmarks, newBookmarks, remoteUrls, dedupStrict });
-          if (newBookmarks.length === 0) {
-            const statePatch2 = {
-              lastAttemptAt: attemptAt,
-              lastSuccessAt: Date.now(),
-              lastOutcome: "success",
-              lastError: "",
-              lastStats: {
-                scanned: bookmarks.length,
-                pending: 0,
-                success: 0,
-                failed: 0
-              }
-            };
-            if (bookmarks.length > 0) {
-              statePatch2.watermark = AutoImporter2.getWatermark(bookmarks);
-            }
-            SyncState2.updateLinuxDoState(statePatch2);
-            AutoImporter2.updateStatus(`\u2705 \u6CA1\u6709\u65B0\u6536\u85CF (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`);
-            return { importedCount: 0, failedCount: 0, errors: [] };
-          }
-          AutoImporter2.updateStatus(`\u{1F4EC} \u53D1\u73B0 ${newBookmarks.length} \u4E2A\u65B0\u6536\u85CF\uFF0C\u6B63\u5728\u5BFC\u5165...`);
-          if (exportBtn) exportBtn.disabled = true;
-          const obsExportBtn = document.querySelector("#ldb-obs-export");
-          if (obsExportBtn) obsExportBtn.disabled = true;
-          const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-          const concurrency = settings.concurrency || 1;
-          let success = 0;
-          let failed = 0;
-          let autoImportAborted = false;
-          const successfulBookmarks = [];
-          const remaining = Array.from({ length: newBookmarks.length }, (_, k) => k);
-          const worker = async () => {
-            while (true) {
-              if (AutoImporter2._leaseLost || autoImportAborted) break;
-              const i = remaining.shift();
-              if (i === void 0) return;
-              const bookmark = newBookmarks[i];
-              const topicId = LinuxDoAPI2.resolveTopicId(bookmark);
-              const title = bookmark.title || bookmark.fancy_title || bookmark.name || `\u5E16\u5B50 ${topicId}`;
-              AutoImporter2.updateStatus(`\u{1F4EC} \u5BFC\u5165\u4E2D (${i + 1}/${newBookmarks.length}): ${title}`);
-              try {
-                settings.apiKey = NotionOAuth2.getAccessToken("");
-                await Exporter2.exportTopic(bookmark, settings);
-                success++;
-                successfulBookmarks.push(bookmark);
-              } catch (error) {
-                console.error(`[LD-Notion] \u81EA\u52A8\u5BFC\u5165\u5931\u8D25: ${title}`, error);
-                failed++;
-                if (Exporter2.isAuthTerminalError && Exporter2.isAuthTerminalError(error)) {
-                  autoImportAborted = { authCode: error.authCode || "unauthorized" };
-                  break;
-                }
-              }
-              if (delay > 0 && remaining.length > 0) {
-                await Utils2.sleep(delay);
-              }
-            }
-          };
-          const workerCount = Math.min(concurrency, newBookmarks.length);
-          const workers = [];
-          for (let w = 0; w < workerCount; w++) {
-            workers.push(worker());
-            if (w < workerCount - 1) await Utils2.sleep(100);
-          }
-          await Promise.all(workers);
-          const uiRef = null;
-          emit("bookmarks:updated");
-          const statePatch = {
-            lastAttemptAt: attemptAt,
-            lastOutcome: autoImportAborted ? "aborted" : failed > 0 ? "partial" : "success",
-            lastError: autoImportAborted ? "\u8BA4\u8BC1\u5931\u8D25\uFF0C\u5DF2\u4E2D\u6B62\u672C\u6B21\u81EA\u52A8\u5BFC\u5165\uFF08\u8BF7\u68C0\u67E5 Notion API Key / OAuth \u6388\u6743\uFF09" : "",
-            lastStats: {
-              scanned: bookmarks.length,
-              pending: newBookmarks.length,
-              success,
-              failed
-            }
-          };
-          if (successfulBookmarks.length > 0) {
-            const successIds = new Set(successfulBookmarks.map((bookmark) => LinuxDoAPI2.getBookmarkId(bookmark)));
-            const leadingSuccessfulBookmarks = SyncState2.takeLeadingItems(
-              newBookmarks,
-              (bookmark) => successIds.has(LinuxDoAPI2.getBookmarkId(bookmark))
-            );
-            if (leadingSuccessfulBookmarks.length > 0) {
-              statePatch.watermark = AutoImporter2.getWatermark(leadingSuccessfulBookmarks);
-            }
-            statePatch.lastSuccessAt = Date.now();
-          }
-          SyncState2.updateLinuxDoState(statePatch);
-          const authCode = String((autoImportAborted == null ? void 0 : autoImportAborted.authCode) || "").toLowerCase();
-          let abortText = `\u26D4 \u8BA4\u8BC1\u5931\u8D25\uFF0C\u5DF2\u4E2D\u6B62\u81EA\u52A8\u5BFC\u5165\uFF08\u6210\u529F ${success} \u4E2A\uFF1B\u5269\u4F59\u9879\u5C06\u5728\u4E0B\u6B21\u540C\u6B65\u91CD\u8BD5\u3002\u8BF7\u68C0\u67E5 Notion API Key / OAuth \u6388\u6743\uFF09 (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`;
-          if (authCode === "empty_token") {
-            abortText = `\u26D4 \u672A\u8BFB\u53D6\u5230 API Key\uFF0C\u5DF2\u4E2D\u6B62\u81EA\u52A8\u5BFC\u5165\uFF08\u6210\u529F ${success} \u4E2A\uFF1B\u8BF7\u91CD\u65B0\u4FDD\u5B58 API Key \u6216\u91CD\u65B0 OAuth \u6388\u6743\uFF09 (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`;
-          } else if (authCode === "unauthorized" || authCode === "invalid_bearer_token") {
-            abortText = `\u26D4 Notion \u62D2\u7EDD\u4E86\u8BE5 API Key\uFF0C\u5DF2\u4E2D\u6B62\u81EA\u52A8\u5BFC\u5165\uFF08\u6210\u529F ${success} \u4E2A\uFF1B\u8BF7\u91CD\u65B0\u590D\u5236\u4FDD\u5B58\u6216\u91CD\u65B0 OAuth \u6388\u6743\uFF09 (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`;
-          }
-          AutoImporter2.updateStatus(
-            autoImportAborted ? abortText : `\u2705 \u81EA\u52A8\u5BFC\u5165\u5B8C\u6210: ${success} \u4E2A\u6210\u529F${failed > 0 ? `\uFF0C${failed} \u4E2A\u5931\u8D25` : ""} (${(/* @__PURE__ */ new Date()).toLocaleTimeString()})`
-          );
-          if (success > 0 && typeof GM_notification === "function") {
-            GM_notification({
-              title: "\u81EA\u52A8\u5BFC\u5165\u5B8C\u6210",
-              text: `\u6210\u529F\u5BFC\u5165 ${success} \u4E2A\u65B0\u6536\u85CF\u5230 Notion`,
-              timeout: 5e3
-            });
-          }
-          return {
-            importedCount: success,
-            failedCount: failed,
-            errors: autoImportAborted ? [String((autoImportAborted == null ? void 0 : autoImportAborted.message) || "\u8BA4\u8BC1\u5931\u8D25\uFF0C\u5DF2\u4E2D\u6B62\u81EA\u52A8\u5BFC\u5165\uFF08\u8BF7\u68C0\u67E5 Notion API Key / OAuth \u6388\u6743\uFF09")] : []
-          };
-        } catch (error) {
-          console.error("[LD-Notion] \u81EA\u52A8\u5BFC\u5165\u51FA\u9519:", error);
-          SyncState2.updateLinuxDoState({
-            lastAttemptAt: attemptAt,
-            lastOutcome: "error",
-            lastError: (error == null ? void 0 : error.message) || String(error),
-            lastStats: {}
-          });
-          AutoImporter2.updateStatus(`\u274C \u81EA\u52A8\u5BFC\u5165\u51FA\u9519: ${error.message}`);
-          return { importedCount: 0, failedCount: 0, errors: [(error == null ? void 0 : error.message) || String(error)] };
-        } finally {
-          clearInterval(renewTimer);
-          SyncLock.releaseLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
-          AutoImporter2._leaseLost = false;
-          AutoImporter2.isRunning = false;
-          if (exportMutexAcquired) SyncLock.isExporting = false;
-          if (exportBtn) exportBtn.disabled = false;
-          const obsExportBtn2 = document.querySelector("#ldb-obs-export");
-          if (obsExportBtn2) obsExportBtn2.disabled = false;
-          emit("sync:center-summary-updated");
-        }
-      };
-      module.exports = { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 };
-    }
-  });
-
   // src/ai/handlers/batch.js
   var require_batch = __commonJS({
     "src/ai/handlers/batch.js"(exports, module) {
@@ -19410,89 +17532,6 @@ ${report}
             return `\u274C \u6279\u91CF\u5206\u6790\u5931\u8D25: ${error.message}`;
           }
         },
-        handleGitHubImport: async (params, settings, explanation) => {
-          const username = params.username || Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, "");
-          const token = Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "");
-          const databaseId = settings.notionDatabaseId;
-          if (!username) {
-            return "\u274C \u8BF7\u5148\u5728\u8BBE\u7F6E\u4E2D\u914D\u7F6E GitHub \u7528\u6237\u540D\u3002\n\n\u{1F4A1} \u5728 Notion \u9762\u677F\u7684\u8BBE\u7F6E\u4E2D\u627E\u5230\u300CGitHub \u6536\u85CF\u5BFC\u5165\u300D\u90E8\u5206\u586B\u5199\u7528\u6237\u540D\u3002";
-          }
-          if (!settings.notionApiKey) {
-            return "\u274C \u8BF7\u5148\u914D\u7F6E Notion API Key\u3002";
-          }
-          if (!databaseId) {
-            return "\u274C \u8BF7\u5148\u914D\u7F6E GitHub \u6536\u85CF\u7684\u76EE\u6807\u6570\u636E\u5E93 ID\u3002\n\n\u{1F4A1} \u53EF\u4EE5\u5728\u8BBE\u7F6E\u4E2D\u4E13\u95E8\u6307\u5B9A\uFF0C\u6216\u4F7F\u7528\u9ED8\u8BA4\u6570\u636E\u5E93\u3002";
-          }
-          const classify = params.classify || false;
-          const importTypes = require_import().GitHubAPI.getImportTypes();
-          try {
-            const allResults = await require_import().GitHubExporter.exportAll({
-              apiKey: settings.notionApiKey,
-              databaseId,
-              username,
-              token,
-              aiApiKey: settings.aiApiKey,
-              aiService: settings.aiService,
-              aiModel: settings.aiModel,
-              aiBaseUrl: settings.aiBaseUrl,
-              categories: settings.categories
-            }, (msg, pct) => {
-              state().updateLastMessage(`\u{1F419} ${msg}`, "processing");
-            });
-            let response = `\u2705 **GitHub \u5BFC\u5165\u5B8C\u6210**
-
-`;
-            let totalExported = 0;
-            let totalFailed = 0;
-            let totalErrors = 0;
-            const typeNames = { stars: "Stars", repos: "Repos", forks: "Forks", gists: "Gists" };
-            for (const type of importTypes) {
-              const r = allResults[type];
-              if (!r) continue;
-              if (r.error) {
-                totalErrors++;
-                response += `\u274C ${typeNames[type]}: ${r.error}
-`;
-              } else {
-                response += `\u{1F4CA} ${typeNames[type]}: \u5171 ${r.total} \u4E2A\uFF0C\u5BFC\u51FA ${r.exported} \u4E2A`;
-                if (r.failed > 0) response += `\uFF0C\u5931\u8D25 ${r.failed} \u4E2A`;
-                response += `
-`;
-                totalExported += r.exported || 0;
-                totalFailed += r.failed || 0;
-              }
-            }
-            if (totalExported === 0 && totalFailed === 0 && totalErrors === 0) {
-              response += `
-\u6240\u6709\u5185\u5BB9\u5DF2\u662F\u6700\u65B0\u72B6\u6001\u3002`;
-            }
-            if (classify && totalExported > 0 && settings.aiApiKey) {
-              state().updateLastMessage("\u{1F3F7}\uFE0F \u6B63\u5728\u8FDB\u884C AI \u5206\u7C7B...", "processing");
-              try {
-                const classifyResult = await require_import().GitHubExporter.classifyRepos({
-                  ...settings,
-                  databaseId
-                }, (msg, pct) => {
-                  state().updateLastMessage(`\u{1F3F7}\uFE0F ${msg}`, "processing");
-                });
-                response += `
-
-\u{1F3F7}\uFE0F **AI \u5206\u7C7B\u5B8C\u6210**: \u5DF2\u5206\u7C7B ${classifyResult.classified}/${classifyResult.total} \u4E2A`;
-              } catch (e) {
-                response += `
-
-\u26A0\uFE0F AI \u5206\u7C7B\u51FA\u9519: ${e.message}`;
-              }
-            } else if (classify && !settings.aiApiKey) {
-              response += `
-
-\u26A0\uFE0F \u672A\u914D\u7F6E AI API Key\uFF0C\u8DF3\u8FC7\u81EA\u52A8\u5206\u7C7B\u3002`;
-            }
-            return response;
-          } catch (error) {
-            return `\u274C GitHub \u5BFC\u5165\u5931\u8D25: ${error.message}`;
-          }
-        },
         handleBookmarkImport: async (params, settings, explanation) => {
           const databaseId = settings.notionDatabaseId;
           if (!settings.notionApiKey) {
@@ -19586,7 +17625,7 @@ ${report}
       var { handleQuery, handleSearch, handleWorkspaceSearch } = require_query();
       var { handleUpdate, _resolveDatabaseId, _fetchSourcePages, handleMove, handleCopy, handleCompound, handleCreateDatabase } = require_pageCrud();
       var { _resolvePageId, _textToBlocks, _extractPageContent, handleWriteContent, handleEditContent, handleTranslateContent, _ensureAIProperty, handleAIAutofill, handleAsk, handleDeepResearch, handleSummarize, handleBrainstorm, handleProofread, handleTemplateOutput } = require_content();
-      var { handleClassify, handleBatchClassify, handleBatchTranslate, handleExtractToDatabase, handleGeneratePages, handleBatchAnalyze, handleGitHubImport, handleBookmarkImport } = require_batch();
+      var { handleClassify, handleBatchClassify, handleBatchTranslate, handleExtractToDatabase, handleGeneratePages, handleBatchAnalyze, handleBookmarkImport } = require_batch();
       var AIHandlers2 = {
         handleQuery,
         handleSearch,
@@ -19618,7 +17657,6 @@ ${report}
         handleExtractToDatabase,
         handleGeneratePages,
         handleBatchAnalyze,
-        handleGitHubImport,
         handleBookmarkImport
       };
       module.exports = { AIHandlers: AIHandlers2 };
@@ -21810,10 +19848,9 @@ ${systemText}
             "AIAssistant.handleTranslateContent / handleEditContent / handleAIAutofill",
             "AIClassifier.*",
             "GenericExporter.setupDatabaseProperties",
-            "GitHubExporter.setupDatabaseProperties",
             "BookmarkExporter.setupDatabaseProperties"
           ]),
-          note: "M2-P1 \u6536\u53E3 UI \u4E8B\u4EF6\u5230 command boundary;\u9057\u7559 direct NotionAPI \u5199\u8DEF\u5F84\u9650\u5B9A\u5728\u5DE5\u5177\u6267\u884C\u5668\u4E0E schema \u521D\u59CB\u5316 helper \u5185(GenericExporter.setupDatabaseProperties \u7684 UI \u89E6\u53D1\u8DEF\u5F84\u5DF2\u52A0 updateDatabase \u975E\u963B\u585E\u95F8\u95E8 + guard.denied \u5BA1\u8BA1;Bookmark/GitHub exporter \u5DF2\u6709 canExecute \u95F8\u95E8),\u4E0D\u5141\u8BB8\u7EE7\u7EED\u4ECE UI \u4E8B\u4EF6\u76F4\u63A5\u6269\u6563\u3002"
+          note: "M2-P1 \u6536\u53E3 UI \u4E8B\u4EF6\u5230 command boundary;\u9057\u7559 direct NotionAPI \u5199\u8DEF\u5F84\u9650\u5B9A\u5728\u5DE5\u5177\u6267\u884C\u5668\u4E0E schema \u521D\u59CB\u5316 helper \u5185(GenericExporter.setupDatabaseProperties \u7684 UI \u89E6\u53D1\u8DEF\u5F84\u5DF2\u52A0 updateDatabase \u975E\u963B\u585E\u95F8\u95E8 + guard.denied \u5BA1\u8BA1;Bookmark exporter \u5DF2\u6709 canExecute \u95F8\u95E8),\u4E0D\u5141\u8BB8\u7EE7\u7EED\u4ECE UI \u4E8B\u4EF6\u76F4\u63A5\u6269\u6563\u3002"
         }),
         _persistStorageEntries: async (entries = {}) => {
           for (const [key, value] of Object.entries(entries)) {
@@ -21852,9 +19889,6 @@ ${systemText}
             personaTone = CONFIG2.DEFAULTS.agentPersonaTone,
             personaExpertise = CONFIG2.DEFAULTS.agentPersonaExpertise,
             personaInstructions = "",
-            githubUsername = "",
-            githubToken,
-            githubImportTypes = ["stars"],
             auditEnabled = null
           } = payload;
           if (liveApiKey) {
@@ -21872,8 +19906,7 @@ ${systemText}
             [CONFIG2.STORAGE_KEYS.AGENT_PERSONA_NAME]: personaName || CONFIG2.DEFAULTS.agentPersonaName,
             [CONFIG2.STORAGE_KEYS.AGENT_PERSONA_TONE]: personaTone,
             [CONFIG2.STORAGE_KEYS.AGENT_PERSONA_EXPERTISE]: personaExpertise || CONFIG2.DEFAULTS.agentPersonaExpertise,
-            [CONFIG2.STORAGE_KEYS.AGENT_PERSONA_INSTRUCTIONS]: personaInstructions,
-            [CONFIG2.STORAGE_KEYS.GITHUB_USERNAME]: githubUsername
+            [CONFIG2.STORAGE_KEYS.AGENT_PERSONA_INSTRUCTIONS]: personaInstructions
           });
           if (auditEnabled !== null) {
             await UICommandService2._persistStorageEntries({
@@ -21881,10 +19914,8 @@ ${systemText}
             });
           }
           await UICommandService2._persistProvidedSensitiveEntries({
-            ...aiApiKey === void 0 ? {} : { [CONFIG2.STORAGE_KEYS.AI_API_KEY]: aiApiKey },
-            ...githubToken === void 0 ? {} : { [CONFIG2.STORAGE_KEYS.GITHUB_TOKEN]: githubToken }
+            ...aiApiKey === void 0 ? {} : { [CONFIG2.STORAGE_KEYS.AI_API_KEY]: aiApiKey }
           });
-          require_import().GitHubAPI.setImportTypes(Array.isArray(githubImportTypes) && githubImportTypes.length > 0 ? githubImportTypes : ["stars"]);
           return {
             aiTargetState: TargetState2.getDisplayAITargetState(),
             aiService,
@@ -23066,7 +21097,7 @@ ${systemText}
       var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2 } = require_extract();
       var { UICommandService: UICommandService2 } = require_UICommandService();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
-      var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
+      var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2 } = require_import();
       var { BookmarkBridge: BookmarkBridge2 } = require_bridge();
       var { StyleManager: StyleManager2 } = require_style_manager();
       var { AIAssistant: AIAssistant2, AIService: AIService2, AIWelcomeUI: AIWelcomeUI2, ChatState: ChatState2, ChatUI: ChatUI2 } = require_ai();
@@ -23421,35 +21452,7 @@ ${systemText}
                         <label class="ldb-label">\u81EA\u5B9A\u4E49\u6307\u4EE4 (\u53EF\u9009)</label>
                         <textarea class="ldb-input" id="ldb-notion-persona-instructions" rows="2" placeholder="\u989D\u5916\u7684\u884C\u4E3A\u6307\u4EE4..." style="resize: vertical;"></textarea>
                     </div>
-                    <div class="ldb-section-divider">
-                        <span class="ldb-hint">\u{1F419} GitHub \u6536\u85CF\u5BFC\u5165</span>
-                    </div>
-                    <div class="ldb-input-group ldb-mt-8">
-                        <label class="ldb-label">GitHub \u7528\u6237\u540D</label>
-                        <input type="text" class="ldb-input" id="ldb-notion-github-username" placeholder="your-username">
-                    </div>
-                    <div class="ldb-input-group">
-                        <label class="ldb-label">GitHub Token (\u53EF\u9009\uFF0C\u63D0\u9AD8\u901F\u7387\u9650\u5236)</label>
-                        <input type="password" class="ldb-input" id="ldb-notion-github-token" placeholder="ghp_xxx...">
-                        <div class="ldb-tip">\u4E0D\u586B\u5199\u4E5F\u53EF\u4F7F\u7528\uFF0C\u4F46\u6709 60 \u6B21/\u5C0F\u65F6\u9650\u5236</div>
-                    </div>
-                    <div class="ldb-input-group">
-                        <label class="ldb-label">\u5BFC\u5165\u7C7B\u578B</label>
-                        <div class="ldb-checkbox-group" style="margin-top: var(--ldb-ui-spacing-xs);">
-                            <label class="ldb-checkbox-item">
-                                <input type="checkbox" class="ldb-notion-github-type" value="stars" checked> \u2B50 Stars
-                            </label>
-                            <label class="ldb-checkbox-item">
-                                <input type="checkbox" class="ldb-notion-github-type" value="repos"> \u{1F4E6} Repos
-                            </label>
-                            <label class="ldb-checkbox-item">
-                                <input type="checkbox" class="ldb-notion-github-type" value="forks"> \u{1F374} Forks
-                            </label>
-                            <label class="ldb-checkbox-item">
-                                <input type="checkbox" class="ldb-notion-github-type" value="gists"> \u{1F4DD} Gists
-                            </label>
-                        </div>
-                    </div>
+                    <!-- v3.17: GitHub \u6536\u85CF\u6E90\u5DF2\u79FB\u9664,\u4EE5\u4E0B\u5386\u53F2 GitHub \u6536\u85CF\u5BFC\u5165\u8BBE\u7F6E\u533A\u5220\u9664\u3002 -->
                     <div class="ldb-section-divider">
                         <span class="ldb-hint">\u{1F4D6} \u6D4F\u89C8\u5668\u4E66\u7B7E\u5BFC\u5165</span>
                         <div id="ldb-notion-bookmark-status" style="font-size: var(--ldb-ui-font-size-xs); margin-top: var(--ldb-ui-spacing-xs);"></div>
@@ -23590,23 +21593,16 @@ ${systemText}
                 personaTone: panel.querySelector("#ldb-notion-persona-tone").value,
                 personaExpertise: panel.querySelector("#ldb-notion-persona-expertise").value.trim() || CONFIG2.DEFAULTS.agentPersonaExpertise,
                 personaInstructions: panel.querySelector("#ldb-notion-persona-instructions").value.trim(),
-                githubUsername: panel.querySelector("#ldb-notion-github-username").value.trim(),
-                // P4 收敛(c07): 与 API Key 同构 —— 未编辑时传 undefined(保留已存值),
-                // 否则面板加载即置空的输入框会在保存时 Storage.remove 掉已存 token
-                githubToken: panel.querySelector("#ldb-notion-github-token").dataset.touched === "true" ? panel.querySelector("#ldb-notion-github-token").value.trim() : void 0,
-                githubImportTypes: [...panel.querySelectorAll(".ldb-notion-github-type:checked")].map((cb) => cb.value),
                 auditEnabled: panel.querySelector("#ldb-notion-audit-enabled").checked
               });
               NotionOAuth2.syncApiKeyInputs();
               CredentialVault2.syncSensitiveInput(panel.querySelector("#ldb-notion-ai-api-key"), CONFIG2.STORAGE_KEYS.AI_API_KEY, "AI \u670D\u52A1\u7684 API Key");
-              CredentialVault2.syncSensitiveInput(panel.querySelector("#ldb-notion-github-token"), CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
               NotionSiteUI2.showStatus("\u8BBE\u7F6E\u5DF2\u4FDD\u5B58", "success");
             } catch (error) {
               NotionSiteUI2.showStatus(`\u8BBE\u7F6E\u4FDD\u5B58\u5931\u8D25\uFF1A${error.message}`, "error");
             } finally {
               panel.querySelector("#ldb-notion-api-key").dataset.touched = "false";
               panel.querySelector("#ldb-notion-ai-api-key").dataset.touched = "false";
-              panel.querySelector("#ldb-notion-github-token").dataset.touched = "false";
               saveBtn.textContent = originalText;
               saveBtn.disabled = false;
             }
@@ -23723,7 +21719,6 @@ ${systemText}
           });
           NotionOAuth2.syncApiKeyInputs();
           CredentialVault2.syncSensitiveInput(panel.querySelector("#ldb-notion-ai-api-key"), CONFIG2.STORAGE_KEYS.AI_API_KEY, "AI \u670D\u52A1\u7684 API Key");
-          CredentialVault2.syncSensitiveInput(panel.querySelector("#ldb-notion-github-token"), CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
         },
         // 加载配置
         loadConfig: () => {
@@ -23746,16 +21741,6 @@ ${systemText}
           panel.querySelector("#ldb-notion-persona-tone").value = Storage2.get(CONFIG2.STORAGE_KEYS.AGENT_PERSONA_TONE, CONFIG2.DEFAULTS.agentPersonaTone);
           panel.querySelector("#ldb-notion-persona-expertise").value = Storage2.get(CONFIG2.STORAGE_KEYS.AGENT_PERSONA_EXPERTISE, CONFIG2.DEFAULTS.agentPersonaExpertise);
           panel.querySelector("#ldb-notion-persona-instructions").value = Storage2.get(CONFIG2.STORAGE_KEYS.AGENT_PERSONA_INSTRUCTIONS, CONFIG2.DEFAULTS.agentPersonaInstructions);
-          panel.querySelector("#ldb-notion-github-username").value = Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, "");
-          panel.querySelector("#ldb-notion-github-token").value = "";
-          panel.querySelector("#ldb-notion-github-token").dataset.touched = "false";
-          panel.querySelector("#ldb-notion-github-token").oninput = () => {
-            panel.querySelector("#ldb-notion-github-token").dataset.touched = "true";
-          };
-          const savedGHTypes = GitHubAPI2.getImportTypes();
-          panel.querySelectorAll(".ldb-notion-github-type").forEach((cb) => {
-            cb.checked = savedGHTypes.includes(cb.value);
-          });
           const permEl = panel.querySelector("#ldb-notion-permission-level");
           if (permEl) {
             const level = OperationGuard2.getLevel();
@@ -23818,7 +21803,6 @@ ${systemText}
           }
           NotionOAuth2.syncApiKeyInputs();
           CredentialVault2.syncSensitiveInput(panel.querySelector("#ldb-notion-ai-api-key"), CONFIG2.STORAGE_KEYS.AI_API_KEY, "AI \u670D\u52A1\u7684 API Key");
-          CredentialVault2.syncSensitiveInput(panel.querySelector("#ldb-notion-github-token"), CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
         },
         getAITargetDefaultOptionLabel: (databases = []) => {
           const effectiveState = TargetState2.getEffectiveAITargetState();
@@ -24180,7 +22164,7 @@ ${systemText}
                         <div class="ldb-toggle-content collapsed ldb-mb-8" id="ldb-source-partitions-content">
                             <div class="ldb-source-option-group">
                                 <button class="ldb-source-option" id="ldb-source-select-linuxdo" type="button" aria-pressed="true">Linux.do \u6536\u85CF\u5206\u533A</button>
-                                <button class="ldb-source-option" id="ldb-source-select-github" type="button" aria-pressed="false">GitHub \u6536\u85CF\u5206\u533A</button>
+                                <!-- v3.17: GitHub \u6536\u85CF\u6E90\u5DF2\u79FB\u9664,source-select-github \u6309\u94AE\u5220\u9664\u3002 -->
                             </div>
                         </div>
 
@@ -24229,7 +22213,7 @@ ${systemText}
                             <!-- F-UI-05:\u5404\u6765\u6E90\u300C\u7ACB\u5373\u5BFC\u5165\u300D\u6309\u94AE(\u4E0D\u4F9D\u8D56 AI \u6307\u4EE4,\u76F4\u63A5\u89E6\u53D1\u5B8C\u6574\u540C\u6B65) -->
                             <div class="ldb-input-group ldb-mt-12">
                                 <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-import-now-linuxdo">\u7ACB\u5373\u5BFC\u5165 Linux.do</button>
-                                <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-import-now-github">\u7ACB\u5373\u5BFC\u5165 GitHub</button>
+                                <!-- v3.17: GitHub \u6536\u85CF\u6E90\u5DF2\u79FB\u9664,import-now-github \u6309\u94AE\u5220\u9664\u3002 -->
                                 <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-import-now-bookmark">\u7ACB\u5373\u5BFC\u5165\u4E66\u7B7E</button>
                             </div>
                             <div class="ldb-tip">\u7ACB\u5373\u5BFC\u5165\u4F1A\u6267\u884C\u5B8C\u6574\u540C\u6B65\uFF08\u62C9\u53D6 + \u5199\u5165 Notion + \u63A8\u8FDB\u6C34\u4F4D\uFF09\uFF0C\u4E0E\u81EA\u52A8\u540C\u6B65\u8DEF\u5F84\u4E00\u81F4\u3002</div>
@@ -24420,7 +22404,7 @@ ${systemText}
                             <div class="ldb-view-header">
                                 <div>
                                     <div class="ldb-view-section-title">\u7EDF\u4E00\u540C\u6B65\u4E2D\u5FC3</div>
-                                    <div class="ldb-tip">\u7EDF\u4E00\u67E5\u770B Linux.do\u3001GitHub \u4E0E\u6D4F\u89C8\u5668\u4E66\u7B7E\u4E09\u6761\u589E\u91CF\u540C\u6B65\u94FE\u7684\u542F\u7528\u72B6\u6001\u3001\u589E\u91CF\u57FA\u7EBF\u548C\u6700\u8FD1\u4E00\u6B21\u6210\u529F\u7ED3\u679C\u3002</div>
+                                    <div class="ldb-tip">\u7EDF\u4E00\u67E5\u770B Linux.do \u4E0E\u6D4F\u89C8\u5668\u4E66\u7B7E\u4E24\u6761\u589E\u91CF\u540C\u6B65\u94FE\u7684\u542F\u7528\u72B6\u6001\u3001\u589E\u91CF\u57FA\u7EBF\u548C\u6700\u8FD1\u4E00\u6B21\u6210\u529F\u7ED3\u679C\u3002</div>
                                 </div>
                                 <div class="ldb-view-actions">
                                     <button class="ldb-btn ldb-btn-secondary ldb-view-action-btn" id="ldb-view-sync-now" type="button">\u7ACB\u5373\u540C\u6B65\u5168\u90E8</button>
@@ -24438,7 +22422,7 @@ ${systemText}
                             <div class="ldb-view-summary" id="ldb-view-summary">
                                 <div class="ldb-view-empty">
                                     <div class="ldb-view-empty-title">\u89C6\u56FE\u8FD8\u6CA1\u6709\u6570\u636E</div>
-                                    <div class="ldb-view-empty-text">\u5148\u52A0\u8F7D Linux.do \u6216 GitHub \u6536\u85CF\uFF0C\u8FD9\u91CC\u4F1A\u5C55\u793A\u6765\u6E90\u5206\u5E03\u3001\u5BFC\u51FA\u72B6\u6001\u548C\u65F6\u95F4\u7EBF\u6458\u8981\u3002</div>
+                                    <div class="ldb-view-empty-text">\u5148\u52A0\u8F7D Linux.do \u6536\u85CF\uFF0C\u8FD9\u91CC\u4F1A\u5C55\u793A\u6765\u6E90\u5206\u5E03\u3001\u5BFC\u51FA\u72B6\u6001\u548C\u65F6\u95F4\u7EBF\u6458\u8981\u3002</div>
                                 </div>
                             </div>
                         </div>
@@ -24809,58 +22793,7 @@ ${systemText}
 
                     <div class="ldb-divider"></div>
 
-                    <!-- GitHub \u6536\u85CF\u5BFC\u5165\u8BBE\u7F6E -->
-                    <div class="ldb-section">
-                        <div class="ldb-toggle-section" id="ldb-github-settings-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="ldb-github-settings-content">
-                            <span class="ldb-section-title" style="margin-bottom: 0;">\u{1F419} GitHub \u5BFC\u5165</span>
-                            <span id="ldb-github-settings-arrow">\u25B6</span>
-                        </div>
-                        <div style="margin-top: var(--ldb-ui-spacing-md); margin-bottom: var(--ldb-ui-spacing-sm);">
-                            <button class="ldb-btn ldb-btn-secondary" id="ldb-open-github-settings" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-lg); font-size: var(--ldb-ui-font-size-sm);">
-                                \u{1F3AF} \u4E00\u952E\u5B9A\u4F4D GitHub Token
-                            </button>
-                        </div>
-                        <div class="ldb-toggle-content collapsed" id="ldb-github-settings-content">
-                            <div class="ldb-input-group ldb-mt-12">
-                                <label class="ldb-label">GitHub \u7528\u6237\u540D</label>
-                                <input type="text" class="ldb-input" id="ldb-github-username" placeholder="your-username">
-                            </div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label">GitHub \u6388\u6743\uFF08\u63A8\u8350\uFF0C\u514D\u624B\u52A8\u521B\u5EFA Token\uFF09</label>
-                                <div style="display: flex; gap: var(--ldb-ui-spacing-sm); align-items: center; flex-wrap: wrap;">
-                                    <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-github-oauth-btn">\u{1F517} \u901A\u8FC7 GitHub \u6388\u6743</button>
-                                    <span id="ldb-github-oauth-status" class="ldb-tip" style="flex: 1;"></span>
-                                </div>
-                                <div class="ldb-tip">\u9996\u6B21\u4F7F\u7528\u9700\u5728\u4E0B\u65B9\u586B\u5165 Client ID\uFF08github.com/settings/developers \u521B\u5EFA OAuth App \u5373\u53EF\uFF0C\u516C\u5F00\u4FE1\u606F\u65E0\u9700\u4FDD\u5BC6\uFF1B\u521B\u5EFA\u65F6 Authorization callback URL \u968F\u4FBF\u586B\u4E00\u4E2A https \u5730\u5740\u5373\u53EF\uFF08\u5982 https://smith-106.github.io/LD-Notion/\uFF0CGitHub \u8868\u5355\u8981\u6C42\u975E\u7A7A\uFF0C\u4F46 Device Flow \u4E0D\u8D70\u56DE\u8C03\uFF09\u2014\u2014\u4E0E Notion OAuth \u4E0D\u540C\uFF0C\u65E0\u9700\u767B\u8BB0\u771F\u5B9E\u56DE\u8C03\u5730\u5740\uFF0C\u4E5F\u4E0D\u4F1A\u51FA\u73B0\u53CC\u56DE\u8C03\u7A97\u53E3\uFF09\uFF1B\u70B9\u6388\u6743\u540E\u8BBE\u5907\u7801\u663E\u793A\u5728\u6309\u94AE\u65C1\u5E76\u81EA\u52A8\u590D\u5236\uFF0C\u76F4\u63A5\u53BB GitHub \u9875\u7C98\u8D34\uFF1B\u6388\u6743\u540E Token \u81EA\u52A8\u586B\u5165\u4E0B\u65B9\u8F93\u5165\u6846\uFF0C\u65E0\u9700\u624B\u52A8\u53BB GitHub \u751F\u6210</div>
-                            </div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label">GitHub OAuth Client ID\uFF08\u6388\u6743\u7528\uFF0C\u53EF\u9009\uFF09</label>
-                                <input type="text" class="ldb-input" id="ldb-github-oauth-client-id" placeholder="Iv1.xxxxxxxxxxxxxxxx">
-                            </div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label">GitHub Token (\u53EF\u9009)</label>
-                                <input type="password" class="ldb-input" id="ldb-github-token" placeholder="ghp_xxx...">
-                                <div class="ldb-tip">\u624B\u52A8\u7C98\u8D34 Personal Access Token\uFF08PAT \u5151\u5E95\u8DEF\u5F84\uFF09\uFF1B\u63A8\u8350\u7528\u4E0A\u65B9\u300C\u901A\u8FC7 GitHub \u6388\u6743\u300D\u81EA\u52A8\u83B7\u53D6</div>
-                            </div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label">\u5BFC\u5165\u7C7B\u578B</label>
-                                <div class="ldb-checkbox-group" style="margin-top: var(--ldb-ui-spacing-xs);">
-                                    <label class="ldb-checkbox-item">
-                                        <input type="checkbox" class="ldb-github-type" value="stars" checked> \u2B50 Stars
-                                    </label>
-                                    <label class="ldb-checkbox-item">
-                                        <input type="checkbox" class="ldb-github-type" value="repos"> \u{1F4E6} Repos
-                                    </label>
-                                    <label class="ldb-checkbox-item">
-                                        <input type="checkbox" class="ldb-github-type" value="forks"> \u{1F374} Forks
-                                    </label>
-                                    <label class="ldb-checkbox-item">
-                                        <input type="checkbox" class="ldb-github-type" value="gists"> \u{1F4DD} Gists
-                                    </label>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                    <!-- v3.17: GitHub \u6536\u85CF\u6E90\u5DF2\u79FB\u9664,\u4EE5\u4E0B\u5386\u53F2 GitHub \u6536\u85CF\u5BFC\u5165\u8BBE\u7F6E\u533A\u5220\u9664\u3002 -->
 
                     <div class="ldb-divider"></div>
 
@@ -24934,7 +22867,7 @@ ${systemText}
                         <div class="ldb-tip" id="ldb-dedup-summary"></div>
                         <div class="ldb-input-group ldb-mt-12">
                             <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-clear-linuxdo-dedup">\u6E05\u9664 Linux.do \u53BB\u91CD</button>
-                            <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-clear-github-exported">\u6E05\u9664 GitHub \u5DF2\u5BFC\u51FA\u8BB0\u5F55</button>
+                            <!-- v3.17: GitHub \u6536\u85CF\u6E90\u5DF2\u79FB\u9664,clear-github-exported \u6309\u94AE\u5220\u9664\u3002 -->
                             <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-clear-bookmark-exported">\u6E05\u9664\u4E66\u7B7E\u5DF2\u5BFC\u51FA\u8BB0\u5F55</button>
                         </div>
                         <div class="ldb-tip">\u4EC5\u6E05\u9664\u672C\u5730\u53BB\u91CD/\u5BFC\u51FA\u8BB0\u5F55\uFF0C\u4E0D\u5F71\u54CD Notion \u4E2D\u5DF2\u6709\u5185\u5BB9\uFF1B\u6E05\u9664\u540E\u5BF9\u5E94\u6765\u6E90\u53EF\u518D\u6B21\u5BFC\u51FA\u3002\u82E5\u300C\u5BFC\u51FA\u72B6\u6001\u4F9D\u636E\u300D\u4E3A Notion \u5DE5\u4F5C\u533A\uFF0C\u6E05\u7A7A Notion \u540E\u5237\u65B0\u5DE5\u4F5C\u533A\u5373\u53EF\u5168\u90E8\u56DE\u5230\u5F85\u5BFC\u51FA\uFF0C\u65E0\u9700\u5148\u6E05\u672C\u5730\u8D26\u672C\u3002</div>
@@ -25499,8 +23432,6 @@ ${systemText}
       var { CONFIG: CONFIG2 } = require_config();
       var { Utils: Utils2 } = require_utils();
       var { Storage: Storage2 } = require_storage();
-      var { SiteDetector: SiteDetector2 } = require_api();
-      var { GitHubAPI: GitHubAPI2 } = require_import();
       var { ChatUI: ChatUI2 } = require_ai();
       var _UI = null;
       var UI2 = () => {
@@ -25508,25 +23439,24 @@ ${systemText}
         return _UI;
       };
       var BookmarkList = {
-        isGitHubMode: () => SiteDetector2.isGitHub(),
+        // v3.17: GitHub 收藏源已移除,恒为 false(兼容壳,调用方无需改)。
+        isGitHubMode: () => false,
         getActiveBookmarkSource: () => {
-          const source = Storage2.get(CONFIG2.STORAGE_KEYS.BOOKMARK_SOURCE, CONFIG2.DEFAULTS.bookmarkSource);
-          return source === "github" ? "github" : "linuxdo";
+          return "linuxdo";
         },
-        isActiveGitHubSource: () => UI2().getActiveBookmarkSource() === "github",
+        // v3.17: GitHub 收藏源已移除,恒为 false(兼容壳,调用方无需改)。
+        isActiveGitHubSource: () => false,
         getAutoImportConfigBySource: () => {
-          const isGitHub = UI2().isActiveGitHubSource();
           return {
-            isGitHub,
-            enabledKey: isGitHub ? CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED : CONFIG2.STORAGE_KEYS.AUTO_IMPORT_ENABLED,
-            intervalKey: isGitHub ? CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL : CONFIG2.STORAGE_KEYS.AUTO_IMPORT_INTERVAL,
-            enabledDefault: isGitHub ? CONFIG2.DEFAULTS.githubAutoImportEnabled : CONFIG2.DEFAULTS.autoImportEnabled,
-            intervalDefault: isGitHub ? CONFIG2.DEFAULTS.githubAutoImportInterval : CONFIG2.DEFAULTS.autoImportInterval
+            isGitHub: false,
+            enabledKey: CONFIG2.STORAGE_KEYS.AUTO_IMPORT_ENABLED,
+            intervalKey: CONFIG2.STORAGE_KEYS.AUTO_IMPORT_INTERVAL,
+            enabledDefault: CONFIG2.DEFAULTS.autoImportEnabled,
+            intervalDefault: CONFIG2.DEFAULTS.autoImportInterval
           };
         },
         updateVisualSnapshot: (source, bookmarks) => {
-          const key = source === "github" ? "github" : "linuxdo";
-          UI2().visualSnapshots[key] = Array.isArray(bookmarks) ? bookmarks.slice() : [];
+          UI2().visualSnapshots.linuxdo = Array.isArray(bookmarks) ? bookmarks.slice() : [];
         },
         getCombinedVisualBookmarks: () => {
           return [
@@ -25539,12 +23469,12 @@ ${systemText}
         },
         getBookmarkVisualTypeLabel: (bookmark) => {
           if ((bookmark == null ? void 0 : bookmark.source) === "github") {
-            const sourceTypeMap = {
+            const sourceTypeMap = Object.assign(/* @__PURE__ */ Object.create(null), {
               stars: "Stars",
               repos: "Repos",
               forks: "Forks",
               gists: "Gists"
-            };
+            });
             return sourceTypeMap[bookmark.sourceType] || "GitHub";
           }
           return "\u5E16\u5B50";
@@ -25574,7 +23504,6 @@ ${systemText}
         applyBookmarkSourceUI: (source) => {
           var _a;
           const refs = UI2().refs || {};
-          const isGitHub = source === "github";
           if (refs.bookmarksLabel) {
             refs.bookmarksLabel.textContent = "\u5DF2\u52A0\u8F7D\u6536\u85CF\u6570\u91CF";
           }
@@ -25585,12 +23514,8 @@ ${systemText}
             refs.autoImportIntervalLabel.textContent = "\u8F6E\u8BE2\u95F4\u9694";
           }
           if (refs.sourceSelectLinuxdo) {
-            refs.sourceSelectLinuxdo.classList.toggle("active", !isGitHub);
-            refs.sourceSelectLinuxdo.setAttribute("aria-pressed", String(!isGitHub));
-          }
-          if (refs.sourceSelectGithub) {
-            refs.sourceSelectGithub.classList.toggle("active", isGitHub);
-            refs.sourceSelectGithub.setAttribute("aria-pressed", String(isGitHub));
+            refs.sourceSelectLinuxdo.classList.toggle("active", true);
+            refs.sourceSelectLinuxdo.setAttribute("aria-pressed", String(true));
           }
           const autoStatus = refs.autoImportStatus || ((_a = UI2().panel) == null ? void 0 : _a.querySelector("#ldb-auto-import-status"));
           if (autoStatus && autoStatus.textContent && !autoStatus.textContent.includes("\u26A0\uFE0F")) {
@@ -25692,18 +23617,10 @@ ${systemText}
         },
         isBookmarkKeyExportedLocal: (bookmarkKey) => {
           if (!bookmarkKey) return false;
+          if (bookmarkKey.startsWith("gh:")) return false;
           const dedupStrict = Utils2.isLinuxDoDedupStrict();
-          if (!bookmarkKey.startsWith("gh:")) {
-            if (!dedupStrict) return false;
-            return Storage2.isTopicExported(bookmarkKey);
-          }
-          const parts = bookmarkKey.split(":");
-          const sourceType = parts[1] || "";
-          const itemKey = parts.slice(2).join(":");
-          if (sourceType === "gists") {
-            return GitHubAPI2.isGistExported(itemKey);
-          }
-          return GitHubAPI2.isExported(itemKey);
+          if (!dedupStrict) return false;
+          return Storage2.isTopicExported(bookmarkKey);
         },
         isBookmarkKeyExported: (bookmarkKey) => {
           return UI2().isExportedForUi(bookmarkKey);
@@ -25747,7 +23664,7 @@ ${systemText}
           };
         },
         // v3.15.1: 本地账本 vs Notion 快照分歧计算(纯函数, 无快照/空列表时返回空分歧+原因)。
-        // 口径: 仅覆盖当前已加载列表(UI.bookmarks, 含 LinuxDo + GitHub 两源);
+        // 口径: 仅覆盖当前已加载列表(UI.bookmarks);
         // allow_duplicates 下 LinuxDo 项本地恒判待导出, 不纳入 ledgerOnly(与 isExportedForUi 同口径)。
         computeLedgerSnapshotDiff: () => {
           const empty = (reason) => ({
@@ -25790,7 +23707,7 @@ ${systemText}
           };
         },
         // v3.15.1: 按快照对齐本地账本 —— 仅 unmark 当前已加载列表中「账本有记、快照缺失」的
-        // LinuxDo/GitHub 项(逐项经 Storage.unmarkTopicExported / GitHubAPI.unmark*, 双账本对称)。
+        // Linux.do 项(逐项经 Storage.unmarkTopicExported;v3.17 GitHub 移除后 gh: 键直接跳过)。
         // 安全护栏: ① 无快照/空快照(records 为空)直接拒绝(Notion 被清空≠快照为空, 须先刷新工作区
         // 拿到真实快照); ② 空列表拒绝; ③ 仅动当前列表交集, 不碰未加载源; ④ 调用方负责确认弹窗+审计。
         alignLedgerToSnapshot: (keys) => {
@@ -25813,16 +23730,8 @@ ${systemText}
             const k = String(key);
             if (wanted && !wanted.has(k)) continue;
             if (!inList.has(k)) continue;
-            let removed = false;
-            if (k.startsWith("gh:")) {
-              const parts = k.split(":");
-              const sourceType = parts[1] || "";
-              const itemKey = parts.slice(2).join(":");
-              if (!itemKey) continue;
-              removed = sourceType === "gists" ? GitHubAPI2.unmarkGistExported(itemKey) : GitHubAPI2.unmarkExported(itemKey);
-            } else {
-              removed = Storage2.unmarkTopicExported(k);
-            }
+            if (k.startsWith("gh:")) continue;
+            const removed = Storage2.unmarkTopicExported(k);
             if (removed) {
               aligned++;
               alignedKeys.push(k);
@@ -25848,7 +23757,7 @@ ${systemText}
             return (_a = UI2().selectedBookmarks) == null ? void 0 : _a.has(bookmarkKey);
           });
         },
-        buildBookmarkItemHtml: (bookmark, githubMode = false) => {
+        buildBookmarkItemHtml: (bookmark) => {
           var _a;
           const bookmarkKey = UI2().getBookmarkKey(bookmark);
           const title = bookmark.title || bookmark.fancy_title || bookmark.name || `\u5E16\u5B50 ${bookmarkKey}`;
@@ -25856,14 +23765,13 @@ ${systemText}
           const escapedTruncatedTitle = Utils2.escapeHtml(Utils2.truncateText(title, 35));
           const isExported = UI2().isBookmarkKeyExported(bookmarkKey);
           const isSelected = (_a = UI2().selectedBookmarks) == null ? void 0 : _a.has(bookmarkKey);
-          const sourceTag = githubMode ? `<span class="status" style="margin-right: var(--ldb-ui-spacing-sm);">${Utils2.escapeHtml((bookmark.sourceType || "stars").toUpperCase())}</span>` : "";
           const reexportAction = isExported ? `<button type="button" class="ldb-btn ldb-btn-secondary ldb-btn-small" data-bookmark-action="reexport" title="\u79FB\u9664\u8BE5\u9879\u7684\u5BFC\u51FA\u8BB0\u5F55\u5E76\u91CD\u65B0\u52A0\u5165\u5F85\u5BFC\u51FA\u5217\u8868">\u91CD\u65B0\u5BFC\u51FA</button>` : ``;
           const escapedBookmarkKey = Utils2.escapeHtml(bookmarkKey);
           return `
             <div class="ldb-bookmark-item" data-topic-id="${escapedBookmarkKey}">
                 <input type="checkbox" ${isSelected ? "checked" : ""} ${isExported ? "disabled" : ""} ${isExported ? 'title="\u5DF2\u5BFC\u51FA\u5230 Notion\uFF0C\u65E0\u6CD5\u91CD\u590D\u5BFC\u5165"' : ""}>
                 <span class="title" title="${escapedTitle}">${escapedTruncatedTitle}</span>
-                ${sourceTag}${isExported ? '<span class="status exported">\u5DF2\u5BFC\u51FA</span>' : '<span class="status pending">\u5F85\u5BFC\u51FA</span>'}
+                ${isExported ? '<span class="status exported">\u5DF2\u5BFC\u51FA</span>' : '<span class="status pending">\u5F85\u5BFC\u51FA</span>'}
                 ${reexportAction}
             </div>
         `;
@@ -25877,12 +23785,10 @@ ${systemText}
           UI2().renderJobId += 1;
           const renderJobId = UI2().renderJobId;
           if (!UI2().bookmarks || UI2().bookmarks.length === 0) {
-            const isGitHub = UI2().isActiveGitHubSource();
-            const emptyLabel = isGitHub ? "\u{1F4E5} \u52A0\u8F7D GitHub \u6536\u85CF" : "\u{1F4E5} \u5BFC\u5165\u6D4F\u89C8\u5668\u4E66\u7B7E";
             list.innerHTML = `
                 <div style="padding: var(--ldb-ui-spacing-xl); text-align: center; color: var(--ldb-ui-muted);">
                     <p>\u6682\u65E0\u6536\u85CF</p>
-                    <button id="ldb-import-bookmarks-btn" class="ldb-btn ldb-btn-primary" style="margin-top: var(--ldb-ui-spacing-lg);">${emptyLabel}</button>
+                    <button id="ldb-import-bookmarks-btn" class="ldb-btn ldb-btn-primary" style="margin-top: var(--ldb-ui-spacing-lg);">\u{1F4E5} \u5BFC\u5165\u6D4F\u89C8\u5668\u4E66\u7B7E</button>
                 </div>
             `;
             setTimeout(() => {
@@ -25890,15 +23796,6 @@ ${systemText}
               const importBtn = list.querySelector("#ldb-import-bookmarks-btn");
               if (importBtn) {
                 importBtn.onclick = () => {
-                  if (isGitHub) {
-                    const loadBtn = document.querySelector("#ldb-load-bookmarks");
-                    if (loadBtn) {
-                      loadBtn.click();
-                    } else {
-                      UI2().showStatus("\u8BF7\u5148\u5728\u6536\u85CF\u533A\u70B9\u51FB\u300C\u52A0\u8F7D\u6536\u85CF\u5217\u8868\u300D", "info");
-                    }
-                    return;
-                  }
                   const chatInput = document.querySelector("#ldb-chat-input");
                   if (chatInput && ChatUI2.sendMessage) {
                     UI2().showStatus("\u6B63\u5728\u5BFC\u5165\u6D4F\u89C8\u5668\u4E66\u7B7E\uFF0C\u8BF7\u8010\u5FC3\u7B49\u5F85...", "info");
@@ -25913,14 +23810,13 @@ ${systemText}
             UI2().updateSelectCount();
             return;
           }
-          const githubMode = UI2().isActiveGitHubSource();
           const bookmarks = UI2().bookmarks.slice();
           const chunkSize = bookmarks.length > 150 ? 80 : bookmarks.length;
           let cursor = 0;
           list.innerHTML = "";
           const appendChunk = () => {
             if (UI2().renderJobId !== renderJobId) return;
-            const chunk = bookmarks.slice(cursor, cursor + chunkSize).map((bookmark) => UI2().buildBookmarkItemHtml(bookmark, githubMode)).join("");
+            const chunk = bookmarks.slice(cursor, cursor + chunkSize).map((bookmark) => UI2().buildBookmarkItemHtml(bookmark)).join("");
             list.insertAdjacentHTML("beforeend", chunk);
             cursor += chunkSize;
             if (cursor < bookmarks.length) {
@@ -25937,25 +23833,8 @@ ${systemText}
         requeueLinuxDoBookmark: (bookmarkKey) => {
           if (!bookmarkKey) return false;
           if (bookmarkKey.startsWith("gh:")) {
-            const parts = bookmarkKey.split(":");
-            const sourceType = parts[1] || "";
-            const itemKey = parts.slice(2).join(":");
-            if (!itemKey) return false;
-            let removed2 = false;
-            if (sourceType === "gists") {
-              removed2 = GitHubAPI2.unmarkGistExported(itemKey);
-            } else {
-              removed2 = GitHubAPI2.unmarkExported(itemKey);
-            }
-            if (!removed2) {
-              UI2().showStatus("\u8BE5\u9879\u5F53\u524D\u4E0D\u5728\u5DF2\u5BFC\u51FA\u8BB0\u5F55\u4E2D\u3002", "info");
-              return false;
-            }
-            UI2().selectedBookmarks.add(bookmarkKey);
-            UI2().recomputeExportStats();
-            UI2().renderBookmarkList();
-            UI2().showStatus("\u5DF2\u79FB\u9664\u8BE5\u9879\u7684\u5BFC\u51FA\u8BB0\u5F55\uFF0C\u8BF7\u91CD\u65B0\u52FE\u9009\u5E76\u5BFC\u51FA\u3002", "success");
-            return true;
+            UI2().showStatus("\u8BE5\u9879\u4E3A\u5386\u53F2 GitHub \u8BB0\u5F55,\u5DF2\u4E0D\u518D\u652F\u6301\u91CD\u65B0\u5BFC\u51FA\u3002", "info");
+            return false;
           }
           if (!Utils2.isLinuxDoDedupStrict()) {
             UI2().showStatus("\u5F53\u524D\u4E3A\u5141\u8BB8\u91CD\u590D\u6A21\u5F0F\uFF0C\u65E0\u9700\u91CD\u65B0\u5BFC\u51FA\uFF1B\u76F4\u63A5\u52FE\u9009\u5E76\u5BFC\u51FA\u5373\u53EF\u3002", "info");
@@ -26001,7 +23880,7 @@ ${systemText}
       var { NotionAPI: NotionAPI2 } = require_api();
       var { ConfirmationDialog: ConfirmationDialog2 } = require_security();
       var { WorkspaceService: WorkspaceService2 } = require_extract();
-      var { AutoImporter: AutoImporter2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2 } = require_import();
+      var { AutoImporter: AutoImporter2 } = require_import();
       var { BookmarkAutoImporter: BookmarkAutoImporter2 } = require_bridge();
       var { AIAssistant: AIAssistant2, AIService: AIService2, ChatUI: ChatUI2, getAISettings } = require_ai();
       var { AISchema } = require_schema();
@@ -26479,20 +24358,7 @@ ${AIService2.isolateContent(JSON.stringify({
           return "\u6682\u65E0\u7EDF\u8BA1";
         },
         buildUnifiedSyncModel: () => {
-          const githubTypeLabelMap = Object.assign(/* @__PURE__ */ Object.create(null), {
-            stars: "Stars",
-            repos: "Repos",
-            forks: "Forks",
-            gists: "Gists"
-          });
           const linuxdoState = SyncState2.getLinuxDoState();
-          const githubMeta = SyncState2.getGitHubMeta();
-          const githubTypes = Array.from(new Set((GitHubAPI2.getImportTypes() || []).filter(Boolean)));
-          const githubStates = githubTypes.map((type) => ({
-            type,
-            label: githubTypeLabelMap[type] || type,
-            state: SyncState2.getGitHubState(type)
-          }));
           const bookmarkState = SyncState2.getBookmarkState();
           const sourceRows = [
             {
@@ -26508,20 +24374,6 @@ ${AIService2.isolateContent(JSON.stringify({
               statsLabel: UI2().buildSyncStatsText("linuxdo", linuxdoState.lastStats),
               scheduleLabel: "\u5B9A\u65F6\u8F6E\u8BE2\u5BFC\u5165 Linux.do \u65B0\u6536\u85CF",
               detailLabel: "\u589E\u91CF\u57FA\u7EBF\u6765\u81EA\u6700\u8FD1\u6536\u85CF\u65F6\u95F4 + \u8FB9\u754C ID"
-            },
-            {
-              key: "github",
-              label: "GitHub",
-              enabled: !!Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED, CONFIG2.DEFAULTS.githubAutoImportEnabled),
-              intervalMinutes: parseInt(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL, CONFIG2.DEFAULTS.githubAutoImportInterval), 10) || 0,
-              outcome: githubMeta.lastOutcome,
-              lastSuccessAt: githubMeta.lastSuccessAt || 0,
-              lastAttemptAt: githubMeta.lastAttemptAt || 0,
-              lastError: githubMeta.lastError || "",
-              watermarkLabel: githubStates.length > 0 ? githubStates.map((item) => `${item.label}\uFF1A${UI2().formatSyncWatermarkLabel(item.state.watermark)}`).join("\uFF1B") : "\u672A\u9009\u62E9\u5BFC\u5165\u7C7B\u578B",
-              statsLabel: UI2().buildSyncStatsText("github", githubMeta.lastStats),
-              scheduleLabel: githubTypes.length > 0 ? `\u542F\u7528\u7C7B\u578B\uFF1A${githubTypes.map((type) => githubTypeLabelMap[type] || type).join(" / ")}` : "\u672A\u9009\u62E9\u5BFC\u5165\u7C7B\u578B",
-              detailLabel: "\u6BCF\u79CD GitHub \u7C7B\u578B\u90FD\u7EF4\u62A4\u72EC\u7ACB\u589E\u91CF\u57FA\u7EBF"
             },
             {
               key: "bookmarks",
@@ -26633,19 +24485,14 @@ ${AIService2.isolateContent(JSON.stringify({
           container.querySelectorAll("[data-reset-baseline]").forEach((btn) => {
             btn.onclick = () => {
               const sourceKey = btn.getAttribute("data-reset-baseline");
-              const sourceLabel = sourceKey === "github" ? "GitHub" : sourceKey;
+              const sourceLabel = sourceKey;
               ConfirmationDialog2.show({
                 title: `\u91CD\u7F6E\u300C${sourceLabel}\u300D\u589E\u91CF\u57FA\u7EBF`,
                 message: `\u786E\u5B9A\u91CD\u7F6E\u300C${sourceLabel}\u300D\u7684\u589E\u91CF\u540C\u6B65\u57FA\u7EBF\u5417\uFF1F
 \u91CD\u7F6E\u540E\u4E0B\u6B21\u540C\u6B65\u5C06\u91CD\u65B0\u5168\u91CF\u626B\u63CF\u3002`,
                 confirmText: "\u91CD\u7F6E\u57FA\u7EBF",
                 onConfirm: () => {
-                  if (sourceKey === "github") {
-                    const githubTypes = Array.from(new Set((GitHubAPI2.getImportTypes() || []).filter(Boolean)));
-                    githubTypes.forEach((type) => SyncState2.resetSourceState(`github-${type}`));
-                  } else {
-                    SyncState2.resetSourceState(sourceKey === "bookmarks" ? "bookmark" : sourceKey);
-                  }
+                  SyncState2.resetSourceState(sourceKey === "bookmarks" ? "bookmark" : sourceKey);
                   WorkspaceInsight.renderSyncCenterSummary();
                   UI2().showStatus(`\u5DF2\u91CD\u7F6E\u300C${sourceLabel}\u300D\u589E\u91CF\u57FA\u7EBF\uFF0C\u4E0B\u6B21\u540C\u6B65\u5C06\u5168\u91CF\u626B\u63CF`, "success");
                 }
@@ -26659,9 +24506,6 @@ ${AIService2.isolateContent(JSON.stringify({
           const tasks = [];
           if (Storage2.get(CONFIG2.STORAGE_KEYS.AUTO_IMPORT_ENABLED, CONFIG2.DEFAULTS.autoImportEnabled)) {
             tasks.push({ label: "Linux.do", run: () => AutoImporter2.run() });
-          }
-          if (Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED, CONFIG2.DEFAULTS.githubAutoImportEnabled)) {
-            tasks.push({ label: "GitHub", run: () => GitHubAutoImporter2.run() });
           }
           if (Storage2.get(CONFIG2.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED, CONFIG2.DEFAULTS.bookmarkAutoImportEnabled)) {
             tasks.push({ label: "\u6D4F\u89C8\u5668\u4E66\u7B7E", run: () => BookmarkAutoImporter2.run() });
@@ -26724,7 +24568,7 @@ ${AIService2.isolateContent(JSON.stringify({
         // 旧实现 bookmark?.url 恒 undefined → LinuxDo 对账永不命中(死代码); 改按 topic_id 构造规范 URL
         // https://linux.do/t/{topicId}(与 LinuxDoAdapter.normalize 及导出写入“链接”属性同法, 无 slug)。
         // Notion 侧若存带 slug 的链接, normalizeWorkspaceInsightUrl 会归一到 /t/{id} 再匹配。
-        // ② 数据源改 getCombinedVisualBookmarks() 覆盖 LinuxDo+GitHub 两源(旧实现只查当前激活源)。
+        // ② 数据源改 getCombinedVisualBookmarks() 覆盖多源快照(旧实现只查当前激活源)。
         // ③ 回填后调 renderBookmarkList() 刷新行内徽标, 与状态提示一致。
         // ④ 循环内仅 mutate 账本缓存, 循环末单次 flush(消除写侧 O(N²), 见 AGENTS.md 禁令)。
         reconcileExportedFromWorkspace: (records = []) => {
@@ -26737,21 +24581,14 @@ ${AIService2.isolateContent(JSON.stringify({
           }
           const urlToBookmark = /* @__PURE__ */ new Map();
           bookmarks.forEach((bookmark) => {
-            var _a;
-            let rawUrl = "";
-            if ((bookmark == null ? void 0 : bookmark.source) === "github") {
-              rawUrl = (_a = bookmark == null ? void 0 : bookmark.raw) == null ? void 0 : _a.html_url;
-            } else {
-              const topicId = String((bookmark == null ? void 0 : bookmark.topic_id) || (bookmark == null ? void 0 : bookmark.bookmarkable_id) || "");
-              if (topicId) rawUrl = `https://linux.do/t/${topicId}`;
-            }
+            const topicId = String((bookmark == null ? void 0 : bookmark.topic_id) || (bookmark == null ? void 0 : bookmark.bookmarkable_id) || "");
+            const rawUrl = topicId ? `https://linux.do/t/${topicId}` : "";
             const url = UI2().normalizeWorkspaceInsightUrl(rawUrl || "");
             if (url && !urlToBookmark.has(url)) urlToBookmark.set(url, bookmark);
           });
           if (urlToBookmark.size === 0) return 0;
           const strictMode = Utils2.isLinuxDoDedupStrict();
           let matched = 0;
-          let githubDirty = false;
           let linuxdoBatchOpened = false;
           if (strictMode) {
             try {
@@ -26766,19 +24603,7 @@ ${AIService2.isolateContent(JSON.stringify({
               if (!recordUrl) return;
               const bookmark = urlToBookmark.get(recordUrl);
               if (!bookmark) return;
-              if ((bookmark == null ? void 0 : bookmark.source) === "github") {
-                const itemKey = bookmark.itemKey;
-                if (!itemKey) return;
-                if (bookmark.sourceType === "gists") {
-                  if (GitHubAPI2.isGistExported(itemKey)) return;
-                  GitHubAPI2.markGistExported(itemKey);
-                } else {
-                  if (GitHubAPI2.isExported(itemKey)) return;
-                  GitHubAPI2.markExported(itemKey);
-                }
-                githubDirty = true;
-                matched++;
-              } else if (strictMode) {
+              if (strictMode) {
                 const topicId = String((bookmark == null ? void 0 : bookmark.topic_id) || (bookmark == null ? void 0 : bookmark.bookmarkable_id) || "");
                 if (!topicId) return;
                 if (Storage2.isTopicExported(topicId)) return;
@@ -26794,10 +24619,6 @@ ${AIService2.isolateContent(JSON.stringify({
               }
               Storage2._exportedTopicsCache = null;
             }
-          }
-          if (githubDirty) {
-            GitHubAPI2.flushExported();
-            GitHubAPI2.flushGistsExported();
           }
           if (matched > 0) {
             UI2().recomputeExportStats();
@@ -27521,13 +25342,13 @@ ${AIService2.isolateContent(JSON.stringify({
           const subtitle = (_b = UI2().refs) == null ? void 0 : _b.viewSubtitle;
           const model = UI2().buildVisualizationModel();
           if (subtitle) {
-            subtitle.textContent = model.loadedSources.length > 0 ? `\u8FD9\u91CC\u7EE7\u7EED\u5C55\u793A\u672C\u8F6E\u5DF2\u52A0\u8F7D\u7684 ${model.loadedSources.join(" + ")} \u5217\u8868\u6458\u8981\uFF1B\u5DE5\u4F5C\u533A\u603B\u89C8\u9700\u8981\u70B9\u51FB\u4E0A\u65B9\u6309\u94AE\u5355\u72EC\u5237\u65B0\u3002` : "\u8FD9\u91CC\u7EE7\u7EED\u5C55\u793A\u5F53\u524D\u5DF2\u52A0\u8F7D\u7684 Linux.do / GitHub \u5217\u8868\u6458\u8981\uFF0C\u4E0D\u4F1A\u4E3B\u52A8\u8BFB\u53D6 Notion \u5DE5\u4F5C\u533A\u3002";
+            subtitle.textContent = model.loadedSources.length > 0 ? `\u8FD9\u91CC\u7EE7\u7EED\u5C55\u793A\u672C\u8F6E\u5DF2\u52A0\u8F7D\u7684 ${model.loadedSources.join(" + ")} \u5217\u8868\u6458\u8981\uFF1B\u5DE5\u4F5C\u533A\u603B\u89C8\u9700\u8981\u70B9\u51FB\u4E0A\u65B9\u6309\u94AE\u5355\u72EC\u5237\u65B0\u3002` : "\u8FD9\u91CC\u7EE7\u7EED\u5C55\u793A\u5F53\u524D\u5DF2\u52A0\u8F7D\u7684 Linux.do \u5217\u8868\u6458\u8981\uFF0C\u4E0D\u4F1A\u4E3B\u52A8\u8BFB\u53D6 Notion \u5DE5\u4F5C\u533A\u3002";
           }
           if (model.total === 0) {
             container.innerHTML = `
                 <div class="ldb-view-empty">
                     <div class="ldb-view-empty-title">\u89C6\u56FE\u8FD8\u6CA1\u6709\u6570\u636E</div>
-                    <div class="ldb-view-empty-text">\u5148\u52A0\u8F7D Linux.do \u6216 GitHub \u6536\u85CF\uFF0C\u8FD9\u91CC\u4F1A\u5C55\u793A\u6765\u6E90\u5206\u5E03\u3001\u5BFC\u51FA\u72B6\u6001\u548C\u65F6\u95F4\u7EBF\u6458\u8981\u3002</div>
+                    <div class="ldb-view-empty-text">\u5148\u52A0\u8F7D Linux.do \u6536\u85CF\uFF0C\u8FD9\u91CC\u4F1A\u5C55\u793A\u6765\u6E90\u5206\u5E03\u3001\u5BFC\u51FA\u72B6\u6001\u548C\u65F6\u95F4\u7EBF\u6458\u8981\u3002</div>
                 </div>
             `;
             return;
@@ -27589,469 +25410,6 @@ ${AIService2.isolateContent(JSON.stringify({
     }
   });
 
-  // src/import/github-obsidian-service.js
-  var require_github_obsidian_service = __commonJS({
-    "src/import/github-obsidian-service.js"(exports, module) {
-      "use strict";
-      var { CONFIG: CONFIG2 } = require_config();
-      var { Utils: Utils2 } = require_utils();
-      var { Storage: Storage2 } = require_storage();
-      var { NotionAPI: NotionAPI2, HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2 } = require_api();
-      var { GitHubExporter: GitHubExporter2 } = require_GitHubExporter();
-      var { GitHubAPI: GitHubAPI2 } = require_GitHubAPI();
-      var { OperationGuard: OperationGuard2 } = require_security();
-      var { SyncLock } = require_sync_lock();
-      var sanitizeObsidianFileName = (name, fallback = "untitled") => {
-        const base = String(name || "").trim().replace(/[\\/:*?"<>|]/g, "_").substring(0, 100);
-        return base || fallback;
-      };
-      var assertObsidianWriteAllowed = (operation, context = {}) => {
-        if (OperationGuard2.canExecute(operation)) return;
-        OperationGuard2.auditDenied(operation, { ...context, trigger: context.trigger || "user_requested_write" }, {
-          phase: "execute",
-          reason: `\u6743\u9650\u4E0D\u8DB3\uFF1AObsidian \u5199\u5165(${operation})\u9700\u8981 level\u22651\uFF0C\u53EF\u5728\u4E3B\u9762\u677F\u300C\u6743\u9650\u63A7\u5236\u300D\u4E2D\u8C03\u6574\u3002`
-        });
-        throw new Error(`\u6743\u9650\u4E0D\u8DB3\uFF1AObsidian \u5199\u5165\u9700\u8981 level\u22651\uFF08\u53EF\u5728\u4E3B\u9762\u677F\u300C\u6743\u9650\u63A7\u5236\u300D\u4E2D\u8C03\u6574\uFF09\u3002`);
-      };
-      var mapGitHubItemsToBookmarks = (items, sourceType) => {
-        return (items || []).map((item) => {
-          const isGist = sourceType === "gists";
-          const itemKey = isGist ? String(item.id || "") : String(item.full_name || item.name || "");
-          const title = isGist ? item.description || Object.keys(item.files || {})[0] || `Gist ${item.id || ""}` : item.full_name || item.name || "\u672A\u547D\u540D\u4ED3\u5E93";
-          return {
-            source: "github",
-            sourceType,
-            itemKey,
-            title,
-            raw: item
-          };
-        }).filter((item) => !!item.itemKey);
-      };
-      var buildGitHubObsidianMarkdown = async (item, settings = {}, enrichContext = null) => {
-        var _a, _b;
-        if (!(item == null ? void 0 : item.raw)) {
-          throw new Error("GitHub \u6761\u76EE\u6570\u636E\u4E0D\u5B8C\u6574");
-        }
-        const sourceTypeMap = {
-          stars: "Stars",
-          repos: "Repos",
-          forks: "Forks",
-          gists: "Gists"
-        };
-        const sourceTypeLabel = sourceTypeMap[item.sourceType] || "GitHub";
-        const bookmark = item.raw;
-        const isGist = item.sourceType === "gists";
-        const owner = isGist ? String(((_a = bookmark.owner) == null ? void 0 : _a.login) || "") : String(((_b = bookmark.owner) == null ? void 0 : _b.login) || String(bookmark.full_name || "").split("/")[0] || "");
-        const inferredTags = Array.isArray(bookmark.inferredTags) ? bookmark.inferredTags : [];
-        const topicTags = Array.isArray(bookmark.topics) ? bookmark.topics : [];
-        const tags = Array.from(new Set([...topicTags, ...inferredTags].filter(Boolean))).slice(0, 20);
-        if (isGist) {
-          const files = Object.values(bookmark.files || {});
-          const primaryFile = files[0] || {};
-          const fileNames = Object.keys(bookmark.files || {});
-          const title2 = item.title || bookmark.description || fileNames[0] || `Gist ${bookmark.id || ""}`;
-          const language = primaryFile.language || "";
-          const meta2 = {
-            title: title2,
-            url: bookmark.html_url || "https://gist.github.com",
-            author: owner || "\u672A\u77E5",
-            owner,
-            gistId: String(bookmark.id || item.itemKey || ""),
-            source: "GitHub",
-            sourceType: sourceTypeLabel,
-            category: "Gist",
-            language,
-            updatedAt: bookmark.updated_at || bookmark.created_at || "",
-            tags
-          };
-          let md2 = HTMLToMarkdown2.buildFrontmatter(meta2);
-          md2 += `> [!info] GitHub Gist
-`;
-          md2 += `> - **\u539F\u59CB\u94FE\u63A5**: [${title2}](${meta2.url})
-`;
-          md2 += `> - **\u4F5C\u8005**: ${owner || "\u672A\u77E5"}
-`;
-          md2 += `> - **\u7C7B\u578B**: ${sourceTypeLabel}
-`;
-          md2 += `> - **\u8BED\u8A00**: ${language || "\u672A\u77E5"}
-`;
-          md2 += `> - **\u6587\u4EF6\u6570**: ${fileNames.length}
-`;
-          md2 += `> - **\u6807\u7B7E**: ${tags.join(", ") || "\u65E0"}
-`;
-          md2 += `> - **\u66F4\u65B0\u65F6\u95F4**: ${bookmark.updated_at ? new Date(bookmark.updated_at).toLocaleString("zh-CN") : "\u672A\u77E5"}
-`;
-          md2 += `> - **\u5BFC\u51FA\u65F6\u95F4**: ${(/* @__PURE__ */ new Date()).toLocaleString("zh-CN")}
-
-`;
-          if (bookmark.description) {
-            md2 += `## \u63CF\u8FF0
-
-${bookmark.description}
-
-`;
-          }
-          if (fileNames.length > 0) {
-            md2 += "## \u6587\u4EF6\u5217\u8868\n\n";
-            fileNames.forEach((fileName) => {
-              var _a2;
-              const file = ((_a2 = bookmark.files) == null ? void 0 : _a2[fileName]) || {};
-              md2 += `- \`${fileName}\``;
-              if (file.language) md2 += ` \xB7 ${file.language}`;
-              if (Number.isFinite(file.size)) md2 += ` \xB7 ${file.size} bytes`;
-              md2 += "\n";
-            });
-            md2 += "\n";
-          }
-          return {
-            title: title2,
-            fileName: sanitizeObsidianFileName(title2, `gist-${bookmark.id || "untitled"}`),
-            markdown: md2,
-            url: meta2.url
-          };
-        }
-        const enriched = await GitHubExporter2.enrichRepo(bookmark, settings, enrichContext || { aiUsedCount: 0, aiMaxItems: 20 });
-        const title = enriched.generatedTitle || item.title || enriched.full_name || enriched.name || "\u672A\u547D\u540D\u4ED3\u5E93";
-        const meta = {
-          title,
-          url: enriched.html_url || "https://github.com",
-          author: owner || "\u672A\u77E5",
-          owner,
-          repo: enriched.full_name || enriched.name || item.itemKey || "",
-          source: "GitHub",
-          sourceType: sourceTypeLabel,
-          category: enriched.inferredCategory || "Repo",
-          language: enriched.language || "",
-          stars: enriched.stargazers_count || 0,
-          updatedAt: enriched.pushed_at || enriched.updated_at || "",
-          tags
-        };
-        let md = HTMLToMarkdown2.buildFrontmatter(meta);
-        md += `> [!info] GitHub \u9879\u76EE
-`;
-        md += `> - **\u539F\u59CB\u94FE\u63A5**: [${enriched.full_name || title}](${meta.url})
-`;
-        md += `> - **\u4F5C\u8005**: ${owner || "\u672A\u77E5"}
-`;
-        md += `> - **\u7C7B\u578B**: ${sourceTypeLabel}
-`;
-        md += `> - **\u8BED\u8A00**: ${enriched.language || "\u672A\u77E5"}
-`;
-        md += `> - **Stars**: ${enriched.stargazers_count || 0}
-`;
-        md += `> - **\u5206\u7C7B**: ${enriched.inferredCategory || "\u672A\u5206\u7C7B"}
-`;
-        md += `> - **\u6807\u7B7E**: ${tags.join(", ") || "\u65E0"}
-`;
-        md += `> - **\u66F4\u65B0\u65F6\u95F4**: ${enriched.pushed_at || enriched.updated_at ? new Date(enriched.pushed_at || enriched.updated_at).toLocaleString("zh-CN") : "\u672A\u77E5"}
-`;
-        md += `> - **\u5BFC\u51FA\u65F6\u95F4**: ${(/* @__PURE__ */ new Date()).toLocaleString("zh-CN")}
-
-`;
-        if (enriched.description) {
-          md += `## \u9879\u76EE\u63CF\u8FF0
-
-${enriched.description}
-
-`;
-        }
-        if (enriched.readmeSummary) {
-          md += `## README \u6458\u8981
-
-${enriched.readmeSummary}
-
-`;
-        }
-        if (Array.isArray(enriched.topics) && enriched.topics.length > 0) {
-          md += `## Topics
-
-${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
-
-`;
-        }
-        return {
-          title,
-          fileName: sanitizeObsidianFileName(enriched.full_name || title, "github-repo"),
-          markdown: md,
-          url: meta.url
-        };
-      };
-      var exportGitHubSelectedToObsidian = async (selectedItems, settings, onProgress, control = {}) => {
-        const { obsUrl, obsKey, obsDir } = settings;
-        if (!obsUrl || !obsKey) {
-          throw new Error("\u8BF7\u5148\u914D\u7F6E Obsidian API \u5730\u5740\u548C Key");
-        }
-        if (!selectedItems || selectedItems.length === 0) {
-          return { success: [], failed: [], skipped: [] };
-        }
-        const success = [];
-        const failed = [];
-        const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-        let githubDirty = false;
-        let authAbortInfo = null;
-        const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
-        try {
-          for (let i = 0; i < selectedItems.length; i++) {
-            if (control.isCancelled) break;
-            while (control.isPaused) {
-              await Utils2.sleep(200);
-              if (control.isCancelled) break;
-            }
-            if (control.isCancelled) break;
-            const item = selectedItems[i];
-            onProgress == null ? void 0 : onProgress(i + 1, selectedItems.length, item.title || item.itemKey || "GitHub");
-            try {
-              const note = await buildGitHubObsidianMarkdown(item, settings, enrichContext);
-              assertObsidianWriteAllowed("obsidian.writeNote", { itemKey: item.itemKey, sourceType: item.sourceType, itemName: item.title || item.itemKey });
-              const noteResult = await ObsidianAPI2.writeNote(obsUrl, obsKey, `${obsDir}/${note.fileName}.md`, note.markdown);
-              if (!noteResult.ok) throw new Error(noteResult.error);
-              if (item.sourceType === "gists") {
-                GitHubAPI2.markGistExported(item.itemKey);
-              } else {
-                GitHubAPI2.markExported(item.itemKey);
-              }
-              githubDirty = true;
-              success.push({
-                title: note.title,
-                url: note.url
-              });
-            } catch (error) {
-              console.warn(`[GitHubObsidianService] Export failed: ${item.itemKey}`, error);
-              failed.push({
-                title: item.title || item.itemKey || "GitHub",
-                error: error.message
-              });
-              const obsErrMsg = String((error == null ? void 0 : error.message) || "");
-              if (/\bHTTP\s*40[13]\b/.test(obsErrMsg) || obsErrMsg.includes("invalid") || obsErrMsg.includes("Invalid") || obsErrMsg.includes("ECONNREFUSED") || obsErrMsg.includes("refused")) {
-                authAbortInfo = { reason: error.message, at: i + 1 };
-                break;
-              }
-            }
-            if (!authAbortInfo && i < selectedItems.length - 1 && delay > 0) {
-              await Utils2.sleep(delay);
-            }
-          }
-        } finally {
-          if (githubDirty) {
-            GitHubAPI2.flushExported();
-            GitHubAPI2.flushGistsExported();
-          }
-        }
-        return {
-          success,
-          failed,
-          skipped: authAbortInfo || control.isCancelled ? selectedItems.slice(success.length + failed.length).map((item) => ({
-            title: item.title || item.itemKey || "GitHub"
-          })) : [],
-          ...authAbortInfo ? { authAborted: authAbortInfo } : {}
-        };
-      };
-      var exportGitHubSelectedToNotion = async (selectedItems, settings, onProgress, control = {}) => {
-        if (SyncLock.isExporting) {
-          return {
-            success: [],
-            failed: [],
-            skipped: (selectedItems || []).map((item) => ({ title: (item == null ? void 0 : item.title) || (item == null ? void 0 : item.itemKey) || "GitHub" })),
-            message: "\u5DF2\u6709\u5BFC\u51FA\u8FDB\u884C\u4E2D\uFF0C\u5DF2\u8DF3\u8FC7\u672C\u6B21\u8BF7\u6C42"
-          };
-        }
-        const { apiKey, databaseId } = settings;
-        if (!apiKey || !databaseId) {
-          throw new Error("\u8BF7\u5148\u914D\u7F6E Notion API Key \u548C\u6570\u636E\u5E93 ID");
-        }
-        if (!selectedItems || selectedItems.length === 0) {
-          return { success: [], failed: [], skipped: [] };
-        }
-        const setupResult = await GitHubExporter2.setupDatabaseProperties(databaseId, apiKey);
-        if (!setupResult.success) {
-          throw new Error(`\u6570\u636E\u5E93\u914D\u7F6E\u5931\u8D25: ${setupResult.error}`);
-        }
-        const lease = await SyncLock.acquireLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE);
-        if (!lease) {
-          return {
-            success: [],
-            failed: [],
-            skipped: (selectedItems || []).map((item) => ({ title: (item == null ? void 0 : item.title) || (item == null ? void 0 : item.itemKey) || "GitHub" })),
-            message: "\u5176\u4ED6\u6807\u7B7E\u9875\u6B63\u5728\u5BFC\u51FA/\u540C\u6B65\uFF0C\u5DF2\u8DF3\u8FC7\u672C\u6B21\u8BF7\u6C42"
-          };
-        }
-        const delay = Storage2.get(CONFIG2.STORAGE_KEYS.REQUEST_DELAY, CONFIG2.DEFAULTS.requestDelay);
-        const success = [];
-        const failed = [];
-        let githubDirty = false;
-        SyncLock.isExporting = true;
-        let leaseLost = false;
-        const renewTimer = setInterval(() => {
-          let renewed;
-          try {
-            renewed = SyncLock.renewLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
-          } catch (renewError) {
-            console.warn("[GitHubObsidianService] \u7EED\u7EA6\u5931\u8D25:", renewError);
-            renewed = false;
-          }
-          if (!renewed) {
-            leaseLost = true;
-            clearInterval(renewTimer);
-          }
-        }, 3e4);
-        const enrichContext = { aiUsedCount: 0, aiMaxItems: 20 };
-        try {
-          for (let i = 0; i < selectedItems.length; i++) {
-            if (control.isCancelled) break;
-            if (leaseLost) break;
-            while (control.isPaused) {
-              await Utils2.sleep(200);
-              if (control.isCancelled || leaseLost) break;
-            }
-            if (control.isCancelled || leaseLost) break;
-            const item = selectedItems[i];
-            const bookmark = item.raw;
-            const sourceType = item.sourceType;
-            const label = item.title || item.itemKey;
-            try {
-              onProgress == null ? void 0 : onProgress(i + 1, selectedItems.length, label);
-            } catch (progressError) {
-              console.warn(`[GitHubObsidianService] onProgress \u56DE\u8C03\u5F02\u5E38 (${label}):`, progressError);
-            }
-            try {
-              let properties;
-              if (sourceType === "gists") {
-                properties = GitHubExporter2.buildGistProperties(bookmark);
-              } else {
-                const sourceMap = { stars: "Star", repos: "Repo", forks: "Fork" };
-                const enriched = await GitHubExporter2.enrichRepo(bookmark, settings, enrichContext);
-                properties = GitHubExporter2.buildRepoProperties(enriched, sourceMap[sourceType] || "Star");
-              }
-              for (const key of Object.keys(properties)) {
-                if (properties[key] === void 0) delete properties[key];
-              }
-              if (leaseLost) break;
-              if (!OperationGuard2.canExecute("createDatabasePage")) {
-                GitHubExporter2._auditExport(
-                  "createDatabasePage",
-                  "denied",
-                  { itemKey: item.itemKey, sourceType, itemName: item.title || item.itemKey, reason: "\u6743\u9650\u4E0D\u8DB3\uFF1A\u624B\u52A8\u5BFC\u51FA\u5EFA\u9875\u9700 level\u22651" }
-                );
-                failed.push({ title: item.title, error: "\u6743\u9650\u4E0D\u8DB3\uFF08\u9700 level\u22651\uFF09", itemKey: item.itemKey, sourceType });
-                continue;
-              }
-              const page = await NotionAPI2.request("POST", "/pages", {
-                parent: { database_id: databaseId },
-                properties
-              }, apiKey);
-              if (sourceType === "gists") {
-                GitHubAPI2.markGistExported(item.itemKey);
-              } else {
-                GitHubAPI2.markExported(item.itemKey);
-              }
-              githubDirty = true;
-              GitHubExporter2._auditExport(
-                "createDatabasePage",
-                "success",
-                { pageId: String((page == null ? void 0 : page.id) || ""), itemKey: item.itemKey, sourceType, databaseId }
-              );
-              success.push({
-                title: item.title,
-                url: (bookmark == null ? void 0 : bookmark.html_url) || "https://github.com",
-                itemKey: item.itemKey,
-                sourceType
-              });
-            } catch (error) {
-              console.warn(`[GitHubObsidianService] Notion export failed: ${item.itemKey}`, error);
-              GitHubExporter2._auditExport(
-                "createDatabasePage",
-                "failed",
-                { itemKey: item.itemKey, sourceType, reason: String((error == null ? void 0 : error.message) || error) }
-              );
-              failed.push({
-                title: item.title,
-                error: error.message,
-                itemKey: item.itemKey,
-                sourceType
-              });
-              if (error && error.isAuthTerminal === true) {
-                const skipped = selectedItems.slice(i + 1).map((skippedItem) => ({
-                  title: skippedItem.title || skippedItem.itemKey || "GitHub"
-                }));
-                if (githubDirty) {
-                  GitHubAPI2.flushExported();
-                  GitHubAPI2.flushGistsExported();
-                }
-                return { success, failed, skipped, authAborted: { reason: error.message, at: i + 1, authCode: error.authCode || "unauthorized" } };
-              }
-            }
-            if (i < selectedItems.length - 1 && delay > 0) {
-              await Utils2.sleep(delay);
-            }
-          }
-        } finally {
-          if (githubDirty) {
-            GitHubAPI2.flushExported();
-            GitHubAPI2.flushGistsExported();
-          }
-          clearInterval(renewTimer);
-          SyncLock.releaseLease(CONFIG2.STORAGE_KEYS.AUTO_SYNC_LEASE, lease);
-          SyncLock.isExporting = false;
-        }
-        return {
-          success,
-          failed,
-          skipped: control.isCancelled || leaseLost ? selectedItems.slice(success.length + failed.length).map((item) => ({
-            title: item.title || item.itemKey || "GitHub"
-          })) : []
-        };
-      };
-      module.exports = {
-        sanitizeObsidianFileName,
-        mapGitHubItemsToBookmarks,
-        buildGitHubObsidianMarkdown,
-        exportGitHubSelectedToObsidian,
-        exportGitHubSelectedToNotion
-      };
-    }
-  });
-
-  // src/ui/github-obsidian-export.js
-  var require_github_obsidian_export = __commonJS({
-    "src/ui/github-obsidian-export.js"(exports, module) {
-      "use strict";
-      var { Exporter: Exporter2 } = require_export();
-      var GitHubObsidianExport = {
-        sanitizeObsidianFileName: (name, fallback = "untitled") => {
-          return require_github_obsidian_service().sanitizeObsidianFileName(name, fallback);
-        },
-        buildGitHubObsidianMarkdown: async (item, settings = {}) => {
-          return require_github_obsidian_service().buildGitHubObsidianMarkdown(item, settings);
-        },
-        exportGitHubSelectedToObsidian: async (selectedItems, settings, onProgress) => {
-          const { exportGitHubSelectedToObsidian } = require_github_obsidian_service();
-          return exportGitHubSelectedToObsidian(selectedItems, settings, onProgress, {
-            get isCancelled() {
-              return Exporter2.isCancelled;
-            },
-            get isPaused() {
-              return Exporter2.isPaused;
-            }
-          });
-        },
-        mapGitHubItemsToBookmarks: (items, sourceType) => {
-          return require_github_obsidian_service().mapGitHubItemsToBookmarks(items, sourceType);
-        },
-        exportGitHubSelected: async (selectedItems, settings, onProgress) => {
-          return require_github_obsidian_service().exportGitHubSelectedToNotion(selectedItems, settings, onProgress, {
-            get isCancelled() {
-              return Exporter2.isCancelled;
-            },
-            get isPaused() {
-              return Exporter2.isPaused;
-            }
-          });
-        }
-      };
-      module.exports = { GitHubObsidianExport };
-    }
-  });
-
   // src/ui/main-ui.js
   var require_main_ui = __commonJS({
     "src/ui/main-ui.js"(exports, module) {
@@ -28064,7 +25422,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
       var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
       var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2 } = require_extract();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
-      var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
+      var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2 } = require_import();
       var { BookmarkBridge: BookmarkBridge2, BookmarkAutoImporter: BookmarkAutoImporter2 } = require_bridge();
       var { AIAssistant: AIAssistant2, AIService: AIService2, AIWelcomeUI: AIWelcomeUI2, ChatUI: ChatUI2, getAISettings } = require_ai();
       var { StyleManager: StyleManager2 } = require_style_manager();
@@ -28078,7 +25436,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
         miniBtn: null,
         isMinimized: false,
         bookmarks: [],
-        visualSnapshots: { linuxdo: [], github: [] },
+        visualSnapshots: { linuxdo: [] },
         workspaceVisualSnapshot: { databases: [], pages: [], records: [], scannedAt: 0, maxPages: 0 },
         workspaceInsightMarkdown: "",
         workspaceInsightSummary: "",
@@ -28135,7 +25493,6 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             viewSyncNowBtn: panel.querySelector("#ldb-view-sync-now"),
             autoImportStatus: panel.querySelector("#ldb-auto-import-status"),
             importNowLinuxdoBtn: panel.querySelector("#ldb-import-now-linuxdo"),
-            importNowGithubBtn: panel.querySelector("#ldb-import-now-github"),
             importNowBookmarkBtn: panel.querySelector("#ldb-import-now-bookmark"),
             bookmarkAutoImportEnabled: panel.querySelector("#ldb-bookmark-auto-import-enabled"),
             bookmarkAutoImportOptions: panel.querySelector("#ldb-bookmark-auto-import-options"),
@@ -28144,7 +25501,6 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             sourcePartitionsContent: panel.querySelector("#ldb-source-partitions-content"),
             sourcePartitionsArrow: panel.querySelector("#ldb-source-partitions-arrow"),
             sourceSelectLinuxdo: panel.querySelector("#ldb-source-select-linuxdo"),
-            sourceSelectGithub: panel.querySelector("#ldb-source-select-github"),
             updateCheckBtn: panel.querySelector("#ldb-update-check-btn"),
             updateAutoEnabled: panel.querySelector("#ldb-update-auto-enabled"),
             updateAutoOptions: panel.querySelector("#ldb-update-auto-options"),
@@ -28161,10 +25517,6 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             aiSettingsToggle: panel.querySelector("#ldb-ai-settings-toggle"),
             aiSettingsContent: panel.querySelector("#ldb-ai-settings-content"),
             aiSettingsArrow: panel.querySelector("#ldb-ai-settings-arrow"),
-            githubSettingsToggle: panel.querySelector("#ldb-github-settings-toggle"),
-            githubSettingsContent: panel.querySelector("#ldb-github-settings-content"),
-            githubSettingsArrow: panel.querySelector("#ldb-github-settings-arrow"),
-            openGithubSettingsBtn: panel.querySelector("#ldb-open-github-settings"),
             sourceSettingsToggle: panel.querySelector("#ldb-source-settings-toggle"),
             sourceSettingsContent: panel.querySelector("#ldb-source-settings-content"),
             sourceSettingsArrow: panel.querySelector("#ldb-source-settings-arrow"),
@@ -28239,12 +25591,6 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             agentPersonaExpertiseInput: panel.querySelector("#ldb-agent-persona-expertise"),
             agentPersonaInstructionsInput: panel.querySelector("#ldb-agent-persona-instructions"),
             agentMaxIterationsSelect: panel.querySelector("#ldb-agent-max-iterations"),
-            githubUsernameInput: panel.querySelector("#ldb-github-username"),
-            githubTokenInput: panel.querySelector("#ldb-github-token"),
-            githubOAuthBtn: panel.querySelector("#ldb-github-oauth-btn"),
-            githubOAuthStatus: panel.querySelector("#ldb-github-oauth-status"),
-            githubOauthClientIdInput: panel.querySelector("#ldb-github-oauth-client-id"),
-            githubTypeCheckboxes: panel.querySelectorAll(".ldb-github-type"),
             obsSettingsToggle: panel.querySelector("#ldb-obs-settings-toggle"),
             obsSettingsContent: panel.querySelector("#ldb-obs-settings-content"),
             obsSettingsArrow: panel.querySelector("#ldb-obs-settings-arrow"),
@@ -28264,7 +25610,6 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             logClearBtn: panel.querySelector("#ldb-log-clear"),
             dedupSummary: panel.querySelector("#ldb-dedup-summary"),
             clearLinuxdoDedupBtn: panel.querySelector("#ldb-clear-linuxdo-dedup"),
-            clearGithubExportedBtn: panel.querySelector("#ldb-clear-github-exported"),
             clearBookmarkExportedBtn: panel.querySelector("#ldb-clear-bookmark-exported"),
             aiRefreshDbsBtn: panel.querySelector("#ldb-ai-refresh-dbs"),
             aiFetchModelsBtn: panel.querySelector("#ldb-ai-fetch-models"),
@@ -28388,12 +25733,6 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           refs.agentPersonaExpertiseInput.value = Storage2.get(CONFIG2.STORAGE_KEYS.AGENT_PERSONA_EXPERTISE, CONFIG2.DEFAULTS.agentPersonaExpertise);
           refs.agentPersonaInstructionsInput.value = Storage2.get(CONFIG2.STORAGE_KEYS.AGENT_PERSONA_INSTRUCTIONS, CONFIG2.DEFAULTS.agentPersonaInstructions);
           refs.agentMaxIterationsSelect.value = String(Storage2.get(CONFIG2.STORAGE_KEYS.AGENT_MAX_ITERATIONS, CONFIG2.DEFAULTS.agentMaxIterations));
-          refs.githubUsernameInput.value = Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, "");
-          refs.githubTokenInput.value = "";
-          const savedGHTypesMain = GitHubAPI2.getImportTypes();
-          refs.githubTypeCheckboxes.forEach((cb) => {
-            cb.checked = savedGHTypesMain.includes(cb.value);
-          });
           refs.obsApiUrlInput.value = Storage2.get(CONFIG2.STORAGE_KEYS.OBS_API_URL, CONFIG2.DEFAULTS.obsApiUrl);
           refs.obsApiKeyInput.value = "";
           refs.obsDirInput.value = Storage2.get(CONFIG2.STORAGE_KEYS.OBS_DIR, CONFIG2.DEFAULTS.obsDir);
@@ -28429,8 +25768,6 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
               UI2.updateWorkspaceSelect(workspaceData);
             }
           }
-          const savedSource = Storage2.get(CONFIG2.STORAGE_KEYS.BOOKMARK_SOURCE, CONFIG2.DEFAULTS.bookmarkSource);
-          const resolvedSource = savedSource === "github" ? "github" : "linuxdo";
           Storage2.set(CONFIG2.STORAGE_KEYS.BOOKMARK_SOURCE, resolvedSource);
           UI2.applyBookmarkSourceUI(resolvedSource);
           const autoConfig = UI2.getAutoImportConfigBySource();
@@ -28499,7 +25836,6 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           }
           NotionOAuth2.syncApiKeyInputs();
           CredentialVault2.syncSensitiveInput(refs.aiApiKeyInput, CONFIG2.STORAGE_KEYS.AI_API_KEY, "AI \u670D\u52A1\u7684 API Key");
-          CredentialVault2.syncSensitiveInput(refs.githubTokenInput, CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
           CredentialVault2.syncSensitiveInput(refs.obsApiKeyInput, CONFIG2.STORAGE_KEYS.OBS_API_KEY, "Obsidian Local REST API Key");
           UI2.renderSyncCenterSummary();
           UI2.renderWorkspaceVisualSummary();
@@ -28512,8 +25848,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           if (!panel) return;
           const OUTCOME_LABELS = { idle: "\u7A7A\u95F2", running: "\u540C\u6B65\u4E2D", success: "\u6210\u529F", partial: "\u90E8\u5206\u6210\u529F", error: "\u5931\u8D25" };
           const chains = [
-            { source: "bookmark", selector: "#ldb-bookmark-auto-import-status" },
-            { source: "github-stars", selector: "#ldb-auto-import-status" }
+            { source: "bookmark", selector: "#ldb-bookmark-auto-import-status" }
           ];
           for (const chain of chains) {
             const el = panel.querySelector(chain.selector);
@@ -28607,8 +25942,6 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           const isUserscriptMode = Utils2.isUserscriptMode();
           const hasBridgeMarker = BookmarkBridge2.isExtensionAvailable();
           const bookmarkSource = UI2.getActiveBookmarkSource();
-          const hasGitHubUsername = !!String(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, "") ?? "").trim();
-          const hasGitHubToken = !!String(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "") ?? "").trim();
           const checks = [
             {
               ok: true,
@@ -28623,17 +25956,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             {
               ok: true,
               label: "\u5F53\u524D\u6765\u6E90",
-              value: bookmarkSource === "github" ? "GitHub" : "Linux.do"
-            },
-            {
-              ok: hasGitHubUsername,
-              label: "GitHub \u7528\u6237\u540D",
-              value: hasGitHubUsername ? "\u5DF2\u914D\u7F6E" : "\u672A\u914D\u7F6E"
-            },
-            {
-              ok: hasGitHubToken,
-              label: "GitHub Token",
-              value: hasGitHubToken ? "\u5DF2\u914D\u7F6E" : "\u672A\u914D\u7F6E"
+              value: "Linux.do"
             },
             {
               ok: true,
@@ -28649,9 +25972,6 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           const tips = [];
           if (!hasBridgeMarker) {
             tips.push("\u2022 \u672A\u68C0\u6D4B\u5230\u4E66\u7B7E\u6865\u63A5\uFF1A\u8BF7\u5B89\u88C5/\u542F\u7528 chrome-extension\uFF08Userscript\uFF09\u6216\u786E\u8BA4\u6269\u5C55\u6743\u9650\u3002");
-          }
-          if (bookmarkSource === "github" && !hasGitHubUsername && !hasGitHubToken) {
-            tips.push("\u2022 \u5F53\u524D\u6765\u6E90\u4E3A GitHub\uFF1A\u8BF7\u81F3\u5C11\u914D\u7F6E GitHub \u7528\u6237\u540D\uFF0C\u5EFA\u8BAE\u540C\u65F6\u914D\u7F6E Token\u3002");
           }
           if (isUserscriptMode && hasBridgeMarker) {
             tips.push("\u2022 \u5F53\u524D\u4E3A Userscript + \u6865\u63A5\u53EF\u7528\uFF0C\u5EFA\u8BAE\u4EC5\u4FDD\u7559\u4E00\u79CD\u8FD0\u884C\u6A21\u5F0F\u907F\u514D\u6DF7\u7528\u3002");
@@ -28702,8 +26022,6 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           const isUserscriptMode = Utils2.isUserscriptMode();
           const hasBridgeMarker = BookmarkBridge2.isExtensionAvailable();
           const bookmarkSource = UI2.getActiveBookmarkSource();
-          const hasGitHubUsername = !!String(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, "") ?? "").trim();
-          const hasGitHubToken = !!String(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "") ?? "").trim();
           const activeTab = Storage2.get(CONFIG2.STORAGE_KEYS.ACTIVE_TAB, CONFIG2.DEFAULTS.activeTab);
           const updateLastResultRaw = Storage2.get(CONFIG2.STORAGE_KEYS.UPDATE_LAST_RESULT, "");
           const updateLastSeenVersion = Storage2.get(CONFIG2.STORAGE_KEYS.UPDATE_LAST_SEEN_VERSION, "");
@@ -28725,9 +26043,6 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           const issues = [];
           if (!hasBridgeMarker) {
             issues.push("missing_bookmark_bridge");
-          }
-          if (bookmarkSource === "github" && !hasGitHubUsername && !hasGitHubToken) {
-            issues.push("github_credentials_missing");
           }
           let updateLastResult = "";
           if (typeof updateLastResultRaw === "string") {
@@ -28751,8 +26066,6 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             `bookmark_count=${Array.isArray(UI2.bookmarks) ? UI2.bookmarks.length : 0}`,
             "",
             "[config]",
-            `github_username=${hasGitHubUsername ? "set" : "unset"}`,
-            `github_token=${hasGitHubToken ? "set" : "unset"}`,
             `auto_import_enabled=${autoImportEnabled ? "true" : "false"}`,
             `auto_import_interval=${String(autoImportInterval)}`,
             `permission_level=${permissionLevel}`,
@@ -29305,7 +26618,6 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
       Object.assign(UI2, require_workspace_visual().WorkspaceVisual);
       Object.assign(UI2, require_bookmark_list().BookmarkList);
       Object.assign(UI2, require_workspace_insight().WorkspaceInsight);
-      Object.assign(UI2, require_github_obsidian_export().GitHubObsidianExport);
       module.exports = { UI: UI2 };
     }
   });
@@ -29320,7 +26632,6 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
       var { NotionOAuth: NotionOAuth2 } = require_auth();
       var { OperationGuard: OperationGuard2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2, PageFileExporter } = require_export();
-      var { GitHubAPI: GitHubAPI2 } = require_import();
       var { BookmarkExporter: BookmarkExporter2 } = require_bridge();
       var { UICommandService: UICommandService2 } = require_UICommandService();
       var { HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2 } = require_api();
@@ -29358,7 +26669,6 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             restoreExportBtn();
             return;
           }
-          const exportIsGitHub = UI2.isActiveGitHubSource();
           const toExport = UI2.bookmarks.filter((b) => {
             const bookmarkKey = UI2.getBookmarkKey(b);
             return UI2.selectedBookmarks.has(bookmarkKey) && !UI2.isBookmarkKeyExported(bookmarkKey);
@@ -29388,8 +26698,7 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
             categories: Utils2.parseAICategories(
               refs.aiCategoriesInput.value.trim() || ""
             ),
-            githubUsername: refs.githubUsernameInput.value.trim(),
-            token: getSensitiveValue(refs.githubTokenInput, CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, ""),
+            // v3.17: GitHub 收藏源已移除,githubUsername/token 设置项删除。
             imgFilter: refs.filterImgSelect.value,
             filterUsers: refs.filterUsersInput.value.trim(),
             filterInclude: refs.filterIncludeInput.value.trim(),
@@ -29416,12 +26725,10 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
               [CONFIG2.STORAGE_KEYS.FILTER_MINLEN]: settings.filterMinLen,
               [CONFIG2.STORAGE_KEYS.IMG_MODE]: settings.imgMode,
               [CONFIG2.STORAGE_KEYS.REQUEST_DELAY]: parseInt(refs.requestDelaySelect.value),
-              [CONFIG2.STORAGE_KEYS.EXPORT_CONCURRENCY]: settings.concurrency,
-              [CONFIG2.STORAGE_KEYS.GITHUB_OAUTH_CLIENT_ID]: refs.githubOauthClientIdInput ? String(refs.githubOauthClientIdInput.value || "").trim() : ""
+              [CONFIG2.STORAGE_KEYS.EXPORT_CONCURRENCY]: settings.concurrency
             },
             sensitiveEntries: {
-              [CONFIG2.STORAGE_KEYS.AI_API_KEY]: getInputValue(refs.aiApiKeyInput),
-              [CONFIG2.STORAGE_KEYS.GITHUB_TOKEN]: getInputValue(refs.githubTokenInput)
+              [CONFIG2.STORAGE_KEYS.AI_API_KEY]: getInputValue(refs.aiApiKeyInput)
             }
           }).then(() => true, (error) => {
             UI2.showStatus(`\u4FDD\u5B58\u8BBE\u7F6E\u5931\u8D25: ${error.message}`, "error");
@@ -29439,22 +26746,14 @@ ${enriched.topics.map((topic) => `- ${topic}`).join("\n")}
           refs.pauseBtn.classList.remove("ldb-btn-primary");
           UI2.refs.reportContainer.innerHTML = "";
           try {
-            let results;
-            if (exportIsGitHub) {
-              results = await UI2.exportGitHubSelected(toExport, settings, (current, total, title) => {
-                UI2.showProgress(current, total, `${title}
-\u5BFC\u51FA\u4E2D`);
-              });
-            } else {
-              results = await Exporter2.exportBookmarks(toExport, settings, (progress) => {
-                UI2.showProgress(
-                  progress.current,
-                  progress.total,
-                  `${progress.title}
+            const results = await Exporter2.exportBookmarks(toExport, settings, (progress) => {
+              UI2.showProgress(
+                progress.current,
+                progress.total,
+                `${progress.title}
 ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C)" : ""}`
-                );
-              });
-            }
+              );
+            });
             UI2.hideProgress();
             UI2.showReport(results);
             UI2.renderBookmarkList();
@@ -29522,213 +26821,193 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           const results = { success: [], failed: [], skipped: [] };
           let imageFailures = 0;
           try {
-            if (UI2.isActiveGitHubSource()) {
-              const githubResults = await UI2.exportGitHubSelectedToObsidian(selected, {
-                obsUrl,
-                obsKey,
-                obsDir,
-                aiApiKey: getSensitiveValue(refs.aiApiKeyInput, CONFIG2.STORAGE_KEYS.AI_API_KEY, ""),
-                aiService: refs.aiServiceSelect.value,
-                aiModel: refs.aiModelSelect.value,
-                aiBaseUrl: refs.aiBaseUrlInput.value.trim(),
-                categories: Utils2.parseAICategories(refs.aiCategoriesInput.value.trim() || ""),
-                token: getSensitiveValue(refs.githubTokenInput, CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "")
-              }, (current, total, title) => {
-                UI2.showProgress(current, total, `${title}
-\u5BFC\u51FA\u5230 Obsidian...`);
-              });
-              results.success.push(...githubResults.success);
-              results.failed.push(...githubResults.failed);
-              results.skipped.push(...githubResults.skipped || []);
-            } else {
-              for (let i = 0; i < selected.length; i++) {
+            for (let i = 0; i < selected.length; i++) {
+              if (Exporter2.isCancelled) break;
+              while (Exporter2.isPaused) {
+                await Utils2.sleep(200);
                 if (Exporter2.isCancelled) break;
-                while (Exporter2.isPaused) {
-                  await Utils2.sleep(200);
-                  if (Exporter2.isCancelled) break;
-                }
-                if (Exporter2.isCancelled) break;
-                const bookmark = selected[i];
-                const topicId = LinuxDoAPI2.resolveTopicId(bookmark);
-                if (!topicId) {
-                  results.failed.push({ topicId: "", title: bookmark.title || bookmark.fancy_title || bookmark.name || "\u672A\u77E5\u6807\u9898", error: "\u65E0\u6CD5\u89E3\u6790\u8BDD\u9898 ID" });
-                  continue;
-                }
-                UI2.showProgress(i + 1, selected.length, "\u5BFC\u51FA\u5E16\u5B50\u5230 Obsidian...");
-                try {
-                  const { topic, posts } = await LinuxDoAPI2.fetchAllPosts(topicId);
-                  const filteredPosts = Exporter2.filterPosts(posts, topic, {
-                    onlyFirst: refs.onlyFirstCheckbox.checked,
-                    onlyOp: refs.onlyOpCheckbox.checked,
-                    rangeStart: parseInt(refs.rangeStartInput.value) || 1,
-                    rangeEnd: parseInt(refs.rangeEndInput.value) || 999999,
-                    imgFilter: refs.filterImgSelect.value,
-                    filterUsers: refs.filterUsersInput.value.trim(),
-                    filterInclude: refs.filterIncludeInput.value.trim(),
-                    filterExclude: refs.filterExcludeInput.value.trim(),
-                    filterMinLen: parseInt(refs.filterMinLenInput.value) || 0
-                  });
-                  const meta = {
-                    title: topic.title,
-                    url: topic.url,
-                    author: topic.opUsername,
-                    topicId: topic.topicId || topic.topic_id,
-                    category: topic.categoryName || topic.category,
-                    tags: topic.tags || [],
-                    floors: filteredPosts.length
-                  };
-                  let md = HTMLToMarkdown2.buildFrontmatter(meta);
-                  md += `> [!info] \u5E16\u5B50\u4FE1\u606F
+              }
+              if (Exporter2.isCancelled) break;
+              const bookmark = selected[i];
+              const topicId = LinuxDoAPI2.resolveTopicId(bookmark);
+              if (!topicId) {
+                results.failed.push({ topicId: "", title: bookmark.title || bookmark.fancy_title || bookmark.name || "\u672A\u77E5\u6807\u9898", error: "\u65E0\u6CD5\u89E3\u6790\u8BDD\u9898 ID" });
+                continue;
+              }
+              UI2.showProgress(i + 1, selected.length, "\u5BFC\u51FA\u5E16\u5B50\u5230 Obsidian...");
+              try {
+                const { topic, posts } = await LinuxDoAPI2.fetchAllPosts(topicId);
+                const filteredPosts = Exporter2.filterPosts(posts, topic, {
+                  onlyFirst: refs.onlyFirstCheckbox.checked,
+                  onlyOp: refs.onlyOpCheckbox.checked,
+                  rangeStart: parseInt(refs.rangeStartInput.value) || 1,
+                  rangeEnd: parseInt(refs.rangeEndInput.value) || 999999,
+                  imgFilter: refs.filterImgSelect.value,
+                  filterUsers: refs.filterUsersInput.value.trim(),
+                  filterInclude: refs.filterIncludeInput.value.trim(),
+                  filterExclude: refs.filterExcludeInput.value.trim(),
+                  filterMinLen: parseInt(refs.filterMinLenInput.value) || 0
+                });
+                const meta = {
+                  title: topic.title,
+                  url: topic.url,
+                  author: topic.opUsername,
+                  topicId: topic.topicId || topic.topic_id,
+                  category: topic.categoryName || topic.category,
+                  tags: topic.tags || [],
+                  floors: filteredPosts.length
+                };
+                let md = HTMLToMarkdown2.buildFrontmatter(meta);
+                md += `> [!info] \u5E16\u5B50\u4FE1\u606F
 `;
-                  md += `> - **\u539F\u59CB\u94FE\u63A5**: ${Utils2.mdLink(topic.title, topic.url)}
+                md += `> - **\u539F\u59CB\u94FE\u63A5**: ${Utils2.mdLink(topic.title, topic.url)}
 `;
-                  md += `> - **\u697C\u4E3B**: @${topic.opUsername || "\u672A\u77E5"}
+                md += `> - **\u697C\u4E3B**: @${topic.opUsername || "\u672A\u77E5"}
 `;
-                  md += `> - **\u5206\u7C7B**: ${meta.category || "\u65E0"}
+                md += `> - **\u5206\u7C7B**: ${meta.category || "\u65E0"}
 `;
-                  md += `> - **\u6807\u7B7E**: ${(topic.tags || []).join(", ") || "\u65E0"}
+                md += `> - **\u6807\u7B7E**: ${(topic.tags || []).join(", ") || "\u65E0"}
 `;
-                  md += `> - **\u5BFC\u51FA\u65F6\u95F4**: ${(/* @__PURE__ */ new Date()).toLocaleString("zh-CN")}
+                md += `> - **\u5BFC\u51FA\u65F6\u95F4**: ${(/* @__PURE__ */ new Date()).toLocaleString("zh-CN")}
 
 `;
-                  filteredPosts.forEach((post, idx) => {
-                    const isOp = post.username === topic.opUsername;
-                    md += HTMLToMarkdown2.buildPostCallout(post, idx, isOp);
-                  });
-                  if (obsImgMode === "file") {
-                    const imgRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
-                    let match;
-                    const imgDownloads = [];
-                    while ((match = imgRegex.exec(md)) !== null) {
-                      imgDownloads.push({ full: match[0], alt: match[1], url: match[2] });
-                    }
-                    for (const img of imgDownloads) {
-                      if (Exporter2.isCancelled) break;
-                      while (Exporter2.isPaused) {
-                        await Utils2.sleep(200);
-                        if (Exporter2.isCancelled) break;
-                      }
-                      if (Exporter2.isCancelled) break;
-                      try {
-                        const ext = img.url.split(".").pop().split("?")[0] || "png";
-                        const nameBytes = new Uint8Array(4);
-                        if (typeof crypto !== "undefined" && crypto.getRandomValues) {
-                          crypto.getRandomValues(nameBytes);
-                        } else {
-                          throw new Error("crypto.getRandomValues \u4E0D\u53EF\u7528\uFF0C\u65E0\u6CD5\u751F\u6210 Obsidian \u56FE\u7247\u6587\u4EF6\u540D");
-                        }
-                        const safeName = `img-${Date.now()}-${Array.from(nameBytes, (b) => b.toString(16).padStart(2, "0")).join("")}.${ext}`;
-                        const imgPath = `${obsImgDir}/${safeName}`;
-                        const { UrlValidator } = __require("../security/UrlValidator");
-                        if (!UrlValidator.validatePageExternalUrl(img.url)) {
-                          throw new Error("\u56FE\u7247 URL \u672A\u901A\u8FC7\u5B89\u5168\u6821\u9A8C");
-                        }
-                        const blob = await new Promise((resolve, reject) => {
-                          GM_xmlhttpRequest({
-                            method: "GET",
-                            url: img.url,
-                            responseType: "blob",
-                            timeout: 3e4,
-                            onload: (r) => {
-                              if (r.status >= 200 && r.status < 300) resolve(r.response);
-                              else reject(new Error(`\u56FE\u7247\u4E0B\u8F7D\u5931\u8D25: HTTP ${r.status}`));
-                            },
-                            onerror: (e) => reject(e),
-                            ontimeout: () => reject(new Error("\u56FE\u7247\u4E0B\u8F7D\u8D85\u65F6"))
-                          });
-                        });
-                        if (!OperationGuard2.canExecute("obsidian.writeImage")) {
-                          OperationGuard2.auditDenied("obsidian.writeImage", { itemName: topic.title, trigger: "user_requested_write" }, {
-                            phase: "execute",
-                            reason: "\u6743\u9650\u4E0D\u8DB3\uFF1AObsidian \u56FE\u7247\u5199\u5165\u9700\u8981 level\u22651"
-                          });
-                          throw new Error("\u6743\u9650\u4E0D\u8DB3\uFF1AObsidian \u56FE\u7247\u5199\u5165\u9700\u8981 level\u22651");
-                        }
-                        const imgResult = await ObsidianAPI2.writeImage(obsUrl, obsKey, imgPath, blob, getMimeType(ext));
-                        if (!imgResult.ok) throw new Error(imgResult.error);
-                        md = md.replace(img.full, () => `![${img.alt}](${encodeURI(imgPath)})`);
-                      } catch {
-                        imageFailures++;
-                      }
-                    }
-                  } else if (obsImgMode === "base64") {
-                    const imgRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
-                    const matches = [];
-                    let m;
-                    while ((m = imgRegex.exec(md)) !== null) matches.push(m);
-                    for (const match of matches.reverse()) {
-                      if (Exporter2.isCancelled) break;
-                      while (Exporter2.isPaused) {
-                        await Utils2.sleep(200);
-                        if (Exporter2.isCancelled) break;
-                      }
-                      if (Exporter2.isCancelled) break;
-                      try {
-                        const { UrlValidator } = __require("../security/UrlValidator");
-                        if (!UrlValidator.validatePageExternalUrl(match[2])) {
-                          throw new Error("\u56FE\u7247 URL \u672A\u901A\u8FC7\u5B89\u5168\u6821\u9A8C");
-                        }
-                        const resp = await new Promise((resolve, reject) => {
-                          GM_xmlhttpRequest({
-                            method: "GET",
-                            url: match[2],
-                            responseType: "blob",
-                            timeout: 3e4,
-                            // P4 收敛(c13): onload 对 4xx/5xx 同样触发 —— 错误页不得内嵌为 data URL
-                            onload: (r) => {
-                              if (r.status >= 200 && r.status < 300) resolve(r);
-                              else reject(new Error(`\u56FE\u7247\u4E0B\u8F7D\u5931\u8D25: HTTP ${r.status}`));
-                            },
-                            onerror: (e) => reject(e),
-                            ontimeout: () => reject(new Error("\u56FE\u7247\u4E0B\u8F7D\u8D85\u65F6"))
-                          });
-                        });
-                        const b64 = await new Promise((resolve) => {
-                          const reader = new FileReader();
-                          reader.onloadend = () => resolve(reader.result);
-                          reader.readAsDataURL(resp.response);
-                        });
-                        md = md.replace(match[0], () => `![${match[1]}](${b64})`);
-                      } catch {
-                        imageFailures++;
-                      }
-                    }
+                filteredPosts.forEach((post, idx) => {
+                  const isOp = post.username === topic.opUsername;
+                  md += HTMLToMarkdown2.buildPostCallout(post, idx, isOp);
+                });
+                if (obsImgMode === "file") {
+                  const imgRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
+                  let match;
+                  const imgDownloads = [];
+                  while ((match = imgRegex.exec(md)) !== null) {
+                    imgDownloads.push({ full: match[0], alt: match[1], url: match[2] });
                   }
-                  const fileName = UI2.sanitizeObsidianFileName(topic.title, `topic-${topicId}`);
-                  if (!OperationGuard2.canExecute("obsidian.writeNote")) {
-                    OperationGuard2.auditDenied("obsidian.writeNote", { itemName: topic.title, trigger: "user_requested_write" }, {
-                      phase: "execute",
-                      reason: "\u6743\u9650\u4E0D\u8DB3\uFF1AObsidian \u7B14\u8BB0\u5199\u5165\u9700\u8981 level\u22651"
-                    });
-                    throw new Error("\u6743\u9650\u4E0D\u8DB3\uFF1AObsidian \u7B14\u8BB0\u5199\u5165\u9700\u8981 level\u22651");
-                  }
-                  const noteResult = await ObsidianAPI2.writeNote(obsUrl, obsKey, `${obsDir}/${fileName}.md`, md);
-                  if (!noteResult.ok) throw new Error(noteResult.error);
-                  Storage2.markTopicExported(topicId);
-                  results.success.push({
-                    title: topic.title,
-                    url: topic.url
-                  });
-                } catch (error) {
-                  results.failed.push({
-                    title: bookmark.title || `\u5E16\u5B50 ${topicId}`,
-                    error: error.message
-                  });
-                  const msgText = String((error == null ? void 0 : error.message) || "");
-                  if (/\bHTTP\s*40[13]\b/.test(msgText) || msgText.includes("invalid") || msgText.includes("Invalid") || msgText.includes("ECONNREFUSED") || msgText.includes("refused")) {
-                    results.authAborted = { reason: error.message, at: i + 1 };
-                    for (let k = i + 1; k < selected.length; k++) {
-                      const skippedBm = selected[k];
-                      results.skipped.push({
-                        title: skippedBm.title || skippedBm.fancy_title || skippedBm.name || `\u5E16\u5B50 ${LinuxDoAPI2.resolveTopicId(skippedBm)}`
+                  for (const img of imgDownloads) {
+                    if (Exporter2.isCancelled) break;
+                    while (Exporter2.isPaused) {
+                      await Utils2.sleep(200);
+                      if (Exporter2.isCancelled) break;
+                    }
+                    if (Exporter2.isCancelled) break;
+                    try {
+                      const ext = img.url.split(".").pop().split("?")[0] || "png";
+                      const nameBytes = new Uint8Array(4);
+                      if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+                        crypto.getRandomValues(nameBytes);
+                      } else {
+                        throw new Error("crypto.getRandomValues \u4E0D\u53EF\u7528\uFF0C\u65E0\u6CD5\u751F\u6210 Obsidian \u56FE\u7247\u6587\u4EF6\u540D");
+                      }
+                      const safeName = `img-${Date.now()}-${Array.from(nameBytes, (b) => b.toString(16).padStart(2, "0")).join("")}.${ext}`;
+                      const imgPath = `${obsImgDir}/${safeName}`;
+                      const { UrlValidator } = __require("../security/UrlValidator");
+                      if (!UrlValidator.validatePageExternalUrl(img.url)) {
+                        throw new Error("\u56FE\u7247 URL \u672A\u901A\u8FC7\u5B89\u5168\u6821\u9A8C");
+                      }
+                      const blob = await new Promise((resolve, reject) => {
+                        GM_xmlhttpRequest({
+                          method: "GET",
+                          url: img.url,
+                          responseType: "blob",
+                          timeout: 3e4,
+                          onload: (r) => {
+                            if (r.status >= 200 && r.status < 300) resolve(r.response);
+                            else reject(new Error(`\u56FE\u7247\u4E0B\u8F7D\u5931\u8D25: HTTP ${r.status}`));
+                          },
+                          onerror: (e) => reject(e),
+                          ontimeout: () => reject(new Error("\u56FE\u7247\u4E0B\u8F7D\u8D85\u65F6"))
+                        });
                       });
+                      if (!OperationGuard2.canExecute("obsidian.writeImage")) {
+                        OperationGuard2.auditDenied("obsidian.writeImage", { itemName: topic.title, trigger: "user_requested_write" }, {
+                          phase: "execute",
+                          reason: "\u6743\u9650\u4E0D\u8DB3\uFF1AObsidian \u56FE\u7247\u5199\u5165\u9700\u8981 level\u22651"
+                        });
+                        throw new Error("\u6743\u9650\u4E0D\u8DB3\uFF1AObsidian \u56FE\u7247\u5199\u5165\u9700\u8981 level\u22651");
+                      }
+                      const imgResult = await ObsidianAPI2.writeImage(obsUrl, obsKey, imgPath, blob, getMimeType(ext));
+                      if (!imgResult.ok) throw new Error(imgResult.error);
+                      md = md.replace(img.full, () => `![${img.alt}](${encodeURI(imgPath)})`);
+                    } catch {
+                      imageFailures++;
                     }
-                    break;
+                  }
+                } else if (obsImgMode === "base64") {
+                  const imgRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
+                  const matches = [];
+                  let m;
+                  while ((m = imgRegex.exec(md)) !== null) matches.push(m);
+                  for (const match of matches.reverse()) {
+                    if (Exporter2.isCancelled) break;
+                    while (Exporter2.isPaused) {
+                      await Utils2.sleep(200);
+                      if (Exporter2.isCancelled) break;
+                    }
+                    if (Exporter2.isCancelled) break;
+                    try {
+                      const { UrlValidator } = __require("../security/UrlValidator");
+                      if (!UrlValidator.validatePageExternalUrl(match[2])) {
+                        throw new Error("\u56FE\u7247 URL \u672A\u901A\u8FC7\u5B89\u5168\u6821\u9A8C");
+                      }
+                      const resp = await new Promise((resolve, reject) => {
+                        GM_xmlhttpRequest({
+                          method: "GET",
+                          url: match[2],
+                          responseType: "blob",
+                          timeout: 3e4,
+                          // P4 收敛(c13): onload 对 4xx/5xx 同样触发 —— 错误页不得内嵌为 data URL
+                          onload: (r) => {
+                            if (r.status >= 200 && r.status < 300) resolve(r);
+                            else reject(new Error(`\u56FE\u7247\u4E0B\u8F7D\u5931\u8D25: HTTP ${r.status}`));
+                          },
+                          onerror: (e) => reject(e),
+                          ontimeout: () => reject(new Error("\u56FE\u7247\u4E0B\u8F7D\u8D85\u65F6"))
+                        });
+                      });
+                      const b64 = await new Promise((resolve) => {
+                        const reader = new FileReader();
+                        reader.onloadend = () => resolve(reader.result);
+                        reader.readAsDataURL(resp.response);
+                      });
+                      md = md.replace(match[0], () => `![${match[1]}](${b64})`);
+                    } catch {
+                      imageFailures++;
+                    }
                   }
                 }
-                if (i < selected.length - 1) {
-                  await Utils2.sleep(300);
+                const fileName = UI2.sanitizeObsidianFileName(topic.title, `topic-${topicId}`);
+                if (!OperationGuard2.canExecute("obsidian.writeNote")) {
+                  OperationGuard2.auditDenied("obsidian.writeNote", { itemName: topic.title, trigger: "user_requested_write" }, {
+                    phase: "execute",
+                    reason: "\u6743\u9650\u4E0D\u8DB3\uFF1AObsidian \u7B14\u8BB0\u5199\u5165\u9700\u8981 level\u22651"
+                  });
+                  throw new Error("\u6743\u9650\u4E0D\u8DB3\uFF1AObsidian \u7B14\u8BB0\u5199\u5165\u9700\u8981 level\u22651");
                 }
+                const noteResult = await ObsidianAPI2.writeNote(obsUrl, obsKey, `${obsDir}/${fileName}.md`, md);
+                if (!noteResult.ok) throw new Error(noteResult.error);
+                Storage2.markTopicExported(topicId);
+                results.success.push({
+                  title: topic.title,
+                  url: topic.url
+                });
+              } catch (error) {
+                results.failed.push({
+                  title: bookmark.title || `\u5E16\u5B50 ${topicId}`,
+                  error: error.message
+                });
+                const msgText = String((error == null ? void 0 : error.message) || "");
+                if (/\bHTTP\s*40[13]\b/.test(msgText) || msgText.includes("invalid") || msgText.includes("Invalid") || msgText.includes("ECONNREFUSED") || msgText.includes("refused")) {
+                  results.authAborted = { reason: error.message, at: i + 1 };
+                  for (let k = i + 1; k < selected.length; k++) {
+                    const skippedBm = selected[k];
+                    results.skipped.push({
+                      title: skippedBm.title || skippedBm.fancy_title || skippedBm.name || `\u5E16\u5B50 ${LinuxDoAPI2.resolveTopicId(skippedBm)}`
+                    });
+                  }
+                  break;
+                }
+              }
+              if (i < selected.length - 1) {
+                await Utils2.sleep(300);
               }
             }
             UI2.hideProgress();
@@ -29917,9 +27196,8 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           const el = refs.dedupSummary;
           if (!el) return;
           const linuxdoCount = Object.keys(DedupStore.getSeen("linuxdo") || {}).length;
-          const githubCount = Object.keys(GitHubAPI2.getExported() || {}).length + Object.keys(GitHubAPI2.getExportedGists() || {}).length;
           const bookmarkCount = Object.keys(BookmarkExporter2.getExported() || {}).length;
-          el.textContent = `\u53BB\u91CD/\u5BFC\u51FA\u8BB0\u5F55 \u2014\u2014 Linux.do: ${linuxdoCount} \u6761\uFF1BGitHub: ${githubCount} \u6761\uFF1B\u4E66\u7B7E: ${bookmarkCount} \u6761`;
+          el.textContent = `\u53BB\u91CD/\u5BFC\u51FA\u8BB0\u5F55 \u2014\u2014 Linux.do: ${linuxdoCount} \u6761\uFF1B\u4E66\u7B7E: ${bookmarkCount} \u6761`;
         };
         const clearWithConfirm = (label, doClear) => {
           ConfirmationDialog2.show({
@@ -29937,7 +27215,8 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
         refs.clearLinuxdoDedupBtn.onclick = () => clearWithConfirm("Linux.do \u53BB\u91CD", () => {
           Storage2.clearExportedTopics();
         });
-        refs.clearGithubExportedBtn.onclick = () => clearWithConfirm("GitHub \u5DF2\u5BFC\u51FA", () => GitHubAPI2.clearExportedRecords());
+        if (refs.clearGithubExportedBtn) refs.clearGithubExportedBtn.onclick = () => {
+        };
         refs.clearBookmarkExportedBtn.onclick = () => clearWithConfirm("\u4E66\u7B7E\u5DF2\u5BFC\u51FA", () => BookmarkExporter2.clearExportedRecords());
         renderDedupSummary();
       };
@@ -29952,9 +27231,8 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
       var { CONFIG: CONFIG2, MSG: MSG2 } = require_config();
       var { Utils: Utils2 } = require_utils();
       var { Storage: Storage2 } = require_storage();
-      var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, GitHubOAuth } = require_auth();
+      var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2 } = require_auth();
       var { buildConfiguredTargetWarning } = require_target_discovery();
-      var { GitHubAPI: GitHubAPI2 } = require_import();
       var { ConfirmationDialog: ConfirmationDialog2 } = require_security();
       var { UICommandService: UICommandService2 } = require_UICommandService();
       var { ChatUI: ChatUI2, AIService: AIService2 } = require_ai();
@@ -30002,51 +27280,6 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
         refs.agentMaxIterationsSelect.onchange = (e) => {
           Storage2.set(CONFIG2.STORAGE_KEYS.AGENT_MAX_ITERATIONS, parseInt(e.target.value) || 8);
         };
-        refs.githubUsernameInput.onchange = (e) => {
-          Storage2.set(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, e.target.value.trim());
-        };
-        refs.githubTokenInput.onchange = (e) => {
-          persistSensitiveInput(e.target, CONFIG2.STORAGE_KEYS.GITHUB_TOKEN).catch((error) => {
-            UI2.showStatus(error.message || String(error), "error");
-          });
-        };
-        if (refs.githubOAuthBtn) {
-          refs.githubOAuthBtn.onclick = async () => {
-            GitHubOAuth.setClientId(refs.githubOauthClientIdInput ? refs.githubOauthClientIdInput.value : "");
-            const setStatus = (text) => {
-              if (refs.githubOAuthStatus) refs.githubOAuthStatus.textContent = text;
-            };
-            let currentUserCode = "";
-            let currentVerificationUri = "";
-            try {
-              refs.githubOAuthBtn.disabled = true;
-              setStatus("\u6B63\u5728\u7533\u8BF7\u8BBE\u5907\u7801\u2026");
-              const result = await GitHubOAuth.startDeviceFlow({
-                onUserCode: ({ userCode, verificationUri }) => {
-                  currentUserCode = String(userCode || "");
-                  currentVerificationUri = String(verificationUri || "");
-                  try {
-                    window.open(currentVerificationUri, "_blank");
-                  } catch (_) {
-                  }
-                  GitHubOAuth.renderUserCodeStatus(refs.githubOAuthStatus, currentUserCode, currentVerificationUri);
-                },
-                onStatus: ({ phase }) => {
-                  if (phase === "pending" || phase === "slow_down") {
-                    GitHubOAuth.renderUserCodeStatus(refs.githubOAuthStatus, currentUserCode, currentVerificationUri, phase);
-                  }
-                }
-              });
-              await GitHubOAuth.applyTokenResponse(result);
-              CredentialVault2.syncSensitiveInput(refs.githubTokenInput, CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
-              setStatus("\u2705 GitHub \u6388\u6743\u6210\u529F\uFF0CToken \u5DF2\u81EA\u52A8\u586B\u5165");
-            } catch (error) {
-              setStatus(error.code === "cancelled" ? "\u5DF2\u53D6\u6D88\u6388\u6743" : `\u274C ${error.message}`);
-            } finally {
-              refs.githubOAuthBtn.disabled = false;
-            }
-          };
-        }
         refs.obsApiUrlInput.onchange = (e) => {
           Storage2.set(CONFIG2.STORAGE_KEYS.OBS_API_URL, e.target.value.trim());
         };
@@ -30064,18 +27297,6 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
         refs.obsImgDirInput.onchange = (e) => {
           Storage2.set(CONFIG2.STORAGE_KEYS.OBS_IMG_DIR, e.target.value.trim());
         };
-        refs.githubTypeCheckboxes.forEach((cb) => {
-          cb.onchange = () => {
-            const source = [...refs.githubTypeCheckboxes].filter((c) => c.checked);
-            const types = [...source].filter((c) => c.checked).map((c) => c.value);
-            GitHubAPI2.setImportTypes(types.length > 0 ? types : ["stars"]);
-            if (types.length === 0) {
-              refs.githubTypeCheckboxes.forEach((c) => {
-                c.checked = c.value === "stars";
-              });
-            }
-          };
-        });
         refs.aiRefreshDbsBtn.onclick = async () => {
           var _a;
           const apiKey = NotionOAuth2.getAccessToken(refs.apiKeyInput.value.trim());
@@ -30249,14 +27470,14 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
       var { CONFIG: CONFIG2, MSG: MSG2, getMimeType: getMimeType3 } = require_config();
       var { Utils: Utils2 } = require_utils();
       var { Storage: Storage2, SyncState: SyncState2, DedupStore } = require_storage();
-      var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2, GitHubOAuth } = require_auth();
+      var { CredentialVault: CredentialVault2, NotionOAuth: NotionOAuth2, TargetState: TargetState2 } = require_auth();
       var { buildConfiguredTargetWarning } = require_target_discovery();
       var { NotionAPI: NotionAPI2, DOMToNotion: DOMToNotion2, SiteDetector: SiteDetector2, InstallHelper: InstallHelper2, HTMLToMarkdown: HTMLToMarkdown2, ObsidianAPI: ObsidianAPI2, EMOJI_MAP: EMOJI_MAP2 } = require_api();
       var { OperationGuard: OperationGuard2, UndoManager: UndoManager2, OperationLog: OperationLog2, ConfirmationDialog: ConfirmationDialog2 } = require_security();
       var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2 } = require_extract();
       var { UICommandService: UICommandService2 } = require_UICommandService();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2 } = require_export();
-      var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
+      var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2 } = require_import();
       var { BookmarkBridge: BookmarkBridge2, BookmarkAutoImporter: BookmarkAutoImporter2, BookmarkExporter: BookmarkExporter2, BookmarkOrganizer } = require_bridge();
       var { AIService: AIService2, ChatUI: ChatUI2, AIClassifier: AIClassifier2, AgentTrace, ChatState: ChatState2 } = require_ai();
       var { DesignSystem: DesignSystem2 } = require_design_system();
@@ -30287,12 +27508,8 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           const syncSensitiveInputs = () => {
             NotionOAuth2.syncApiKeyInputs();
             CredentialVault2.syncSensitiveInput(refs.aiApiKeyInput, CONFIG2.STORAGE_KEYS.AI_API_KEY, "AI \u670D\u52A1\u7684 API Key");
-            CredentialVault2.syncSensitiveInput(refs.githubTokenInput, CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
             CredentialVault2.syncSensitiveInput(refs.obsApiKeyInput, CONFIG2.STORAGE_KEYS.OBS_API_KEY, "Obsidian Local REST API Key");
           };
-          if (refs.githubOauthClientIdInput) {
-            refs.githubOauthClientIdInput.value = GitHubOAuth.getClientId();
-          }
           const isUserscriptMode = Utils2.isUserscriptMode();
           const hasBridgeMarker = BookmarkBridge2.isExtensionAvailable();
           if (refs.runtimeBadge) {
@@ -30395,7 +27612,6 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           const collapseSections = [
             { toggle: refs.filterToggle, content: refs.filterContent, arrow: refs.filterArrow, key: "filter" },
             { toggle: refs.aiSettingsToggle, content: refs.aiSettingsContent, arrow: refs.aiSettingsArrow, key: "ai" },
-            { toggle: refs.githubSettingsToggle, content: refs.githubSettingsContent, arrow: refs.githubSettingsArrow, key: "github" },
             { toggle: refs.obsSettingsToggle, content: refs.obsSettingsContent, arrow: refs.obsSettingsArrow, key: "obsidian" },
             { toggle: refs.sourceSettingsToggle, content: refs.sourceSettingsContent, arrow: refs.sourceSettingsArrow, key: "source" },
             { toggle: refs.sourcePartitionsToggle, content: refs.sourcePartitionsContent, arrow: refs.sourcePartitionsArrow, key: "partitions" }
@@ -30442,7 +27658,6 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           [
             refs.filterToggle,
             refs.aiSettingsToggle,
-            refs.githubSettingsToggle,
             refs.obsSettingsToggle,
             refs.sourceSettingsToggle,
             refs.sourcePartitionsToggle
@@ -30457,27 +27672,6 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
           });
           refs.sourceSelectLinuxdo.onclick = () => {
             UI2.switchBookmarkSource("linuxdo");
-          };
-          refs.sourceSelectGithub.onclick = () => {
-            UI2.switchBookmarkSource("github");
-          };
-          refs.openGithubSettingsBtn.onclick = () => {
-            const settingsTab = panel.querySelector('.ldb-tab[data-tab="settings"]');
-            if (settingsTab && !settingsTab.classList.contains("active")) {
-              settingsTab.click();
-            }
-            const content = refs.githubSettingsContent;
-            const arrow = refs.githubSettingsArrow;
-            const tokenInput = refs.githubTokenInput;
-            if (content == null ? void 0 : content.classList.contains("collapsed")) {
-              content.classList.remove("collapsed");
-              if (arrow) arrow.textContent = "\u25BC";
-            }
-            if (tokenInput) {
-              tokenInput.scrollIntoView({ block: "center", behavior: "smooth" });
-              tokenInput.focus();
-            }
-            UI2.showStatus("\u5DF2\u5B9A\u4F4D\u5230 GitHub Token \u8BBE\u7F6E", "info");
           };
           refs.selfCheckBtn.onclick = () => {
             UI2.renderSelfCheckResult();
@@ -30619,22 +27813,6 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             Storage2.set(cfg.enabledKey, enabled);
             refs.autoImportOptions.style.display = enabled ? "block" : "none";
             if (enabled) {
-              if (cfg.isGitHub) {
-                const githubReady = !!(Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, "").trim() || Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "").trim());
-                const notionReady = !!(NotionOAuth2.getAccessToken(refs.apiKeyInput.value.trim()) && (refs.databaseIdInput.value.trim() || refs.parentPageIdInput.value.trim()));
-                if (!githubReady || !notionReady) {
-                  GitHubAutoImporter2.updateStatus("\u26A0\uFE0F \u8BF7\u5148\u914D\u7F6E GitHub \u7528\u6237\u540D/Token \u4E0E Notion \u76EE\u6807");
-                  e.target.checked = false;
-                  Storage2.set(cfg.enabledKey, false);
-                  refs.autoImportOptions.style.display = "none";
-                  return;
-                }
-                GitHubAutoImporter2.run();
-                const interval2 = parseInt(refs.autoImportInterval.value) || 0;
-                Storage2.set(cfg.intervalKey, interval2);
-                if (interval2 > 0) GitHubAutoImporter2.startPolling(interval2);
-                return;
-              }
               const apiKey = NotionOAuth2.getAccessToken(refs.apiKeyInput.value.trim());
               if (!apiKey) {
                 AutoImporter2.updateStatus("\u26A0\uFE0F \u8BF7\u5148\u914D\u7F6E Notion API Key");
@@ -30663,29 +27841,17 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
               Storage2.set(cfg.intervalKey, interval);
               if (interval > 0) AutoImporter2.startPolling(interval);
             } else {
-              if (cfg.isGitHub) {
-                GitHubAutoImporter2.stopPolling();
-                GitHubAutoImporter2.updateStatus("");
-              } else {
-                AutoImporter2.stopPolling();
-                AutoImporter2.updateStatus("");
-              }
+              AutoImporter2.stopPolling();
+              AutoImporter2.updateStatus("");
             }
           };
           refs.autoImportInterval.onchange = (e) => {
             const interval = parseInt(e.target.value) || 0;
             const cfg = UI2.getAutoImportConfigBySource();
             Storage2.set(cfg.intervalKey, interval);
-            if (cfg.isGitHub) {
-              GitHubAutoImporter2.stopPolling();
-              if (interval > 0 && Storage2.get(cfg.enabledKey, false)) {
-                GitHubAutoImporter2.startPolling(interval);
-              }
-            } else {
-              AutoImporter2.stopPolling();
-              if (interval > 0 && Storage2.get(cfg.enabledKey, false)) {
-                AutoImporter2.startPolling(interval);
-              }
+            AutoImporter2.stopPolling();
+            if (interval > 0 && Storage2.get(cfg.enabledKey, false)) {
+              AutoImporter2.startPolling(interval);
             }
           };
           refs.bookmarkAutoImportEnabled.onchange = (e) => {
@@ -30772,7 +27938,6 @@ ${progress.message || progress.stage}${progress.isPaused ? " (\u5DF2\u6682\u505C
             };
           };
           bindImportNow(refs.importNowLinuxdoBtn, "Linux.do \u5BFC\u5165", () => AutoImporter2.run());
-          bindImportNow(refs.importNowGithubBtn, "GitHub \u5BFC\u5165", () => GitHubAutoImporter2.run());
           bindImportNow(refs.importNowBookmarkBtn, "\u4E66\u7B7E\u5BFC\u5165", () => BookmarkAutoImporter2.run());
           refs.linuxdoDedupModeSelect.onchange = (e) => {
             var _a2;
@@ -30928,9 +28093,9 @@ ${preview}${more}
             }
           };
           UI2.switchBookmarkSource = (source) => {
-            const resolvedSource = source === "github" ? "github" : "linuxdo";
-            Storage2.set(CONFIG2.STORAGE_KEYS.BOOKMARK_SOURCE, resolvedSource);
-            UI2.applyBookmarkSourceUI(resolvedSource);
+            const resolvedSource2 = "linuxdo";
+            Storage2.set(CONFIG2.STORAGE_KEYS.BOOKMARK_SOURCE, resolvedSource2);
+            UI2.applyBookmarkSourceUI(resolvedSource2);
             UI2.renderSelfCheckResult();
             UI2.bookmarks = [];
             UI2.selectedBookmarks = /* @__PURE__ */ new Set();
@@ -30965,10 +28130,9 @@ ${preview}${more}
                 const item2 = reexportBtn.closest(".ldb-bookmark-item");
                 const bookmarkKey = String((item2 == null ? void 0 : item2.dataset.topicId) || "");
                 if (bookmarkKey) {
-                  const isGitHubKey = bookmarkKey.startsWith("gh:");
                   ConfirmationDialog2.show({
                     title: "\u786E\u8BA4\u91CD\u65B0\u5BFC\u51FA",
-                    message: isGitHubKey ? "\u91CD\u65B0\u5BFC\u51FA\u5C06\u79FB\u9664\u8BE5\u9879\uFF08\u4ED3\u5E93/Gist\uFF09\u7684\u5BFC\u51FA\u8BB0\u5F55\u5E76\u91CD\u65B0\u52A0\u5165\u5F85\u5BFC\u51FA\u5217\u8868\uFF0C\u53EF\u80FD\u8986\u76D6\u73B0\u6709 Notion \u9875\u9762\u6216 Obsidian \u7B14\u8BB0\uFF0C\u662F\u5426\u7EE7\u7EED\uFF1F" : "\u91CD\u65B0\u5BFC\u51FA\u5C06\u79FB\u9664\u8BE5\u5E16\u5B50\u7684\u5BFC\u51FA\u8BB0\u5F55\u5E76\u91CD\u65B0\u52A0\u5165\u5F85\u5BFC\u51FA\u5217\u8868\uFF0C\u53EF\u80FD\u8986\u76D6\u73B0\u6709 Notion \u9875\u9762\uFF0C\u662F\u5426\u7EE7\u7EED\uFF1F",
+                    message: "\u91CD\u65B0\u5BFC\u51FA\u5C06\u79FB\u9664\u8BE5\u5E16\u5B50\u7684\u5BFC\u51FA\u8BB0\u5F55\u5E76\u91CD\u65B0\u52A0\u5165\u5F85\u5BFC\u51FA\u5217\u8868\uFF0C\u53EF\u80FD\u8986\u76D6\u73B0\u6709 Notion \u9875\u9762\uFF0C\u662F\u5426\u7EE7\u7EED\uFF1F",
                     confirmText: "\u91CD\u65B0\u5BFC\u51FA",
                     onConfirm: () => {
                       UI2.requeueLinuxDoBookmark(bookmarkKey);
@@ -31015,54 +28179,21 @@ ${preview}${more}
             refs.bookmarkEmptyLoad.onclick = () => refs.loadBookmarksBtn.click();
           }
           refs.loadBookmarksBtn.onclick = async () => {
-            var _a2;
             const btn = refs.loadBookmarksBtn;
             btn.disabled = true;
             btn.innerHTML = '<span class="ldb-spin">\u{1F504}</span> \u52A0\u8F7D\u4E2D...';
             const loadSource = UI2.getActiveBookmarkSource();
             try {
-              let bookmarks = [];
-              if (UI2.isActiveGitHubSource()) {
-                const username = refs.githubUsernameInput.value.trim() || Storage2.get(CONFIG2.STORAGE_KEYS.GITHUB_USERNAME, "");
-                const token = getSensitiveValue(refs.githubTokenInput, CONFIG2.STORAGE_KEYS.GITHUB_TOKEN, "");
-                const types = GitHubAPI2.getImportTypes();
-                if (!username && !token) {
-                  UI2.showStatus("\u8BF7\u5148\u5728\u8BBE\u7F6E\u4E2D\u586B\u5199 GitHub \u7528\u6237\u540D\uFF08\u6216\u914D\u7F6E Token\uFF09", "error");
-                  return;
-                }
-                const allItems = [];
-                for (const type of types) {
-                  if (type === "stars") {
-                    const items = await GitHubAPI2.fetchStarredRepos(username, token);
-                    allItems.push(...UI2.mapGitHubItemsToBookmarks(items, "stars"));
-                  } else if (type === "repos") {
-                    const items = await GitHubAPI2.fetchUserRepos(username, token);
-                    const ownRepos = items.filter((r) => !r.fork);
-                    allItems.push(...UI2.mapGitHubItemsToBookmarks(ownRepos, "repos"));
-                  } else if (type === "forks") {
-                    const items = await GitHubAPI2.fetchForkedRepos(username, token);
-                    allItems.push(...UI2.mapGitHubItemsToBookmarks(items, "forks"));
-                  } else if (type === "gists") {
-                    const items = await GitHubAPI2.fetchUserGists(username, token);
-                    allItems.push(...UI2.mapGitHubItemsToBookmarks(items, "gists"));
-                  }
-                  if (loadSource === UI2.getActiveBookmarkSource() && ((_a2 = UI2.refs) == null ? void 0 : _a2.bookmarkCount)) {
-                    UI2.refs.bookmarkCount.textContent = allItems.length;
-                  }
-                }
-                bookmarks = allItems;
-              } else {
-                const username = await Utils2.getCurrentLinuxDoUsernameAsync();
-                if (!username) {
-                  UI2.showStatus("\u65E0\u6CD5\u83B7\u53D6\u5F53\u524D Linux.do \u7528\u6237\u540D\uFF0C\u8BF7\u5148\u767B\u5F55\u540E\u91CD\u8BD5", "error");
-                  return;
-                }
-                bookmarks = await LinuxDoAPI2.fetchAllBookmarks(username, (count) => {
-                  var _a3;
-                  if (loadSource !== UI2.getActiveBookmarkSource()) return;
-                  if ((_a3 = UI2.refs) == null ? void 0 : _a3.bookmarkCount) UI2.refs.bookmarkCount.textContent = count;
-                });
+              const username = await Utils2.getCurrentLinuxDoUsernameAsync();
+              if (!username) {
+                UI2.showStatus("\u65E0\u6CD5\u83B7\u53D6\u5F53\u524D Linux.do \u7528\u6237\u540D\uFF0C\u8BF7\u5148\u767B\u5F55\u540E\u91CD\u8BD5", "error");
+                return;
               }
+              const bookmarks = await LinuxDoAPI2.fetchAllBookmarks(username, (count) => {
+                var _a2;
+                if (loadSource !== UI2.getActiveBookmarkSource()) return;
+                if ((_a2 = UI2.refs) == null ? void 0 : _a2.bookmarkCount) UI2.refs.bookmarkCount.textContent = count;
+              });
               if (loadSource !== UI2.getActiveBookmarkSource()) return;
               UI2.bookmarks = bookmarks;
               UI2.updateVisualSnapshot(UI2.getActiveBookmarkSource(), bookmarks);
@@ -31074,8 +28205,7 @@ ${preview}${more}
               UI2.renderBookmarkList();
               UI2.refs.bookmarkListContainer.style.display = "block";
               if (UI2.refs.bookmarkEmptyState) UI2.refs.bookmarkEmptyState.style.display = "none";
-              const sourceText = UI2.isActiveGitHubSource() ? "GitHub \u6536\u85CF" : "Linux.do \u6536\u85CF";
-              UI2.showStatus(`\u6210\u529F\u52A0\u8F7D ${bookmarks.length} \u4E2A${sourceText}`, "success");
+              UI2.showStatus(`\u6210\u529F\u52A0\u8F7D ${bookmarks.length} \u4E2ALinux.do \u6536\u85CF`, "success");
             } catch (error) {
               UI2.showStatus(`\u52A0\u8F7D\u5931\u8D25: ${error.message}`, "error");
             } finally {
@@ -31538,7 +28668,7 @@ ${preview}${more}
       var { ZhihuAPI: ZhihuAPI2, GenericExtractor: GenericExtractor2, WorkspaceService: WorkspaceService2 } = require_extract();
       var { UICommandService: UICommandService2 } = require_UICommandService();
       var { Exporter: Exporter2, LinuxDoAPI: LinuxDoAPI2, GenericExporter: GenericExporter2, PageFileExporter } = require_export();
-      var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2, GitHubAutoImporter: GitHubAutoImporter2, GitHubAPI: GitHubAPI2, GitHubExporter: GitHubExporter2 } = require_import();
+      var { AutoImporter: AutoImporter2, UpdateChecker: UpdateChecker2 } = require_import();
       var { AIAssistant: AIAssistant2, getAISettings } = require_ai();
       var { StyleManager: StyleManager2 } = require_style_manager();
       var { DesignSystem: DesignSystem2 } = require_design_system();
@@ -32625,15 +29755,14 @@ ${preview}${more}
       var AIAssistant2 = () => AI().AIAssistant;
       var AIClassifier2 = () => AI().AIClassifier;
       var AI_WELCOME_ENTRY_POINTS = Object.freeze({
-        subtitle: "\u7A33\u5B9A\u652F\u6301\uFF1A\u6570\u636E\u5E93 / \u9875\u9762\u68C0\u7D22\u3001\u8DE8\u6E90\u641C\u7D22\u3001\u6279\u91CF\u5206\u7C7B\u3001GitHub / \u4E66\u7B7E\u5BFC\u5165\u3001\u9875\u9762\u6458\u8981\uFF1B\u66F4\u591A\u80FD\u529B\u770B\u300C\u5E2E\u52A9\u300D",
-        inputPlaceholder: "\u8F93\u5165\u6307\u4EE4\uFF0C\u5982\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u6216\u300C\u5BFC\u5165GitHub\u6536\u85CF\u300D...",
+        subtitle: "\u7A33\u5B9A\u652F\u6301\uFF1A\u6570\u636E\u5E93 / \u9875\u9762\u68C0\u7D22\u3001\u8DE8\u6E90\u641C\u7D22\u3001\u6279\u91CF\u5206\u7C7B\u3001\u4E66\u7B7E\u5BFC\u5165\u3001\u9875\u9762\u6458\u8981\uFF1B\u66F4\u591A\u80FD\u529B\u770B\u300C\u5E2E\u52A9\u300D",
+        inputPlaceholder: "\u8F93\u5165\u6307\u4EE4\uFF0C\u5982\u300C\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93\u300D\u6216\u300C\u5BFC\u5165\u6D4F\u89C8\u5668\u4E66\u7B7E\u300D...",
         chips: Object.freeze([
           { command: "\u5E2E\u52A9", label: "\u{1F4A1} \u5E2E\u52A9" },
           { command: "\u5217\u51FA\u6240\u6709\u6570\u636E\u5E93", label: "\u{1F5C2}\uFE0F \u6570\u636E\u5E93" },
           { command: "\u5728\u5DE5\u4F5C\u533A\u641C\u7D22\u6240\u6709\u9875\u9762", label: "\u{1F4C4} \u9875\u9762" },
           { command: "\u8DE8\u6E90\u641C\u7D22\u6700\u8FD1\u6536\u85CF\u7684\u5E16\u5B50", label: "\u{1F50D} \u8DE8\u6E90\u641C\u7D22" },
           { command: "\u81EA\u52A8\u5206\u7C7B\u6240\u6709\u672A\u5206\u7C7B\u7684\u5E16\u5B50", label: "\u{1F3F7}\uFE0F \u5206\u7C7B" },
-          { command: "\u5BFC\u5165GitHub\u6536\u85CF", label: "\u{1F419} GitHub" },
           { command: "\u5BFC\u5165\u6D4F\u89C8\u5668\u4E66\u7B7E", label: "\u{1F4D6} \u4E66\u7B7E" }
         ])
       });
@@ -34123,7 +31252,6 @@ ${isolate(AI()._resultToAgentPayload(result))}` });
 - "\u628A\u6574\u4E2A\u6570\u636E\u5E93\u7FFB\u8BD1\u6210\u82F1\u6587"
 - "\u628A\u8FD9\u4E2A\u9875\u9762\u7684\u7B14\u8BB0\u63D0\u53D6\u4E3A\u6570\u636E\u5E93"
 - "\u4E3A\u65B0\u5458\u5DE5\u521B\u5EFA\u5165\u804C\u6307\u5357\uFF08\u542B\u5B50\u9875\u9762\uFF09"
-- "\u5BFC\u5165 GitHub \u6536\u85CF\u5230 Notion"
 - "\u5BFC\u5165\u6D4F\u89C8\u5668\u4E66\u7B7E"
 
 \u8BF4\u660E\uFF1A
@@ -34231,20 +31359,19 @@ ${isolate(AI()._resultToAgentPayload(result))}` });
 23. generate_pages - \u751F\u6210\u591A\u9875\u9762\u7ED3\u6784\u5316\u5185\u5BB9\uFF08\u5982\uFF1A\u521B\u5EFA\u5165\u804C\u6307\u5357\u542B\u5B50\u9875\u9762\u3001\u751F\u6210\u7ADE\u54C1\u5206\u6790\u62A5\u544A\u3001\u521B\u5EFA\u5305\u542B\u591A\u4E2A\u90E8\u5206\u7684\u9879\u76EE\u6587\u6863\uFF09
 24. batch_analyze - \u6279\u91CF\u5206\u6790\u6570\u636E\u5E93\u4E2D\u7684\u9875\u9762\u5E76\u751F\u6210\u7EFC\u5408\u62A5\u544A\uFF08\u5982\uFF1A\u5206\u6790\u56E2\u961F\u9879\u76EE\u751F\u6210\u5468\u62A5\u3001\u5206\u6790\u6240\u6709\u5E16\u5B50\u627E\u51FA\u8D8B\u52BF\u3001\u7EFC\u5408\u5206\u6790\u6570\u636E\u5E93\u5185\u5BB9\uFF09
 25. compound - \u7528\u6237\u6307\u4EE4\u5305\u542B\u4E24\u4E2A\u53CA\u4EE5\u4E0A\u9700\u6309\u987A\u5E8F\u6267\u884C\u7684\u4E0D\u540C\u64CD\u4F5C\uFF08\u5982\uFF1A\u5148\u5206\u7C7B\u518D\u79FB\u52A8\u3001\u5206\u7C7B\u540E\u79FB\u5230B\u6570\u636E\u5E93\uFF09
-26. github_import - \u5BFC\u5165 GitHub \u6536\u85CF/Stars/Repos/Gists \u5230 Notion\uFF08\u5982\uFF1A\u5BFC\u5165GitHub\u6536\u85CF\u3001\u540C\u6B65\u6211\u7684GitHub Stars\u3001\u628AGitHub\u6536\u85CF\u5BFC\u5165\u5230Notion\u3001\u5BFC\u5165github\u661F\u6807\u4ED3\u5E93\u3001\u5BFC\u5165\u6211\u7684\u4ED3\u5E93\u3001\u5BFC\u5165Gists\uFF09
-27. bookmark_import - \u5BFC\u5165\u6D4F\u89C8\u5668\u4E66\u7B7E\u5230 Notion\uFF08\u5982\uFF1A\u5BFC\u5165\u4E66\u7B7E\u3001\u540C\u6B65\u6D4F\u89C8\u5668\u6536\u85CF\u3001\u628AChrome\u4E66\u7B7E\u5BFC\u5165\u5230Notion\u3001\u6574\u7406\u6211\u7684\u4E66\u7B7E\uFF09
-28. fetch_notion_object - \u6309\u9875\u9762/\u6570\u636E\u5E93\u540D\u79F0\u3001URL \u6216 ID \u8BFB\u53D6\u5BF9\u8C61\u8BE6\u60C5\uFF08\u5982\uFF1A\u67E5\u770B\u8FD9\u4E2A Notion \u94FE\u63A5\u3001\u8BFB\u53D6\u8FD9\u4E2A\u9875\u9762\u5BF9\u8C61\uFF09
-29. fetch_page_blocks - \u67E5\u770B\u9875\u9762\u6216\u5757\u7684\u5757\u7ED3\u6784\uFF08\u5982\uFF1A\u67E5\u770B xxx \u9875\u9762\u7684\u5757\u7ED3\u6784\u3001\u5217\u51FA\u8FD9\u4E2A block \u7684\u5B50\u5757\uFF09
-30. get_comment - \u8BFB\u53D6\u5355\u6761\u8BC4\u8BBA\u8BE6\u60C5\uFF08\u5982\uFF1A\u67E5\u770B comment_xxx \u8FD9\u6761\u8BC4\u8BBA\uFF09
-31. create_comment - \u521B\u5EFA\u8BC4\u8BBA\u6216\u56DE\u590D\u5DF2\u6709\u8BC4\u8BBA\uFF08\u5982\uFF1A\u5728 xxx \u9875\u9762\u8BC4\u8BBA\u201C\u8BF7\u8865\u5145\u793A\u4F8B\u201D\u3001\u56DE\u590D comment_xxx\uFF09
-32. append_block_children - \u5411\u9875\u9762\u6216\u5757\u63D2\u5165\u5185\u5BB9\u5757\uFF08\u5982\uFF1A\u5728 xxx \u9875\u9762\u672B\u5C3E\u63D2\u5165\u4E00\u6BB5\u8BF4\u660E\u3001\u5728 block_xxx \u540E\u63D2\u5165\u5217\u8868\uFF09
-33. update_block_content - \u66F4\u65B0\u5E38\u89C1\u53EF\u7F16\u8F91\u5757\u5185\u5BB9\uFF08\u5982\uFF1A\u628A block_xxx \u6539\u6210\u201C\u65B0\u7684\u5185\u5BB9\u201D\u3001\u628A equation \u5757\u6539\u6210\u516C\u5F0F\u3001\u628A bookmark/embed \u5757\u6539\u6210\u65B0 URL\uFF09
-34. update_page - \u66F4\u65B0\u5355\u4E2A\u9875\u9762\u7684\u5C5E\u6027\u6216\u5143\u6570\u636E\uFF08\u5982\uFF1A\u628A xxx \u6807\u8BB0\u4E3A\u91CD\u8981\u3001\u7ED9 xxx \u9875\u9762\u6362\u5C01\u9762\uFF09
-35. batch_update_pages - \u6279\u91CF\u66F4\u65B0\u591A\u4E2A\u9875\u9762\uFF08\u5982\uFF1A\u628A\u6807\u9898\u5305\u542B\u65E7\u7248\u7684\u9875\u9762\u5168\u90E8\u6807\u8BB0\u4E3A\u5F52\u6863\uFF09
-36. archive_page - \u5F52\u6863\u9875\u9762\uFF08\u5982\uFF1A\u5F52\u6863 xxx \u9875\u9762\u3001\u5F52\u6863\u6807\u9898\u5305\u542B\u65E7\u7248\u7684\u6240\u6709\u9875\u9762\uFF09
-37. restore_page - \u6062\u590D\u5DF2\u5F52\u6863\u9875\u9762\uFF08\u5982\uFF1A\u6062\u590D xxx \u9875\u9762\uFF09
-38. help - \u5E2E\u52A9\uFF08\u5982\uFF1A\u5E2E\u52A9\u3001\u4F60\u80FD\u505A\u4EC0\u4E48\uFF09
-39. unknown - \u65E0\u6CD5\u7406\u89E3
+26. bookmark_import - \u5BFC\u5165\u6D4F\u89C8\u5668\u4E66\u7B7E\u5230 Notion\uFF08\u5982\uFF1A\u5BFC\u5165\u4E66\u7B7E\u3001\u540C\u6B65\u6D4F\u89C8\u5668\u6536\u85CF\u3001\u628AChrome\u4E66\u7B7E\u5BFC\u5165\u5230Notion\u3001\u6574\u7406\u6211\u7684\u4E66\u7B7E\uFF09
+27. fetch_notion_object - \u6309\u9875\u9762/\u6570\u636E\u5E93\u540D\u79F0\u3001URL \u6216 ID \u8BFB\u53D6\u5BF9\u8C61\u8BE6\u60C5\uFF08\u5982\uFF1A\u67E5\u770B\u8FD9\u4E2A Notion \u94FE\u63A5\u3001\u8BFB\u53D6\u8FD9\u4E2A\u9875\u9762\u5BF9\u8C61\uFF09
+28. fetch_page_blocks - \u67E5\u770B\u9875\u9762\u6216\u5757\u7684\u5757\u7ED3\u6784\uFF08\u5982\uFF1A\u67E5\u770B xxx \u9875\u9762\u7684\u5757\u7ED3\u6784\u3001\u5217\u51FA\u8FD9\u4E2A block \u7684\u5B50\u5757\uFF09
+29. get_comment - \u8BFB\u53D6\u5355\u6761\u8BC4\u8BBA\u8BE6\u60C5\uFF08\u5982\uFF1A\u67E5\u770B comment_xxx \u8FD9\u6761\u8BC4\u8BBA\uFF09
+30. create_comment - \u521B\u5EFA\u8BC4\u8BBA\u6216\u56DE\u590D\u5DF2\u6709\u8BC4\u8BBA\uFF08\u5982\uFF1A\u5728 xxx \u9875\u9762\u8BC4\u8BBA\u201C\u8BF7\u8865\u5145\u793A\u4F8B\u201D\u3001\u56DE\u590D comment_xxx\uFF09
+31. append_block_children - \u5411\u9875\u9762\u6216\u5757\u63D2\u5165\u5185\u5BB9\u5757\uFF08\u5982\uFF1A\u5728 xxx \u9875\u9762\u672B\u5C3E\u63D2\u5165\u4E00\u6BB5\u8BF4\u660E\u3001\u5728 block_xxx \u540E\u63D2\u5165\u5217\u8868\uFF09
+32. update_block_content - \u66F4\u65B0\u5E38\u89C1\u53EF\u7F16\u8F91\u5757\u5185\u5BB9\uFF08\u5982\uFF1A\u628A block_xxx \u6539\u6210\u201C\u65B0\u7684\u5185\u5BB9\u201D\u3001\u628A equation \u5757\u6539\u6210\u516C\u5F0F\u3001\u628A bookmark/embed \u5757\u6539\u6210\u65B0 URL\uFF09
+33. update_page - \u66F4\u65B0\u5355\u4E2A\u9875\u9762\u7684\u5C5E\u6027\u6216\u5143\u6570\u636E\uFF08\u5982\uFF1A\u628A xxx \u6807\u8BB0\u4E3A\u91CD\u8981\u3001\u7ED9 xxx \u9875\u9762\u6362\u5C01\u9762\uFF09
+34. batch_update_pages - \u6279\u91CF\u66F4\u65B0\u591A\u4E2A\u9875\u9762\uFF08\u5982\uFF1A\u628A\u6807\u9898\u5305\u542B\u65E7\u7248\u7684\u9875\u9762\u5168\u90E8\u6807\u8BB0\u4E3A\u5F52\u6863\uFF09
+35. archive_page - \u5F52\u6863\u9875\u9762\uFF08\u5982\uFF1A\u5F52\u6863 xxx \u9875\u9762\u3001\u5F52\u6863\u6807\u9898\u5305\u542B\u65E7\u7248\u7684\u6240\u6709\u9875\u9762\uFF09
+36. restore_page - \u6062\u590D\u5DF2\u5F52\u6863\u9875\u9762\uFF08\u5982\uFF1A\u6062\u590D xxx \u9875\u9762\uFF09
+37. help - \u5E2E\u52A9\uFF08\u5982\uFF1A\u5E2E\u52A9\u3001\u4F60\u80FD\u505A\u4EC0\u4E48\uFF09
+38. unknown - \u65E0\u6CD5\u7406\u89E3
 
 \u6CE8\u610F\u533A\u5206 search \u548C workspace_search\uFF1A
 - search: \u7528\u6237\u60F3\u5728\u914D\u7F6E\u7684\u5E16\u5B50\u6570\u636E\u5E93\u4E2D\u641C\u7D22
@@ -34320,7 +31447,7 @@ compound \u5224\u65AD\u4F9D\u636E\uFF1A
 
 \u5355\u64CD\u4F5C\u683C\u5F0F\uFF1A
 {
-  "intent": "query|search|workspace_search|classify|batch_classify|update|move|copy|create_database|write_content|edit_content|translate_content|ai_autofill|ask|agent_task|deep_research|template_output|summarize|brainstorm|proofread|batch_translate|extract_to_database|generate_pages|batch_analyze|github_import|bookmark_import|fetch_notion_object|fetch_page_blocks|get_comment|create_comment|append_block_children|update_block_content|update_page|batch_update_pages|archive_page|restore_page|help|unknown",
+  "intent": "query|search|workspace_search|classify|batch_classify|update|move|copy|create_database|write_content|edit_content|translate_content|ai_autofill|ask|agent_task|deep_research|template_output|summarize|brainstorm|proofread|batch_translate|extract_to_database|generate_pages|batch_analyze|bookmark_import|fetch_notion_object|fetch_page_blocks|get_comment|create_comment|append_block_children|update_block_content|update_page|batch_update_pages|archive_page|restore_page|help|unknown",
   "params": {
 "keyword": "\u641C\u7D22\u5173\u952E\u8BCD\uFF08\u5982\u6709\uFF09",
 "property": "\u8981\u66F4\u65B0\u7684\u5C5E\u6027\u540D\uFF08\u5982\u6709\uFF09",
@@ -34356,7 +31483,7 @@ compound \u5224\u65AD\u4F9D\u636E\uFF1A
 "extraction_prompt": "\u63D0\u53D6\u8981\u6C42\u63CF\u8FF0\uFF08extract_to_database \u65F6\u4F7F\u7528\uFF0C\u63CF\u8FF0\u8981\u63D0\u53D6\u4EC0\u4E48\u4FE1\u606F\uFF09",
 "structure_prompt": "\u7ED3\u6784\u63CF\u8FF0\uFF08generate_pages \u65F6\u4F7F\u7528\uFF0C\u63CF\u8FF0\u9700\u8981\u751F\u6210\u7684\u9875\u9762\u7ED3\u6784\uFF09",
 "analysis_prompt": "\u5206\u6790\u8981\u6C42\uFF08batch_analyze \u65F6\u4F7F\u7528\uFF0C\u63CF\u8FF0\u5206\u6790\u76EE\u6807\u548C\u7EF4\u5EA6\uFF09",
-"username": "GitHub \u7528\u6237\u540D\uFF08github_import \u65F6\u53EF\u9009\uFF0C\u8986\u76D6\u5DF2\u914D\u7F6E\u7684\u7528\u6237\u540D\uFF09",
+
 "reference": "\u9875\u9762/\u6570\u636E\u5E93\u540D\u79F0\u3001URL \u6216 ID\uFF08fetch_notion_object \u65F6\u4F7F\u7528\uFF09",
 "block_id": "\u5757 ID\uFF08fetch_page_blocks/update_block_content/append_block_children/create_comment \u65F6\u53EF\u9009\uFF09",
 "comment_id": "\u8BC4\u8BBA ID\uFF08get_comment/create_comment \u65F6\u53EF\u9009\uFF09",
@@ -34439,7 +31566,6 @@ ${isolateContent2(userMessage)}
           extract_to_database: "handleExtractToDatabase",
           generate_pages: "handleGeneratePages",
           batch_analyze: "handleBatchAnalyze",
-          github_import: "handleGitHubImport",
           bookmark_import: "handleBookmarkImport",
           ask: "handleAsk",
           agent_task: "handleAgentTask",
@@ -34548,7 +31674,6 @@ ${isolateContent2(userMessage)}
         // ======= 内容提取为数据库 =======
         // ======= 多页面结构化生成 =======
         // ======= 批量页面分析 =======
-        // ======= GitHub 收藏导入 =======
         // ======= 浏览器书签导入 =======
         // ======= AI 输出模板 =======
         // ======= Agent 自主代理 =======
@@ -34650,7 +31775,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
   var { OperationGuard, OperationLog, ConfirmationDialog, UndoManager } = require_security();
   var { ZhihuAPI, GenericExtractor, WorkspaceService } = require_extract();
   var { GenericExporter, LinuxDoAPI, Exporter } = require_export();
-  var { AutoImporter, UpdateChecker, GitHubAutoImporter, GitHubAPI, GitHubExporter } = require_import();
+  var { AutoImporter, UpdateChecker } = require_import();
   var { BookmarkBridge, BookmarkExporter, BookmarkAutoImporter } = require_bridge();
   var { StyleManager, DesignSystem, PanelResize, NotionSiteUI, UI_CSS, UIEvents, UI, GenericUI } = require_ui();
   var { UICommandService } = require_coordination();
@@ -34662,10 +31787,9 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
   } catch (_) {
   }
   window.addEventListener("ld-notion-popup-action", (event) => {
-    var _a;
     const { action } = event.detail || {};
     if (action === "set-bookmark-source") {
-      const source = ((_a = event.detail) == null ? void 0 : _a.source) === "github" ? "github" : "linuxdo";
+      const source = "linuxdo";
       Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_SOURCE, source);
       if (UI.panel && UI.refs) {
         if (typeof UI.switchBookmarkSource === "function") {
@@ -34686,8 +31810,7 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
       return;
     }
     const cmdMap = {
-      "import-bookmarks": "\u5BFC\u5165\u6D4F\u89C8\u5668\u4E66\u7B7E",
-      "import-github": "\u5BFC\u5165GitHub\u6536\u85CF"
+      "import-bookmarks": "\u5BFC\u5165\u6D4F\u89C8\u5668\u4E66\u7B7E"
     };
     const cmd = Object.prototype.hasOwnProperty.call(cmdMap, action) ? cmdMap[action] : void 0;
     if (!cmd) return;
@@ -34720,11 +31843,6 @@ ${intentResult.explanation ? `\u6211\u7684\u7406\u89E3\uFF1A${intentResult.expla
           Utils.runWhenBrowserIdle(() => BookmarkAutoImporter.init());
         } else if (currentSite === SiteDetector.SITES.NOTION) {
           NotionSiteUI.init();
-          Utils.runWhenBrowserIdle(() => BookmarkAutoImporter.init());
-        } else if (currentSite === SiteDetector.SITES.GITHUB) {
-          UI.init();
-          Utils.runWhenBrowserIdle(() => UpdateChecker.init());
-          Utils.runWhenBrowserIdle(() => GitHubAutoImporter.init());
           Utils.runWhenBrowserIdle(() => BookmarkAutoImporter.init());
         } else if (currentSite === SiteDetector.SITES.ZHIHU) {
           GenericUI.init();

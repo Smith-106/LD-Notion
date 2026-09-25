@@ -565,8 +565,8 @@ module.exports = {
     // === 跨源工具 (Level 0) ===
 
     cross_source_search: {
-        description: "跨源搜索：在 Linux.do、GitHub、浏览器书签等多个来源中统一搜索",
-        params: "query(搜索词), source(可选:'linux.do'|'github'|'书签'|'all', 默认all), limit(数量,默认10)",
+        description: "跨源搜索：在 Linux.do、浏览器书签等多个来源中统一搜索",
+        params: "query(搜索词), source(可选:'linux.do'|'书签'|'all', 默认all), limit(数量,默认10)",
         level: 0,
         execute: async (args, settings) => {
             const { query = "", source = "all", limit = 10 } = args;
@@ -577,7 +577,7 @@ module.exports = {
             // 构建来源过滤
             let sourceFilter = null;
             if (source !== "all") {
-                const sourceMap = { "linux.do": "Linux.do", "github": "GitHub", "书签": "浏览器书签" };
+                const sourceMap = { "linux.do": "Linux.do", "书签": "浏览器书签" };
                 const sourceValue = sourceMap[source.toLowerCase()] || source;
                 sourceFilter = { property: "来源", rich_text: { contains: sourceValue } };
             }
@@ -665,7 +665,7 @@ module.exports = {
     },
 
     unified_stats: {
-        description: "跨源统计：统计各来源（Linux.do/GitHub/浏览器书签）的数据量、分类分布",
+        description: "跨源统计：统计各来源（Linux.do/浏览器书签）的数据量、分类分布",
         params: "无需参数",
         level: 0,
         execute: async (args, settings) => {

@@ -9,9 +9,6 @@ const { Exporter, LinuxDoAPI } = require("../export");
 const { SyncLock } = require("../sync-lock");
 
 const { UpdateChecker } = require("./UpdateChecker");
-const { GitHubAutoImporter } = require("./GitHubAutoImporter");
-const { GitHubAPI } = require("./GitHubAPI");
-const { GitHubExporter } = require("./GitHubExporter");
 const { emit } = require("../coordination/event-bus");
 
 const AutoImporter = {
@@ -190,10 +187,10 @@ AutoImporter.run = async () => {
     AutoImporter.isRunning = true;
     // v3.14.6 (CC-03): 自动导入占用导出互斥, 防手动/AI/自动并发交错; finally 复位
     // P4 收敛(c09): 记录本 run 是否由自己置位 —— 租约失败/被占路径无条件清 false
-    // 会误清并发手动导出已置位的互斥(与 GitHubAutoImporter glm P1 同型)
+    // 会误清并发手动导出已置位的互斥(与 BookmarkAutoImporter glm P1 同型)
     const exportMutexAcquired = SyncLock.isExporting !== true;
     SyncLock.isExporting = true;
-    // P4 收敛(c09): 与 GitHub/Bookmark 同构 —— 取跨 tab 租约。
+    // P4 收敛(c09): 与 Bookmark 同构 —— 取跨 tab 租约。
     // 仅置进程内 isExporting 无法防两 tab 同时读-标记 isTopicExported 的竞态(重复建页)。
     let lease = null;
     try {
@@ -256,7 +253,7 @@ AutoImporter.run = async () => {
         // F4 共识(模式语义一致): allow_duplicates 时跳过本地去重过滤(watermark 照常推进),
         // 与手动导入路径的 allow 语义对齐。
         const dedupStrict = Utils.isLinuxDoDedupStrict();
-        // 20260914: Notion 实际状态对账(与 GitHubAutoImporter/_exportViaGitHubExporter 同构) ——
+        // 20260914: Notion 实际状态对账(与 BookmarkAutoImporter 对账同构) ——
         // 远端「链接」索引是 ground truth; 查询失败降级本地账本(旧语义)。
         const settings = AutoImporter.buildSettings();
         let remoteUrls = null;
@@ -433,4 +430,4 @@ AutoImporter.run = async () => {
     }
 };
 
-module.exports = { AutoImporter, UpdateChecker, GitHubAutoImporter, GitHubAPI, GitHubExporter };
+module.exports = { AutoImporter, UpdateChecker };

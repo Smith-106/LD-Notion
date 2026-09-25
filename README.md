@@ -1,12 +1,12 @@
 # LD-Notion Hub — AI 多源知识中枢
 
-一个可扩展的 Tampermonkey 用户脚本，统一连接 **Linux.do**、**GitHub**、**浏览器书签** 与 **Notion**：多源收藏导入、跨源智能搜索与推荐、AI 对话式管理工作区，并可继续接入更多内容来源。
+一个可扩展的 Tampermonkey 用户脚本，统一连接 **Linux.do**、**浏览器书签** 与 **Notion**：多源收藏导入、跨源智能搜索与推荐、AI 对话式管理工作区，并可继续接入更多内容来源。
 
 > **桌面应用已拆分为独立仓库**：[LD-Notion-Desktop](https://github.com/Smith-106/LD-Notion-Desktop)（Tauri v2 + React + Rust 本地知识库）
 
 [![安装脚本](https://img.shields.io/badge/安装脚本-Tampermonkey-green?style=for-the-badge&logo=tampermonkey)](https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA) [![使用教程](https://img.shields.io/badge/使用教程-TUTORIAL-blue?style=for-the-badge)](./TUTORIAL.md) [![文档站](https://img.shields.io/badge/文档站-GitHub%20Pages-6f42c1?style=for-the-badge&logo=githubpages)](https://smith-106.github.io/LD-Notion/) [![安装浏览器扩展](https://img.shields.io/badge/安装浏览器扩展-Release-orange?style=for-the-badge&logo=googlechrome)](https://github.com/Smith-106/LD-Notion/releases/latest)
 
-- 当前仓库源码版本：`v3.16.6`
+- 当前仓库源码版本：`v3.17.0`
 - 最新 Release 页面：<https://github.com/Smith-106/LD-Notion/releases/latest>
 - 文档站：<https://smith-106.github.io/LD-Notion/>
 - 脚本安装（GreasyFork 页面）：<https://greasyfork.org/zh-CN/scripts/566681-ld-notion-notion-ai-%E5%8A%A9%E6%89%8B-linux-do-%E6%94%B6%E8%97%8F%E5%AF%BC%E5%87%BA>
@@ -19,14 +19,14 @@
 推荐阅读路径：
 
 - **快速开始**：[安装与首次导入](https://smith-106.github.io/LD-Notion/guide/getting-started)
-- **功能地图**：[Linux.do、GitHub、书签、AI 助手与网页剪藏](https://smith-106.github.io/LD-Notion/features/)
+- **功能地图**：[Linux.do、书签、AI 助手与网页剪藏](https://smith-106.github.io/LD-Notion/features/)
 - **原理机制**：[Concepts / 机制地图](https://smith-106.github.io/LD-Notion/concepts/)
 - **路由规则**：[Routing Rules](https://smith-106.github.io/LD-Notion/concepts/routing-rules)
 - **导入流水线**：[Import Pipeline](https://smith-106.github.io/LD-Notion/concepts/import-pipeline)
 - **安全边界**：[OperationGuard](https://smith-106.github.io/LD-Notion/concepts/operation-guard)、[Auth Model](https://smith-106.github.io/LD-Notion/concepts/auth-model) 与 [Prompt Injection Defense](https://smith-106.github.io/LD-Notion/concepts/prompt-injection-defense)
 - **扩展与部署**：[Chrome Extension Architecture](https://smith-106.github.io/LD-Notion/extension/architecture) 与 [Deployment](https://smith-106.github.io/LD-Notion/reference/deployment)
 
-## 四大核心能力
+## 三大核心能力
 
 ### 1. Linux.do 收藏导出器
 
@@ -41,19 +41,7 @@
 - **图片处理**：上传到 Notion / 外链引用 / 跳过图片
 - **格式保留**：代码块（语法高亮）、引用、表格、列表、标题、链接、粗体/斜体/删除线/行内代码、Emoji (100+)
 
-### 2. GitHub 活动导入
-
-将 GitHub 上的各类活动导入到 Notion，在设置中勾选需要的类型即可。
-
-- **Stars**：导入你收藏的仓库（名称、描述、语言、Stars 数、标签）
-- **Repos**：导入你自己的仓库
-- **Forks**：导入你 Fork 过的仓库
-- **Gists**：导入你的代码片段
-- **类型可选**：在设置中勾选需要导入的类型，按需开启
-- **AI 分类**：导入完成后可自动用 AI 对仓库进行分类
-- **智能去重**：已导入的不会重复导入
-
-### 3. 浏览器书签导入
+### 2. 浏览器书签导入
 
 通过 Chrome 扩展读取浏览器书签，一键导入 Notion 进行整理。支持两种形态：
 - **脚本版 + 书签桥接扩展（`chrome-extension-full/`）**
@@ -64,7 +52,7 @@
 - **智能去重**：已导入的书签不会重复
 - **配套扩展极简**：仅 2 个文件，不收集任何数据
 
-### 4. Notion AI 助手
+### 3. Notion AI 助手
 
 在 **Linux.do** 和 **Notion** 站点均可使用的对话式 AI 助手，通过自然语言操作 Notion 工作区。
 
@@ -84,7 +72,7 @@ AI 助手仍采用 ReAct / Agent Loop 架构，但现在不再是早期那套固
 | 页面与块编辑 | 「在“项目计划”页面末尾插入一段说明」「在 block_xxx 后插入内容」「把 block_xxx 改成新文案 / 公式 / URL」 | 标准 |
 | 页面元数据与整理 | 「给“项目计划”加封面」「把“项目计划”换成 🚀 图标」「锁定 / 归档 / 恢复页面」 | 标准 / 高级 |
 | 创建与批量处理 | 「创建页面」「批量创建页面」「批量更新页面」「自动分类未分类页面」「批量打标签」 | 标准 |
-| 跨源检索与导入 | 「在 Linux.do / GitHub / 书签里统一搜索」「导入 GitHub 收藏」「导入浏览器书签」 | 只读 / 标准 |
+| 跨源检索与导入 | 「在 Linux.do / 书签里统一搜索」「导入浏览器书签」 | 只读 / 标准 |
 | AI 深度工作流 | 「总结页面」「头脑风暴」「校对」「批量翻译数据库」「把页面笔记提取为数据库」「生成多页面结构化内容」 | 只读 / 标准 / 高级 |
 
 #### 意图识别
@@ -95,7 +83,7 @@ AI 助手仍采用 ReAct / Agent Loop 架构，但现在不再是早期那套固
 - **页面 Markdown / 块 / 评论**：「读取“项目计划” Markdown」「查看“项目计划”页面评论」「查看 comment_xxx」
 - **页面 / 块写入**：「在“项目计划”页面插入“新增说明”」「把 block_xxx 改成“新的段落内容”」「把 equation 块改成 E=mc^2」「把 bookmark/embed 块改成新的 URL」
 - **页面整理**：「把“项目计划”移到归档」「恢复“项目计划”」「把“项目计划”换成 🚀 图标」
-- **跨源检索与导入**：「在所有来源中搜索 Kubernetes」「导入我的 GitHub 收藏」「导入浏览器书签」
+- **跨源检索与导入**：「在所有来源中搜索 Kubernetes」「导入浏览器书签」
 - **AI 分析与生成**：「总结一下这个页面」「围绕远程办公做头脑风暴」「把整个数据库翻译成英文」
 
 说明：
@@ -120,7 +108,7 @@ AI 助手仍采用 ReAct / Agent Loop 架构，但现在不再是早期那套固
 - **撤销支持**：危险操作提供 5 秒撤销窗口；常规写入默认记录审计，不承诺统一可撤销
 - **权限域收窄**（v3.7.0）：`@match` 从 `*://*/*` 收窄为 6 个显式站点，`@connect` 从 `*` 收窄为 9 个显式域名白名单，阻止向任意域名发起请求
 - **Prompt Injection 防御**（v3.7.0）：AI 输入用 XML 标签隔离用户内容与系统指令，输出经 `escapeHtml` + `safeMarkdown` 净化，UI 全局 50+ 处拼接点统一转义
-- **凭证存储**（v3.14.3 / commit 049bf46）：AI API Key、Base URL、GitHub Token、Obsidian API Key/URL 与 Notion OAuth 三键均走浏览器本地明文存储（GM 存储）；保险箱机制已退役。审计日志仍由 `REDACT_IN_LOGS` 超集统一脱敏
+- **凭证存储**（v3.14.3 / commit 049bf46）：AI API Key、Base URL、Obsidian API Key/URL 与 Notion OAuth 三键均走浏览器本地明文存储（GM 存储）；保险箱机制已退役。审计日志仍由 `REDACT_IN_LOGS` 超集统一脱敏
 - **setLevel 验证**（v3.7.0）：权限等级设置强制校验 0-3 整数，拒绝 NaN/Infinity/超范围值
 
 ## 安装
@@ -131,7 +119,7 @@ AI 助手仍采用 ReAct / Agent Loop 架构，但现在不再是早期那套固
 
 ### 方式 A：油猴脚本（推荐）
 
-> **v3.14.9 提示**：油猴脚本仅匹配 Linux.do / Notion / GitHub (incl. gist.github.com) / 知乎（含 `*.linux.do` / `*.notion.so` 子域）；**不再**在任意网页自动出现面板。通用剪藏请用 Chrome 扩展，或自行添加 Tampermonkey `@match`。
+> **v3.14.9 提示**：油猴脚本仅匹配 Linux.do / Notion / 知乎（含 `*.linux.do` / `*.notion.so` 子域）；**不再**在任意网页自动出现面板。通用剪藏请用 Chrome 扩展，或自行添加 Tampermonkey `@match`。
 
 
 #### 1. 安装 Tampermonkey
@@ -150,7 +138,6 @@ AI 助手仍采用 ReAct / Agent Loop 架构，但现在不再是早期那套固
 4. 打开以下任一站点验证入口是否生效：
    - `https://linux.do/u/你的用户名/activity/bookmarks`（完整面板）
    - `https://www.notion.so/`（右下角浮动 AI 按钮）
-   - `https://github.com/`（与 Linux.do 同步的完整面板）
 
 #### 3. 安装书签桥接扩展（可选，仅导入浏览器书签需要）
 
@@ -229,7 +216,7 @@ node scripts/build-extension.js
 
 注意：
 - 当前项目是纯前端运行，没有单独后端；Notion OAuth 三键（Client Secret、access/refresh token）保存在你的浏览器本地 GM 存储中，以保证授权回调跨页面可读（v3.12.0 起的存储模型）
-- AI API Key、GitHub Token、Obsidian 等敏感凭证自 v3.14.3 起亦走 GM 明文存储（保险箱退役），更新脚本后无需重新解锁
+- AI API Key、Obsidian 等敏感凭证自 v3.14.3 起亦走 GM 明文存储（保险箱退役），更新脚本后无需重新解锁
 - 这更适合个人自建公开集成，不建议把共享的生产级公开集成 secret 直接放进前端
 - 面板里的“断开授权”只会清除本地保存的 OAuth 凭据，不会撤销 Notion 后台已经批准的授权
 
@@ -282,7 +269,7 @@ https://www.notion.so/xxx/32位数据库ID?v=xxx
 ### 自动导入
 
 1. 完成 Notion 配置
-2. 在来源分区中选择 Linux.do 或 GitHub（两边配置互不影响）
+2. 在来源分区中选择 Linux.do 或浏览器书签（两边配置互不影响）
 3. 勾选「启用自动导入新收藏」
 4. 选择轮询间隔
 5. 新收藏将自动导出，无需手动操作
@@ -299,15 +286,6 @@ https://www.notion.so/xxx/32位数据库ID?v=xxx
 - **Linux.do 侧**：在收藏页面的工具面板中使用
 - **Notion 侧**：在任意 Notion 页面点击右下角浮动图标
 - 输入自然语言指令，AI 自动执行对应操作
-
-### GitHub 导入
-
-1. 在设置面板中填写 GitHub 用户名
-2. 授权（二选一）：
-   - 推荐：「🔗 通过 GitHub 授权」OAuth Device Flow——先在面板填入公开的 OAuth App Client ID（github.com/settings/developers 创建，Callback URL 随便填一个 https 地址即可，Device Flow 不用它），点击授权后在 GitHub 页面输入一次性代码，Token 自动回填，不必手动创建 PAT
-   - 兜底：手动粘贴 GitHub Token（提高速率限制到 5000 次/小时）
-3. 勾选需要导入的类型（Stars / Repos / Forks / Gists）
-4. 在 AI 对话中输入「导入 GitHub 收藏」或点击快捷按钮 🐙 GitHub
 
 ### 浏览器书签导入
 
@@ -358,13 +336,12 @@ A: 请检查：
 ## 技术说明
 
 - 基于 Discourse API 获取 Linux.do 帖子数据
-- 基于 GitHub REST API 获取 Stars/Repos/Forks/Gists
 - 配套 Chrome Extension 通过 `chrome.bookmarks` API 读取浏览器书签
 - 使用 Notion API 创建数据库记录和子页面
 - DOM 解析转换为 Notion Block 格式
 - 自动处理 API 速率限制 (429 响应自动重试)
 - AI 助手使用 ReAct Agent Loop 架构，支持多轮推理和工具调用
-- 跨源工具支持 Linux.do / GitHub / 浏览器书签统一搜索和推荐
+- 跨源工具支持 Linux.do / 浏览器书签统一搜索和推荐
 - SyncState V1/V2 迁移（v3.7.0）：消除双写，V1 facade 代理 V2，自动迁移幂等安全
 - DedupStore 批量优化（v3.7.0）：`beginBatch/endBatch` 减少同步循环 IPC，`queueMicrotask` 合并写入
 - 模块化源码（`src/`）经 esbuild 打包为单文件 `.user.js`（1.35MB），同时生成 Chrome Extension 变体
@@ -382,7 +359,7 @@ A: 请检查：
   5. 如涉及扩展交付：`node scripts/build-extension.js`
   6. 最后按 `docs/ui-regression-checklist.md` 做 Linux.do / Notion / 通用网页 / `chrome-extension-full` 手工 smoke
 - 一键交付验证：`npm run verify:delivery`（包含 baseline、`bounded_hosts` smoke、bridge runtime smoke 与默认扩展构建）
-- `npm test`：109 个测试文件、1827 个用例（另有 legacy 三件套），覆盖 SyncStateV2、DedupStore、Config、OperationLog、AIService、AI Schema/Trace/Handlers、API 模块、GitHub/书签/通用导出、UI 基线与**双出口内容保真**（`tests/dom-exit-surface.test.js`）等模块（RSS 源已于 v3.15.0 移除）
+- `npm test`：109 个测试文件、1827 个用例（另有 legacy 三件套），覆盖 SyncStateV2、DedupStore、Config、OperationLog、AIService、AI Schema/Trace/Handlers、API 模块、书签/通用导出、UI 基线与**双出口内容保真**（`tests/dom-exit-surface.test.js`）等模块（RSS 源已于 v3.15.0 移除）
 - Node 测试会直接读取并执行当前 `LinuxDo-Bookmarks-to-Notion.user.js` 的核心代码，并复用 `scripts/build-extension.js` 的提取/构建 seam，而不是维护一份单独的测试副本
 - 当前自动化验证重点覆盖：Utils 辅助函数、OAuth 回调与 refresh fallback、`TargetState`、`quickParseIntent` 正/反例、`assistant_result v1` 输出契约，以及 `scripts/build-extension.js` 的锚点、builder seam、manifest profile、bridge runtime 边界与构建冒烟
 - 语法检查：`node --check LinuxDo-Bookmarks-to-Notion.user.js`（如无 Node 可跳过）

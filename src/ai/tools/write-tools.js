@@ -18,7 +18,7 @@ const MAX_TAG_DBS = 10;
 module.exports = {
     batch_tag: {
         description: "批量打标签：用 AI 为指定来源的所有未标记页面自动添加标签",
-        params: "source(可选:'linux.do'|'github'|'书签'|'all'), tag_count(每页标签数,默认3)",
+        params: "source(可选:'linux.do'|'书签'|'all'), tag_count(每页标签数,默认3)",
         level: 1,
         execute: async (args, settings) => {
             if (!OperationGuard.canExecute("updatePage")) {
@@ -63,7 +63,7 @@ module.exports = {
 
             // 过滤来源
             if (source !== "all") {
-                const sourceMap = { "linux.do": "Linux.do", "github": "GitHub", "书签": "浏览器书签" };
+                const sourceMap = { "linux.do": "Linux.do", "书签": "浏览器书签" };
                 const sourceValue = sourceMap[source.toLowerCase()] || source;
                 pages = pages.filter(p => {
                     const s = p.properties?.["来源"]?.rich_text?.[0]?.text?.content || "";

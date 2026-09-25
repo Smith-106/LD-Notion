@@ -402,37 +402,16 @@ describe("SyncStateV2 — _migrateV1toV2", () => {
         expect(v2.sources.linuxdo.lastSuccessAt).toBe(100);
     });
 
-    it("maps github.stars to sources.github-stars", () => {
+    // v3.17 GitHub 收藏源已移除: 历史 github 状态不再迁移(静默丢弃, 与 v3.15 RSS 移除同口径)
+    it("v3.17 GitHub 移除: 历史 github 状态不再迁移(静默丢弃)", () => {
         const v1 = {
             github: { stars: { watermark: null, lastOutcome: "success" } },
         };
         const v2 = SyncStateV2._migrateV1toV2(v1);
-        expect(v2.sources["github-stars"].lastOutcome).toBe("success");
-    });
-
-    it("maps github.repos to sources.github-repos", () => {
-        const v1 = {
-            github: { repos: { watermark: null, lastOutcome: "partial" } },
-        };
-        const v2 = SyncStateV2._migrateV1toV2(v1);
-        expect(v2.sources["github-repos"].lastOutcome).toBe("partial");
-    });
-
-    it("maps github.forks to sources.github-forks", () => {
-        const v1 = {
-            github: { forks: { watermark: null, lastOutcome: "error", lastError: "fail" } },
-        };
-        const v2 = SyncStateV2._migrateV1toV2(v1);
-        expect(v2.sources["github-forks"].lastOutcome).toBe("error");
-        expect(v2.sources["github-forks"].lastError).toBe("fail");
-    });
-
-    it("maps github.gists to sources.github-gists", () => {
-        const v1 = {
-            github: { gists: { watermark: null, lastOutcome: "idle" } },
-        };
-        const v2 = SyncStateV2._migrateV1toV2(v1);
-        expect(v2.sources["github-gists"].lastOutcome).toBe("idle");
+        expect(v2.sources["github-stars"]).toBeUndefined();
+        expect(v2.sources["github-repos"]).toBeUndefined();
+        expect(v2.sources["github-forks"]).toBeUndefined();
+        expect(v2.sources["github-gists"]).toBeUndefined();
     });
 
     it("maps bookmarks to sources.bookmark (not bookmarks)", () => {
@@ -456,19 +435,20 @@ describe("SyncStateV2 — _migrateV1toV2", () => {
 
     it("fills default values for missing source types", () => {
         const v2 = SyncStateV2._migrateV1toV2({});
-        // All keys from _defaults() should exist
-        for (const key of ["linuxdo", "github-stars", "github-repos", "github-forks", "github-gists", "github-meta", "bookmark", "zhihu", "generic"]) {
+        // All keys from _defaults() should exist (v3.17: github-* 已移除)
+        for (const key of ["linuxdo", "bookmark", "zhihu", "generic"]) {
             expect(v2.sources[key]).toBeDefined();
             expect(v2.sources[key].lastOutcome).toBe("idle");
         }
+        expect(v2.sources["github-stars"]).toBeUndefined();
     });
 
-    it("includes snapshot defaults for bookmark only (v3.15 RSS 移除)", () => {
+    it("includes snapshot defaults for bookmark only (v3.15 RSS 移除, v3.17 GitHub 移除)", () => {
         const v2 = SyncStateV2._migrateV1toV2({});
         expect(v2.sources.bookmark).toHaveProperty("snapshot");
         expect(v2.sources.rss).toBeUndefined();
         expect(v2.sources.linuxdo).not.toHaveProperty("snapshot");
-        expect(v2.sources["github-stars"]).not.toHaveProperty("snapshot");
+        expect(v2.sources["github-stars"]).toBeUndefined();
     });
 });
 

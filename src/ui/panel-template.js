@@ -45,7 +45,7 @@ function renderPanel(personaName) {
                         <div class="ldb-toggle-content collapsed ldb-mb-8" id="ldb-source-partitions-content">
                             <div class="ldb-source-option-group">
                                 <button class="ldb-source-option" id="ldb-source-select-linuxdo" type="button" aria-pressed="true">Linux.do 收藏分区</button>
-                                <button class="ldb-source-option" id="ldb-source-select-github" type="button" aria-pressed="false">GitHub 收藏分区</button>
+                                <!-- v3.17: GitHub 收藏源已移除,source-select-github 按钮删除。 -->
                             </div>
                         </div>
 
@@ -94,7 +94,7 @@ function renderPanel(personaName) {
                             <!-- F-UI-05:各来源「立即导入」按钮(不依赖 AI 指令,直接触发完整同步) -->
                             <div class="ldb-input-group ldb-mt-12">
                                 <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-import-now-linuxdo">立即导入 Linux.do</button>
-                                <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-import-now-github">立即导入 GitHub</button>
+                                <!-- v3.17: GitHub 收藏源已移除,import-now-github 按钮删除。 -->
                                 <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-import-now-bookmark">立即导入书签</button>
                             </div>
                             <div class="ldb-tip">立即导入会执行完整同步（拉取 + 写入 Notion + 推进水位），与自动同步路径一致。</div>
@@ -285,7 +285,7 @@ function renderPanel(personaName) {
                             <div class="ldb-view-header">
                                 <div>
                                     <div class="ldb-view-section-title">统一同步中心</div>
-                                    <div class="ldb-tip">统一查看 Linux.do、GitHub 与浏览器书签三条增量同步链的启用状态、增量基线和最近一次成功结果。</div>
+                                    <div class="ldb-tip">统一查看 Linux.do 与浏览器书签两条增量同步链的启用状态、增量基线和最近一次成功结果。</div>
                                 </div>
                                 <div class="ldb-view-actions">
                                     <button class="ldb-btn ldb-btn-secondary ldb-view-action-btn" id="ldb-view-sync-now" type="button">立即同步全部</button>
@@ -303,7 +303,7 @@ function renderPanel(personaName) {
                             <div class="ldb-view-summary" id="ldb-view-summary">
                                 <div class="ldb-view-empty">
                                     <div class="ldb-view-empty-title">视图还没有数据</div>
-                                    <div class="ldb-view-empty-text">先加载 Linux.do 或 GitHub 收藏，这里会展示来源分布、导出状态和时间线摘要。</div>
+                                    <div class="ldb-view-empty-text">先加载 Linux.do 收藏，这里会展示来源分布、导出状态和时间线摘要。</div>
                                 </div>
                             </div>
                         </div>
@@ -674,58 +674,7 @@ function renderPanel(personaName) {
 
                     <div class="ldb-divider"></div>
 
-                    <!-- GitHub 收藏导入设置 -->
-                    <div class="ldb-section">
-                        <div class="ldb-toggle-section" id="ldb-github-settings-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="ldb-github-settings-content">
-                            <span class="ldb-section-title" style="margin-bottom: 0;">🐙 GitHub 导入</span>
-                            <span id="ldb-github-settings-arrow">▶</span>
-                        </div>
-                        <div style="margin-top: var(--ldb-ui-spacing-md); margin-bottom: var(--ldb-ui-spacing-sm);">
-                            <button class="ldb-btn ldb-btn-secondary" id="ldb-open-github-settings" style="padding: var(--ldb-ui-spacing-sm) var(--ldb-ui-spacing-lg); font-size: var(--ldb-ui-font-size-sm);">
-                                🎯 一键定位 GitHub Token
-                            </button>
-                        </div>
-                        <div class="ldb-toggle-content collapsed" id="ldb-github-settings-content">
-                            <div class="ldb-input-group ldb-mt-12">
-                                <label class="ldb-label">GitHub 用户名</label>
-                                <input type="text" class="ldb-input" id="ldb-github-username" placeholder="your-username">
-                            </div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label">GitHub 授权（推荐，免手动创建 Token）</label>
-                                <div style="display: flex; gap: var(--ldb-ui-spacing-sm); align-items: center; flex-wrap: wrap;">
-                                    <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-github-oauth-btn">🔗 通过 GitHub 授权</button>
-                                    <span id="ldb-github-oauth-status" class="ldb-tip" style="flex: 1;"></span>
-                                </div>
-                                <div class="ldb-tip">首次使用需在下方填入 Client ID（github.com/settings/developers 创建 OAuth App 即可，公开信息无需保密；创建时 Authorization callback URL 随便填一个 https 地址即可（如 https://smith-106.github.io/LD-Notion/，GitHub 表单要求非空，但 Device Flow 不走回调）——与 Notion OAuth 不同，无需登记真实回调地址，也不会出现双回调窗口）；点授权后设备码显示在按钮旁并自动复制，直接去 GitHub 页粘贴；授权后 Token 自动填入下方输入框，无需手动去 GitHub 生成</div>
-                            </div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label">GitHub OAuth Client ID（授权用，可选）</label>
-                                <input type="text" class="ldb-input" id="ldb-github-oauth-client-id" placeholder="Iv1.xxxxxxxxxxxxxxxx">
-                            </div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label">GitHub Token (可选)</label>
-                                <input type="password" class="ldb-input" id="ldb-github-token" placeholder="ghp_xxx...">
-                                <div class="ldb-tip">手动粘贴 Personal Access Token（PAT 兑底路径）；推荐用上方「通过 GitHub 授权」自动获取</div>
-                            </div>
-                            <div class="ldb-input-group">
-                                <label class="ldb-label">导入类型</label>
-                                <div class="ldb-checkbox-group" style="margin-top: var(--ldb-ui-spacing-xs);">
-                                    <label class="ldb-checkbox-item">
-                                        <input type="checkbox" class="ldb-github-type" value="stars" checked> ⭐ Stars
-                                    </label>
-                                    <label class="ldb-checkbox-item">
-                                        <input type="checkbox" class="ldb-github-type" value="repos"> 📦 Repos
-                                    </label>
-                                    <label class="ldb-checkbox-item">
-                                        <input type="checkbox" class="ldb-github-type" value="forks"> 🍴 Forks
-                                    </label>
-                                    <label class="ldb-checkbox-item">
-                                        <input type="checkbox" class="ldb-github-type" value="gists"> 📝 Gists
-                                    </label>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                    <!-- v3.17: GitHub 收藏源已移除,以下历史 GitHub 收藏导入设置区删除。 -->
 
                     <div class="ldb-divider"></div>
 
@@ -799,7 +748,7 @@ function renderPanel(personaName) {
                         <div class="ldb-tip" id="ldb-dedup-summary"></div>
                         <div class="ldb-input-group ldb-mt-12">
                             <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-clear-linuxdo-dedup">清除 Linux.do 去重</button>
-                            <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-clear-github-exported">清除 GitHub 已导出记录</button>
+                            <!-- v3.17: GitHub 收藏源已移除,clear-github-exported 按钮删除。 -->
                             <button type="button" class="ldb-btn ldb-btn-secondary" id="ldb-clear-bookmark-exported">清除书签已导出记录</button>
                         </div>
                         <div class="ldb-tip">仅清除本地去重/导出记录，不影响 Notion 中已有内容；清除后对应来源可再次导出。若「导出状态依据」为 Notion 工作区，清空 Notion 后刷新工作区即可全部回到待导出，无需先清本地账本。</div>

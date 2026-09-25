@@ -752,7 +752,6 @@ const AIAssistant = {
 - "把整个数据库翻译成英文"
 - "把这个页面的笔记提取为数据库"
 - "为新员工创建入职指南（含子页面）"
-- "导入 GitHub 收藏到 Notion"
 - "导入浏览器书签"
 
 说明：
@@ -870,20 +869,19 @@ const AIAssistant = {
 23. generate_pages - 生成多页面结构化内容（如：创建入职指南含子页面、生成竞品分析报告、创建包含多个部分的项目文档）
 24. batch_analyze - 批量分析数据库中的页面并生成综合报告（如：分析团队项目生成周报、分析所有帖子找出趋势、综合分析数据库内容）
 25. compound - 用户指令包含两个及以上需按顺序执行的不同操作（如：先分类再移动、分类后移到B数据库）
-26. github_import - 导入 GitHub 收藏/Stars/Repos/Gists 到 Notion（如：导入GitHub收藏、同步我的GitHub Stars、把GitHub收藏导入到Notion、导入github星标仓库、导入我的仓库、导入Gists）
-27. bookmark_import - 导入浏览器书签到 Notion（如：导入书签、同步浏览器收藏、把Chrome书签导入到Notion、整理我的书签）
-28. fetch_notion_object - 按页面/数据库名称、URL 或 ID 读取对象详情（如：查看这个 Notion 链接、读取这个页面对象）
-29. fetch_page_blocks - 查看页面或块的块结构（如：查看 xxx 页面的块结构、列出这个 block 的子块）
-30. get_comment - 读取单条评论详情（如：查看 comment_xxx 这条评论）
-31. create_comment - 创建评论或回复已有评论（如：在 xxx 页面评论“请补充示例”、回复 comment_xxx）
-32. append_block_children - 向页面或块插入内容块（如：在 xxx 页面末尾插入一段说明、在 block_xxx 后插入列表）
-33. update_block_content - 更新常见可编辑块内容（如：把 block_xxx 改成“新的内容”、把 equation 块改成公式、把 bookmark/embed 块改成新 URL）
-34. update_page - 更新单个页面的属性或元数据（如：把 xxx 标记为重要、给 xxx 页面换封面）
-35. batch_update_pages - 批量更新多个页面（如：把标题包含旧版的页面全部标记为归档）
-36. archive_page - 归档页面（如：归档 xxx 页面、归档标题包含旧版的所有页面）
-37. restore_page - 恢复已归档页面（如：恢复 xxx 页面）
-38. help - 帮助（如：帮助、你能做什么）
-39. unknown - 无法理解
+26. bookmark_import - 导入浏览器书签到 Notion（如：导入书签、同步浏览器收藏、把Chrome书签导入到Notion、整理我的书签）
+27. fetch_notion_object - 按页面/数据库名称、URL 或 ID 读取对象详情（如：查看这个 Notion 链接、读取这个页面对象）
+28. fetch_page_blocks - 查看页面或块的块结构（如：查看 xxx 页面的块结构、列出这个 block 的子块）
+29. get_comment - 读取单条评论详情（如：查看 comment_xxx 这条评论）
+30. create_comment - 创建评论或回复已有评论（如：在 xxx 页面评论“请补充示例”、回复 comment_xxx）
+31. append_block_children - 向页面或块插入内容块（如：在 xxx 页面末尾插入一段说明、在 block_xxx 后插入列表）
+32. update_block_content - 更新常见可编辑块内容（如：把 block_xxx 改成“新的内容”、把 equation 块改成公式、把 bookmark/embed 块改成新 URL）
+33. update_page - 更新单个页面的属性或元数据（如：把 xxx 标记为重要、给 xxx 页面换封面）
+34. batch_update_pages - 批量更新多个页面（如：把标题包含旧版的页面全部标记为归档）
+35. archive_page - 归档页面（如：归档 xxx 页面、归档标题包含旧版的所有页面）
+36. restore_page - 恢复已归档页面（如：恢复 xxx 页面）
+37. help - 帮助（如：帮助、你能做什么）
+38. unknown - 无法理解
 
 注意区分 search 和 workspace_search：
 - search: 用户想在配置的帖子数据库中搜索
@@ -959,7 +957,7 @@ compound 判断依据：
 
 单操作格式：
 {
-  "intent": "query|search|workspace_search|classify|batch_classify|update|move|copy|create_database|write_content|edit_content|translate_content|ai_autofill|ask|agent_task|deep_research|template_output|summarize|brainstorm|proofread|batch_translate|extract_to_database|generate_pages|batch_analyze|github_import|bookmark_import|fetch_notion_object|fetch_page_blocks|get_comment|create_comment|append_block_children|update_block_content|update_page|batch_update_pages|archive_page|restore_page|help|unknown",
+  "intent": "query|search|workspace_search|classify|batch_classify|update|move|copy|create_database|write_content|edit_content|translate_content|ai_autofill|ask|agent_task|deep_research|template_output|summarize|brainstorm|proofread|batch_translate|extract_to_database|generate_pages|batch_analyze|bookmark_import|fetch_notion_object|fetch_page_blocks|get_comment|create_comment|append_block_children|update_block_content|update_page|batch_update_pages|archive_page|restore_page|help|unknown",
   "params": {
 "keyword": "搜索关键词（如有）",
 "property": "要更新的属性名（如有）",
@@ -995,7 +993,7 @@ compound 判断依据：
 "extraction_prompt": "提取要求描述（extract_to_database 时使用，描述要提取什么信息）",
 "structure_prompt": "结构描述（generate_pages 时使用，描述需要生成的页面结构）",
 "analysis_prompt": "分析要求（batch_analyze 时使用，描述分析目标和维度）",
-"username": "GitHub 用户名（github_import 时可选，覆盖已配置的用户名）",
+
 "reference": "页面/数据库名称、URL 或 ID（fetch_notion_object 时使用）",
 "block_id": "块 ID（fetch_page_blocks/update_block_content/append_block_children/create_comment 时可选）",
 "comment_id": "评论 ID（get_comment/create_comment 时可选）",
@@ -1082,7 +1080,6 @@ compound 格式（仅当 intent 为 compound 时使用）：
         extract_to_database: "handleExtractToDatabase",
         generate_pages: "handleGeneratePages",
         batch_analyze: "handleBatchAnalyze",
-        github_import: "handleGitHubImport",
         bookmark_import: "handleBookmarkImport",
         ask: "handleAsk",
         agent_task: "handleAgentTask",
@@ -1259,9 +1256,6 @@ compound 格式（仅当 intent 为 compound 时使用）：
 
 
     // ======= 批量页面分析 =======
-
-
-    // ======= GitHub 收藏导入 =======
 
 
     // ======= 浏览器书签导入 =======

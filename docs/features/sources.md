@@ -1,27 +1,8 @@
-# GitHub 与浏览器书签导入
+# 浏览器书签导入
 
-LD-Notion 可以把 Linux.do 之外的收藏来源统一导入 Notion，形成跨来源知识库。
+LD-Notion 可以把浏览器收藏统一导入 Notion，形成跨来源知识库。
 
-## GitHub 导入
-
-支持的类型：
-
-- Stars：收藏的仓库。
-- Repos：自己的仓库。
-- Forks：Fork 过的仓库。
-- Gists：代码片段。
-
-导入时会保留名称、描述、语言、Stars 数、链接等信息；如果配置了 AI，也可以增强分类与标签。
-
-授权推荐面板中的「🔗 通过 GitHub 授权」（OAuth Device Flow，只需填一次公开的 Client ID，无需手工创建 PAT）；也可手动粘贴 Personal Access Token 兜底。详见 [GitHub Adapter](/integrations/github)。
-
-```mermaid
-flowchart LR
-  GitHub[GitHub API] --> Types[Stars / Repos / Forks / Gists]
-  Types --> Enrich[README 语义与元信息增强]
-  Enrich --> Classify[规则分类 / AI 分类]
-  Classify --> Notion[写入 Notion]
-```
+> v3.17 起 GitHub 收藏源已移除，本页仅保留浏览器书签导入说明。
 
 ## 浏览器书签导入
 
@@ -38,7 +19,7 @@ LD-Notion 支持两种理解方式：
 
 ```mermaid
 flowchart TD
-  Sources[Linux.do / GitHub / 书签] --> Mode{组织方式}
+  Sources[Linux.do / 书签] --> Mode{组织方式}
   Mode --> Separate[分来源管理\n配置互不影响]
   Mode --> Unified[统一知识库\n按来源类型筛选]
   Separate --> NotionA[多个目标库或分区]
@@ -50,7 +31,6 @@ flowchart TD
 ## 去重字段
 
 - Linux.do：优先按帖子链接或主题 ID 去重。
-- GitHub：按仓库 / Gist 唯一标识去重。
 - 书签：按 URL 与路径策略去重。
 
-如果要重新导入，可以清理对应导出记录；操作前建议先确认目标数据库中已有数据是否需要保留。v3.13.0 起可在脚本设置面板「数据管理」区一键清除（Linux.do 去重 / GitHub 已导出 / 书签已导出）。
+如果要重新导入，可以清理对应导出记录；操作前建议先确认目标数据库中已有数据是否需要保留。v3.13.0 起可在脚本设置面板「数据管理」区一键清除（Linux.do 去重 / 书签已导出）。

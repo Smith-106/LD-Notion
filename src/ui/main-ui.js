@@ -9,7 +9,7 @@ const { NotionAPI, DOMToNotion, SiteDetector, InstallHelper, HTMLToMarkdown, Obs
 const { OperationGuard, UndoManager, OperationLog, ConfirmationDialog } = require("../security");
 const { ZhihuAPI, GenericExtractor, WorkspaceService } = require("../extract");
 const { Exporter, LinuxDoAPI, GenericExporter } = require("../export");
-const { AutoImporter, UpdateChecker, GitHubAutoImporter, GitHubAPI, GitHubExporter } = require("../import");
+const { AutoImporter, UpdateChecker } = require("../import");
 const { BookmarkBridge, BookmarkAutoImporter } = require("../bridge");
 const { AIAssistant, AIService, AIWelcomeUI, ChatUI, getAISettings } = require("../ai");
 const { StyleManager } = require("./style-manager");
@@ -26,7 +26,7 @@ const UI = {
     miniBtn: null,
     isMinimized: false,
     bookmarks: [],
-    visualSnapshots: { linuxdo: [], github: [] },
+    visualSnapshots: { linuxdo: [] },
     workspaceVisualSnapshot: { databases: [], pages: [], records: [], scannedAt: 0, maxPages: 0 },
     workspaceInsightMarkdown: "",
     workspaceInsightSummary: "",
@@ -85,7 +85,6 @@ const UI = {
             viewSyncNowBtn: panel.querySelector("#ldb-view-sync-now"),
             autoImportStatus: panel.querySelector("#ldb-auto-import-status"),
             importNowLinuxdoBtn: panel.querySelector("#ldb-import-now-linuxdo"),
-            importNowGithubBtn: panel.querySelector("#ldb-import-now-github"),
             importNowBookmarkBtn: panel.querySelector("#ldb-import-now-bookmark"),
             bookmarkAutoImportEnabled: panel.querySelector("#ldb-bookmark-auto-import-enabled"),
             bookmarkAutoImportOptions: panel.querySelector("#ldb-bookmark-auto-import-options"),
@@ -94,7 +93,6 @@ const UI = {
             sourcePartitionsContent: panel.querySelector("#ldb-source-partitions-content"),
             sourcePartitionsArrow: panel.querySelector("#ldb-source-partitions-arrow"),
             sourceSelectLinuxdo: panel.querySelector("#ldb-source-select-linuxdo"),
-            sourceSelectGithub: panel.querySelector("#ldb-source-select-github"),
             updateCheckBtn: panel.querySelector("#ldb-update-check-btn"),
             updateAutoEnabled: panel.querySelector("#ldb-update-auto-enabled"),
             updateAutoOptions: panel.querySelector("#ldb-update-auto-options"),
@@ -111,10 +109,6 @@ const UI = {
             aiSettingsToggle: panel.querySelector("#ldb-ai-settings-toggle"),
             aiSettingsContent: panel.querySelector("#ldb-ai-settings-content"),
             aiSettingsArrow: panel.querySelector("#ldb-ai-settings-arrow"),
-            githubSettingsToggle: panel.querySelector("#ldb-github-settings-toggle"),
-            githubSettingsContent: panel.querySelector("#ldb-github-settings-content"),
-            githubSettingsArrow: panel.querySelector("#ldb-github-settings-arrow"),
-            openGithubSettingsBtn: panel.querySelector("#ldb-open-github-settings"),
             sourceSettingsToggle: panel.querySelector("#ldb-source-settings-toggle"),
             sourceSettingsContent: panel.querySelector("#ldb-source-settings-content"),
             sourceSettingsArrow: panel.querySelector("#ldb-source-settings-arrow"),
@@ -189,12 +183,6 @@ const UI = {
             agentPersonaExpertiseInput: panel.querySelector("#ldb-agent-persona-expertise"),
             agentPersonaInstructionsInput: panel.querySelector("#ldb-agent-persona-instructions"),
             agentMaxIterationsSelect: panel.querySelector("#ldb-agent-max-iterations"),
-            githubUsernameInput: panel.querySelector("#ldb-github-username"),
-            githubTokenInput: panel.querySelector("#ldb-github-token"),
-            githubOAuthBtn: panel.querySelector("#ldb-github-oauth-btn"),
-            githubOAuthStatus: panel.querySelector("#ldb-github-oauth-status"),
-            githubOauthClientIdInput: panel.querySelector("#ldb-github-oauth-client-id"),
-            githubTypeCheckboxes: panel.querySelectorAll(".ldb-github-type"),
             obsSettingsToggle: panel.querySelector("#ldb-obs-settings-toggle"),
             obsSettingsContent: panel.querySelector("#ldb-obs-settings-content"),
             obsSettingsArrow: panel.querySelector("#ldb-obs-settings-arrow"),
@@ -214,7 +202,6 @@ const UI = {
             logClearBtn: panel.querySelector("#ldb-log-clear"),
             dedupSummary: panel.querySelector("#ldb-dedup-summary"),
             clearLinuxdoDedupBtn: panel.querySelector("#ldb-clear-linuxdo-dedup"),
-            clearGithubExportedBtn: panel.querySelector("#ldb-clear-github-exported"),
             clearBookmarkExportedBtn: panel.querySelector("#ldb-clear-bookmark-exported"),
             aiRefreshDbsBtn: panel.querySelector("#ldb-ai-refresh-dbs"),
             aiFetchModelsBtn: panel.querySelector("#ldb-ai-fetch-models"),
@@ -384,14 +371,7 @@ const UI = {
         refs.agentPersonaInstructionsInput.value = Storage.get(CONFIG.STORAGE_KEYS.AGENT_PERSONA_INSTRUCTIONS, CONFIG.DEFAULTS.agentPersonaInstructions);
         refs.agentMaxIterationsSelect.value = String(Storage.get(CONFIG.STORAGE_KEYS.AGENT_MAX_ITERATIONS, CONFIG.DEFAULTS.agentMaxIterations));
 
-        // 加载 GitHub 设置
-        refs.githubUsernameInput.value = Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "");
-        refs.githubTokenInput.value = "";
-        // 加载 GitHub 导入类型
-        const savedGHTypesMain = GitHubAPI.getImportTypes();
-        refs.githubTypeCheckboxes.forEach(cb => {
-            cb.checked = savedGHTypesMain.includes(cb.value);
-        });
+        // v3.17: GitHub 收藏源已移除,以下历史 GitHub 设置加载段删除。
 
         // 加载 Obsidian 设置
         refs.obsApiUrlInput.value = Storage.get(CONFIG.STORAGE_KEYS.OBS_API_URL, CONFIG.DEFAULTS.obsApiUrl);
@@ -442,9 +422,7 @@ const UI = {
             }
         }
 
-        // 加载自动导入设置
-        const savedSource = Storage.get(CONFIG.STORAGE_KEYS.BOOKMARK_SOURCE, CONFIG.DEFAULTS.bookmarkSource);
-        const resolvedSource = savedSource === "github" ? "github" : "linuxdo";
+        // v3.17: GitHub 收藏源已移除,收藏来源恒为 linuxdo(历史 github 值归一)。
         Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_SOURCE, resolvedSource);
         UI.applyBookmarkSourceUI(resolvedSource);
 
@@ -524,7 +502,6 @@ const UI = {
         }
         NotionOAuth.syncApiKeyInputs();
         CredentialVault.syncSensitiveInput(refs.aiApiKeyInput, CONFIG.STORAGE_KEYS.AI_API_KEY, "AI 服务的 API Key");
-        CredentialVault.syncSensitiveInput(refs.githubTokenInput, CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "ghp_xxx...");
         CredentialVault.syncSensitiveInput(refs.obsApiKeyInput, CONFIG.STORAGE_KEYS.OBS_API_KEY, "Obsidian Local REST API Key");
         UI.renderSyncCenterSummary();
         UI.renderWorkspaceVisualSummary();
@@ -539,7 +516,6 @@ const UI = {
         const OUTCOME_LABELS = { idle: "空闲", running: "同步中", success: "成功", partial: "部分成功", error: "失败" };
         const chains = [
             { source: "bookmark", selector: "#ldb-bookmark-auto-import-status" },
-            { source: "github-stars", selector: "#ldb-auto-import-status" },
         ];
         for (const chain of chains) {
             const el = panel.querySelector(chain.selector);
@@ -644,8 +620,6 @@ const UI = {
         const isUserscriptMode = Utils.isUserscriptMode();
         const hasBridgeMarker = BookmarkBridge.isExtensionAvailable();
         const bookmarkSource = UI.getActiveBookmarkSource();
-        const hasGitHubUsername = !!String(Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "") ?? "").trim();
-        const hasGitHubToken = !!String(Storage.get(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "") ?? "").trim();
 
         const checks = [
             {
@@ -661,17 +635,7 @@ const UI = {
             {
                 ok: true,
                 label: "当前来源",
-                value: bookmarkSource === "github" ? "GitHub" : "Linux.do",
-            },
-            {
-                ok: hasGitHubUsername,
-                label: "GitHub 用户名",
-                value: hasGitHubUsername ? "已配置" : "未配置",
-            },
-            {
-                ok: hasGitHubToken,
-                label: "GitHub Token",
-                value: hasGitHubToken ? "已配置" : "未配置",
+                value: "Linux.do",
             },
             {
                 ok: true,
@@ -688,9 +652,6 @@ const UI = {
         const tips = [];
         if (!hasBridgeMarker) {
             tips.push("• 未检测到书签桥接：请安装/启用 chrome-extension（Userscript）或确认扩展权限。");
-        }
-        if (bookmarkSource === "github" && !hasGitHubUsername && !hasGitHubToken) {
-            tips.push("• 当前来源为 GitHub：请至少配置 GitHub 用户名，建议同时配置 Token。");
         }
         if (isUserscriptMode && hasBridgeMarker) {
             tips.push("• 当前为 Userscript + 桥接可用，建议仅保留一种运行模式避免混用。");
@@ -747,9 +708,6 @@ const UI = {
         const isUserscriptMode = Utils.isUserscriptMode();
         const hasBridgeMarker = BookmarkBridge.isExtensionAvailable();
         const bookmarkSource = UI.getActiveBookmarkSource();
-        // P4 收敛(c15): 非字符串脏值(跨设备同步/历史存储)会让 .trim() 抛 TypeError
-        const hasGitHubUsername = !!String(Storage.get(CONFIG.STORAGE_KEYS.GITHUB_USERNAME, "") ?? "").trim();
-        const hasGitHubToken = !!String(Storage.get(CONFIG.STORAGE_KEYS.GITHUB_TOKEN, "") ?? "").trim();
         const activeTab = Storage.get(CONFIG.STORAGE_KEYS.ACTIVE_TAB, CONFIG.DEFAULTS.activeTab);
         const updateLastResultRaw = Storage.get(CONFIG.STORAGE_KEYS.UPDATE_LAST_RESULT, "");
         const updateLastSeenVersion = Storage.get(CONFIG.STORAGE_KEYS.UPDATE_LAST_SEEN_VERSION, "");
@@ -775,9 +733,6 @@ const UI = {
         if (!hasBridgeMarker) {
             issues.push("missing_bookmark_bridge");
         }
-        if (bookmarkSource === "github" && !hasGitHubUsername && !hasGitHubToken) {
-            issues.push("github_credentials_missing");
-        }
 
         let updateLastResult = "";
         if (typeof updateLastResultRaw === "string") {
@@ -802,8 +757,6 @@ const UI = {
             `bookmark_count=${Array.isArray(UI.bookmarks) ? UI.bookmarks.length : 0}`,
             "",
             "[config]",
-            `github_username=${hasGitHubUsername ? "set" : "unset"}`,
-            `github_token=${hasGitHubToken ? "set" : "unset"}`,
             `auto_import_enabled=${autoImportEnabled ? "true" : "false"}`,
             `auto_import_interval=${String(autoImportInterval)}`,
             `permission_level=${permissionLevel}`,
@@ -1463,7 +1416,5 @@ const UI = {
 Object.assign(UI, require("./workspace-visual").WorkspaceVisual);
 Object.assign(UI, require("./bookmark-list").BookmarkList);
 Object.assign(UI, require("./workspace-insight").WorkspaceInsight);
-// M3 波次8 (ISS-015): GitHub→Obsidian/Notion 导出转发壳 5 方法 mixin
-Object.assign(UI, require("./github-obsidian-export").GitHubObsidianExport);
 
 module.exports = { UI };

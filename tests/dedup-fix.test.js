@@ -31,10 +31,7 @@ beforeEach(() => {
     BookmarkExporter._exportedCache = null;
     BookmarkExporter._exportedWatcherBound = false;
     BookmarkExporter._exportedKeysMigrated = false;
-    const { GitHubAPI } = require("../src/import/GitHubAPI");
-    GitHubAPI._exportedCache = null;
-    GitHubAPI._exportedGistsCache = null;
-    GitHubAPI._exportedWatcherBound = false;
+    // v3.17: GitHub 收藏源已移除,GitHubAPI 已删除,此处不再复位其账本缓存。
 });
 
 describe("F1 单一账本: Storage 委托 DedupStore", () => {
@@ -261,25 +258,17 @@ describe("R-TTL-01 导出账本容量上限淘汰(替代 90 天时间 TTL)", () 
         expect(set["https://b.com/y"]).toBeDefined();
     });
 
-    it("GitHubAPI.flushExported: 91 天前的 repo 导出记录不再被时间淘汰", () => {
-        const { GitHubAPI } = require("../src/import/GitHubAPI");
-        const old = Date.now() - 91 * 24 * 60 * 60 * 1000;
-        store.set(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, JSON.stringify({ "owner/repo-old": old }));
-        GitHubAPI.markExportedAndFlush("owner/repo-new");
-        expect(GitHubAPI.isExported("owner/repo-old")).toBe(true);
-        expect(GitHubAPI.isExported("owner/repo-new")).toBe(true);
-    });
-
-    it("GitHubAPI 超过容量上限时淘汰最旧 repo 记录", () => {
-        const { GitHubAPI } = require("../src/import/GitHubAPI");
+    // v3.17: GitHub 收藏源已移除,以下两条 GitHubAPI 账本契约删除(功能已不存在)。
+    it("BookmarkExporter 账本容量上限淘汰(与 GitHub 旧语义对称)", () => {
+        const { BookmarkExporter } = require("../src/bridge/BookmarkExporter");
         const set = {};
-        for (let i = 0; i < GitHubAPI._EXPORT_CAPACITY_LIMIT + 3; i++) {
-            set[`owner/repo-${i}`] = Date.now() - (10000 - i);
+        for (let i = 0; i < BookmarkExporter._EXPORT_CAPACITY_LIMIT + 3; i++) {
+            set[`https://x.com/repo-${i}`] = Date.now() - (10000 - i);
         }
-        GitHubAPI._evictByCapacity(set);
-        expect(Object.keys(set).length).toBe(GitHubAPI._EXPORT_CAPACITY_LIMIT);
-        expect(set["owner/repo-0"]).toBeUndefined();
-        expect(set[`owner/repo-${GitHubAPI._EXPORT_CAPACITY_LIMIT + 2}`]).toBeDefined();
+        BookmarkExporter._evictByCapacity(set);
+        expect(Object.keys(set).length).toBe(BookmarkExporter._EXPORT_CAPACITY_LIMIT);
+        expect(set["https://x.com/repo-0"]).toBeUndefined();
+        expect(set[`https://x.com/repo-${BookmarkExporter._EXPORT_CAPACITY_LIMIT + 2}`]).toBeDefined();
     });
 
     it("BookmarkExporter.flushExported: 91 天前的书签导出记录不再被时间淘汰", () => {

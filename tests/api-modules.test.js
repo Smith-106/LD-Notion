@@ -75,30 +75,30 @@ describe("SiteDetector", () => {
     it("exposes SITES constants", () => {
         expect(SiteDetector.SITES.LINUX_DO).toBe("linux_do");
         expect(SiteDetector.SITES.NOTION).toBe("notion");
-        expect(SiteDetector.SITES.GITHUB).toBe("github");
+        // v3.17: GitHub 收藏源已移除, SITES.GITHUB 不再定义。
+        expect(SiteDetector.SITES.GITHUB).toBeUndefined();
         expect(SiteDetector.SITES.ZHIHU).toBe("zhihu");
         expect(SiteDetector.SITES.GENERIC).toBe("generic");
     });
 
-    it("classifies gist.github.com as github", () => {
+    it("classifies gist.github.com as generic (v3.17 GitHub 源已移除)", () => {
         const prev = window.location.hostname;
         window.location.hostname = "gist.github.com";
         try {
-            expect(SiteDetector.detect()).toBe(SiteDetector.SITES.GITHUB);
-            expect(SiteDetector.isGitHub()).toBe(true);
-            expect(SiteDetector.isGeneric()).toBe(false);
+            expect(SiteDetector.detect()).toBe(SiteDetector.SITES.GENERIC);
+            expect(SiteDetector.isGeneric()).toBe(true);
         } finally {
             window.location.hostname = prev;
         }
     });
 
-    it("classifies github.com and www.github.com as github", () => {
+    it("classifies github.com and www.github.com as generic (v3.17 GitHub 源已移除)", () => {
         const prev = window.location.hostname;
         try {
             window.location.hostname = "github.com";
-            expect(SiteDetector.detect()).toBe(SiteDetector.SITES.GITHUB);
+            expect(SiteDetector.detect()).toBe(SiteDetector.SITES.GENERIC);
             window.location.hostname = "www.github.com";
-            expect(SiteDetector.detect()).toBe(SiteDetector.SITES.GITHUB);
+            expect(SiteDetector.detect()).toBe(SiteDetector.SITES.GENERIC);
         } finally {
             window.location.hostname = prev;
         }

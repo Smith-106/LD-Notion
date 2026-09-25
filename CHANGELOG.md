@@ -1,3 +1,12 @@
+## [3.17.0] - 2026-09-25
+
+### feat (GitHub 收藏源全移除)
+
+- **删除**：GitHub 收藏导入全链下线 —— 独占模块 7 个（GitHubAdapter/GitHubAPI/GitHubExporter/GitHubAutoImporter/github-oauth/github-obsidian-service/github-obsidian-export）+ 独占测试 4 个 + `verify-github-no-callback.js` 验收脚本；面板 GitHub 分区/来源切换/自动导入配置、SITES.GITHUB、`@connect github.com`（Device Flow 下线）一并删除。
+- **保留**：UpdateChecker 自身更新检查（走 `api.github.com` releases，非收藏功能）+ `api.github.com` @connect + `smith-106.github.io` OAuth 回调页 + `GITHUB_*` 存储键只读兼容（历史残留剪枝，`github-*` 同步状态静默丢弃，与 v3.15 RSS 移除同口径）。
+- **文档**：删 `docs/integrations/github.md` 并修 nav/sidebar；README/TUTORIAL/docs 全仓去 GitHub 采集引用；`features/sources.md` 改为书签导入专页。
+- **验证**：vitest 全量 + legacy 三件套全绿；`verify:build`/`verify:delivery` 全链通过。
+
 ## [3.16.6] - 2026-09-25
 
 ### fix (设备码常驻 + 自动复制)

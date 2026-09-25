@@ -11,7 +11,6 @@ globalThis.__LD_NOTION_TEST_HOOKS__ = {
     BookmarkAutoImporter,
     DesignSystem,
     GenericUI,
-    GitHubAutoImporter,
     NotionOAuth,
     NotionSiteUI,
     SiteDetector,
@@ -24,7 +23,6 @@ if (globalThis.__LD_NOTION_TEST_OVERRIDES__ && typeof globalThis.__LD_NOTION_TES
         "BookmarkAutoImporter",
         "DesignSystem",
         "GenericUI",
-        "GitHubAutoImporter",
         "NotionOAuth",
         "NotionSiteUI",
         "UI",
@@ -255,9 +253,6 @@ function createHarness(url, events) {
             AutoImporter: {
                 init: () => events.push("auto"),
             },
-            GitHubAutoImporter: {
-                init: () => events.push("github-auto"),
-            },
             BookmarkAutoImporter: {
                 init: () => events.push("bookmark-auto"),
             },
@@ -305,7 +300,6 @@ async function main() {
         const contentPath = path.join(tempOutDir, "content.js");
         const contentSource = instrumentBuiltContent(fs.readFileSync(contentPath, "utf8"));
 
-        assert.ok(manifest.content_scripts?.[0]?.matches?.includes("https://github.com/*"));
         assert.ok(manifest.content_scripts?.[0]?.matches?.includes("https://www.zhihu.com/*"));
         assert.ok(manifest.content_scripts?.[0]?.matches?.includes("https://*/*"));
         assert.ok(manifest.content_scripts?.[0]?.exclude_matches?.includes("*://localhost/*"));
@@ -321,11 +315,6 @@ async function main() {
                 site: "notion",
                 url: "https://www.notion.so/workspace/page",
                 expected: ["theme", "notion-ui", "bookmark-auto"],
-            },
-            {
-                site: "github",
-                url: "https://github.com/smith-106",
-                expected: ["theme", "ui", "update", "github-auto", "bookmark-auto"],
             },
             {
                 site: "zhihu",

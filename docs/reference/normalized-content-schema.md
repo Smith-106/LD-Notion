@@ -4,7 +4,7 @@ Normalized Content Schema 是导入链路中的文档契约，用于说明来源
 
 ## Why it exists
 
-Linux.do 帖子、GitHub 仓库、浏览器书签、知乎文章和通用网页的原始字段不同，但写入目标需要稳定结构。Normalized Content 让后续路由、AI 增强、权限检查和目标写入不必关心来源差异。
+Linux.do 帖子、浏览器书签、知乎文章和通用网页的原始字段不同，但写入目标需要稳定结构。Normalized Content 让后续路由、AI 增强、权限检查和目标写入不必关心来源差异。
 
 ```mermaid
 flowchart LR
@@ -28,14 +28,13 @@ flowchart LR
 
 ```json
 {
-  "source": "github",
-  "sourceId": "Smith-106/LD-Notion",
-  "url": "https://github.com/Smith-106/LD-Notion",
+  "source": "linuxdo",
+  "sourceId": "12345",
+  "url": "https://linux.do/t/topic/12345",
   "rawMetadata": {
-    "name": "LD-Notion",
-    "description": "AI 多源知识中枢",
-    "language": "JavaScript",
-    "stars": 123
+    "title": "示例帖子",
+    "author": "alice",
+    "replyCount": 12
   }
 }
 ```
@@ -45,13 +44,13 @@ flowchart LR
 ```json
 {
   "identity": {
-    "source": "github",
-    "sourceId": "Smith-106/LD-Notion",
-    "url": "https://github.com/Smith-106/LD-Notion"
+    "source": "linuxdo",
+    "sourceId": "12345",
+    "url": "https://linux.do/t/topic/12345"
   },
   "content": {
-    "title": "LD-Notion — AI 多源知识中枢",
-    "body": "统一连接 Linux.do、GitHub、浏览器书签与 Notion。",
+    "title": "示例帖子",
+    "body": "统一连接 Linux.do、浏览器书签与 Notion。",
     "excerpt": "浏览器侧知识采集与 Notion/Obsidian 输出工具。"
   },
   "metadata": {
@@ -63,7 +62,7 @@ flowchart LR
   "routing": {
     "destination": "notion-database",
     "collection": "knowledge-hub",
-    "template": "github-repository"
+    "template": "linuxdo-topic"
   },
   "audit": {
     "capturedAt": "2026-05-13T00:00:00+08:00",
@@ -80,16 +79,16 @@ flowchart LR
   "target": "notion-database",
   "databaseId": "<redacted>",
   "properties": {
-    "标题": "LD-Notion — AI 多源知识中枢",
-    "链接": "https://github.com/Smith-106/LD-Notion",
+    "标题": "示例帖子",
+    "链接": "https://linux.do/t/topic/12345",
     "分类": "工具",
     "标签": ["notion", "userscript", "extension"],
-    "来源类型": "Repo"
+    "来源类型": "帖子"
   },
   "children": [
     {
       "type": "paragraph",
-      "text": "统一连接 Linux.do、GitHub、浏览器书签与 Notion。"
+      "text": "统一连接 Linux.do、浏览器书签与 Notion。"
     }
   ]
 }
@@ -100,7 +99,6 @@ flowchart LR
 | Source | Identity | Content | Metadata | Notes |
 | --- | --- | --- | --- | --- |
 | Linux.do | topic id / URL | 主楼、楼层、引用、代码块 | 作者、收藏时间、回复数、浏览数 | 需要格式转换为 Notion Blocks |
-| GitHub | repo full name / gist id | 描述、README 摘要 | language、stars、forks、topics | 可用 README 语义增强分类 |
 | Bookmarks | URL + folder path | 页面标题、摘要 | 书签路径、域名、标签 | 脚本版依赖桥接扩展 |
 | Zhihu | article / answer URL | 标题、正文摘要 | 作者、来源类型 | 可能降级为通用网页剪藏 |
 | Generic web | URL | title、excerpt、正文线索 | site、charset、meta tags | 需要字符集与噪声清理 |

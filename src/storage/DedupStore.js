@@ -7,7 +7,7 @@ const { emit } = require("../coordination/event-bus");
 // 去重条目存活时间：90 天。超过此时间的条目在批量/单点写回时自动淘汰，
 // 防止 GM storage 中单键 JSON 无界增长导致 sync 延迟线性增加（PERF-001）。
 // v3.14.3 修复：时间 TTL 只用于 URL 键源（bookmark/zhihu/generic，无界）；
-// id 键源（linuxdo/github-*，导出账本，天然有界）改容量上限淘汰，
+// id 键源（linuxdo，导出账本，天然有界）改容量上限淘汰，
 // 避免 90 天后已导出记录被静默遗忘、UI 误判“待导出”。
 const DEDUP_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 // id 键源容量上限：超过后淘汰最旧条目（导出账本防误删的时间 TTL 替代）

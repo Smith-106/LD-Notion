@@ -11,16 +11,13 @@ globalThis.GM_addValueChangeListener = () => 0;
 const { DedupStore } = require("../src/storage/DedupStore");
 const { CONFIG } = require("../src/config");
 const { BookmarkExporter } = require("../src/bridge/BookmarkExporter");
-const { GitHubAPI } = require("../src/import/GitHubAPI");
-const { GitHubAutoImporter } = require("../src/import/GitHubAutoImporter");
+// v3.17: GitHub 收藏源已移除,GitHubAPI/GitHubAutoImporter 已删除。
 
 beforeEach(() => {
     store.clear();
     DedupStore._batchCaches = {};
     BookmarkExporter._exportedCache = null;
     BookmarkExporter._exportedKeysMigrated = false;
-    GitHubAPI._exportedCache = null;
-    GitHubAPI._exportedGistsCache = null;
 });
 
 describe("R-DEDUP-SKIP: bookmark dual-ledger clear", () => {
@@ -37,57 +34,43 @@ describe("R-DEDUP-SKIP: bookmark dual-ledger clear", () => {
     });
 });
 
-describe("R-DEDUP-SKIP: GitHub auto skips isExported after watermark reset", () => {
-    it("_exportViaGitHubExporter does not create page for already-exported keys", async () => {
-        GitHubAPI.markExportedAndFlush("owner/already");
-        const createSpy = vi.fn();
-        // NotionAPI.request 被 GitHubAutoImporter 用于建页; 通过 stub OperationGuard + 拦截 request
+// v3.17: GitHub 收藏源已移除。等价语义: 书签导出远端查询失败降级本地账本 →
+// 已落账 URL 跳过不建页, 未落账 URL 仍建页。
+describe("R-DEDUP-SKIP: bookmark export skips ledger-hit on remote fallback", () => {
+    it("exportBookmarks does not create page for already-exported urls", async () => {
         const { NotionAPI } = require("../src/api");
-        const reqSpy = vi.spyOn(NotionAPI, "request").mockResolvedValue({ id: "page-new" });
-        // 20260914 对账语义: 远端「链接」索引是 ground truth —— queryDatabase 返回库内已有页
-        // (already 的链接在库内) → 命中跳过; fresh 不在库内 → 建页。原账本-only 语义退役。
-        vi.spyOn(NotionAPI, "queryDatabase").mockResolvedValue({
-            results: [{ properties: { "链接": { url: "https://github.com/owner/already" } } }],
-            has_more: false,
-        });
+        const { Utils } = require("../src/utils");
         const { OperationGuard } = require("../src/security");
-        vi.spyOn(OperationGuard, "canExecute").mockReturnValue(true);
-
-        const meta = GitHubAutoImporter.getTypeMeta("stars");
-        const mapped = [
-            {
-                itemKey: "owner/already",
-                raw: { full_name: "owner/already", html_url: "https://github.com/owner/already", description: "" },
-                title: "owner/already",
-                sourceType: "stars",
-            },
-            {
-                itemKey: "owner/fresh",
-                raw: { full_name: "owner/fresh", html_url: "https://github.com/owner/fresh", description: "" },
-                title: "owner/fresh",
-                sourceType: "stars",
-            },
-        ];
-
-        // enrichRepo 可能打网; stub
-        const { GitHubExporter } = require("../src/import/GitHubExporter");
-        vi.spyOn(GitHubExporter, "enrichRepo").mockImplementation(async (r) => r);
-
-        const result = await GitHubAutoImporter._exportViaGitHubExporter(
-            mapped,
-            "stars",
-            meta,
-            { apiKey: "k", databaseId: "db" }
-        );
-
-        expect(result.success.map((e) => e.itemKey).sort()).toEqual(["owner/already", "owner/fresh"]);
-        expect(result.success.find((e) => e.itemKey === "owner/already").skippedExisting).toBe(true);
-        expect(result.created.map((e) => e.itemKey)).toEqual(["owner/fresh"]);
-        // 仅 fresh 建页
-        expect(reqSpy).toHaveBeenCalledTimes(1);
-        expect(reqSpy.mock.calls[0][2].properties["链接"].url).toContain("owner/fresh");
-
-        reqSpy.mockRestore();
-        createSpy.mockRestore?.();
+        BookmarkExporter.markExportedAndFlush("https://example.com/already");
+        const reqSpy = vi.spyOn(NotionAPI, "request").mockResolvedValue({ id: "page-new" });
+        const collectSpy = vi.spyOn(NotionAPI, "collectDatabaseUrls")
+            .mockRejectedValue(new Error("network down")); // 远端查询失败 → 降级本地账本
+        const strictSpy = vi.spyOn(Utils, "isBookmarkDedupStrict").mockReturnValue(true);
+        const canSpy = vi.spyOn(OperationGuard, "canExecute").mockReturnValue(true);
+        const setupSpy = vi.spyOn(BookmarkExporter, "setupDatabaseProperties")
+            .mockResolvedValue({ success: true });
+        const enrichSpy = vi.spyOn(BookmarkExporter, "enrichBookmark")
+            .mockImplementation(async (b) => b);
+        try {
+            const result = await BookmarkExporter.exportBookmarks({
+                apiKey: "k",
+                databaseId: "db",
+                bookmarks: [
+                    { url: "https://example.com/already", title: "Already" },
+                    { url: "https://example.com/fresh", title: "Fresh" },
+                ],
+            });
+            expect(result.exported).toBe(1);
+            // 仅 fresh 建页
+            expect(reqSpy).toHaveBeenCalledTimes(1);
+            expect(reqSpy.mock.calls[0][2].properties["链接"].url).toContain("example.com/fresh");
+        } finally {
+            reqSpy.mockRestore();
+            collectSpy.mockRestore();
+            strictSpy.mockRestore();
+            canSpy.mockRestore();
+            setupSpy.mockRestore();
+            enrichSpy.mockRestore();
+        }
     });
 });

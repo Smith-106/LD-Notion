@@ -29,7 +29,7 @@ const DEFAULT_MANIFEST_PROFILE = "bounded_hosts";
 
 const MANIFEST_SHARED_DEFAULTS = Object.freeze({
     name: "LD-Notion — Notion AI 助手 & 多源收藏管理",
-    description: "将 Linux.do、GitHub、浏览器书签与 Notion 深度连接：AI 对话式助手、批量导出收藏、跨源智能搜索与推荐",
+    description: "将 Linux.do、浏览器书签与 Notion 深度连接：AI 对话式助手、批量导出收藏、跨源智能搜索与推荐",
     permissions: Object.freeze([
         "storage",
         "bookmarks",
@@ -43,9 +43,6 @@ const MANIFEST_SHARED_DEFAULTS = Object.freeze({
         "https://notion.so/*",
         "https://*.notion.so/*",
         "https://smith-106.github.io/LD-Notion/*",
-        "https://github.com/*",
-        "https://www.github.com/*",
-        "https://gist.github.com/*",
         "https://www.zhihu.com/*",
         "https://zhuanlan.zhihu.com/*",
         "http://*/*",
@@ -84,9 +81,8 @@ const MANIFEST_PROFILE_PRESETS = Object.freeze({
             "https://api.anthropic.com/*",
             "https://generativelanguage.googleapis.com/*",
             "https://api.github.com/*",
-            // v3.16.4: GitHub OAuth Device Flow 直连 github.com(/login/device/code + /login/oauth/access_token)
-            // MV3 SW fetch 无授权会失败, 与 userscript @connect github.com 对称。
-            "https://github.com/*",
+            // v3.17: GitHub 收藏源已移除,github.com host 权限删除(Device Flow 下线);
+            // api.github.com 保留, 仅供 UpdateChecker 自身更新检查。
             // Obsidian Local REST API(全盘审计修复): background 白名单允许 localhost/127.0.0.1
             // 但 manifest 缺 host_permissions → MV3 SW fetch 无授权, Obsidian 导出失败
             "http://127.0.0.1/*",
@@ -105,8 +101,7 @@ const MANIFEST_PROFILE_PRESETS = Object.freeze({
             "https://api.anthropic.com/*",
             "https://generativelanguage.googleapis.com/*",
             "https://api.github.com/*",
-            // v3.16.4: Device Flow 直连 github.com(见 default profile 同注释)。
-            "https://github.com/*",
+            // v3.17: GitHub 收藏源已移除,github.com host 权限删除(见 default profile 同注释)。
             "http://127.0.0.1/*",
             "https://127.0.0.1/*",
             "http://localhost/*",
@@ -439,14 +434,12 @@ function validatePatchedBuildAssumptions({ source, patchedBody, contentScript, b
     if (typeof popupHtml === "string") {
         assertContains(popupHtml, "<script src=\"popup.js\"></script>", "popup HTML 脚本入口");
         assertContains(popupHtml, "id=\"import-bookmarks\"", "popup 书签导入按钮");
-        assertContains(popupHtml, "id=\"import-github\"", "popup GitHub 导入按钮");
         assertContains(popupHtml, "id=\"open-bookmark-panel\"", "popup 收藏来源按钮");
     }
 
     if (typeof popupScript === "string") {
         assertContains(popupScript, "document.addEventListener(\"DOMContentLoaded\"", "popup DOMContentLoaded 入口");
         assertContains(popupScript, "LD_NOTION_IMPORT_BOOKMARKS", "popup 书签导入消息");
-        assertContains(popupScript, "LD_NOTION_IMPORT_GITHUB", "popup GitHub 导入消息");
         assertContains(popupScript, "LD_NOTION_SET_BOOKMARK_SOURCE", "popup 收藏来源消息");
     }
 
@@ -472,7 +465,7 @@ function buildBackgroundScript() {
 // 允许的域名白名单 (对应 manifest host_permissions)
 const ALLOWED_HOSTS = [
     "api.notion.com", "linux.do", "*.linux.do",
-    "api.github.com", "github.com", "*.github.com",
+    "api.github.com",
     "api.openai.com", "api.anthropic.com",
     "generativelanguage.googleapis.com",
     "*.amazonaws.com", "s3.amazonaws.com",
@@ -633,13 +626,9 @@ body { width: 320px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI',
         <span class="icon">\ud83d\udd16</span>
         <div><div class="label">\u5bfc\u5165\u6d4f\u89c8\u5668\u4e66\u7b7e</div><div class="desc">\u5c06\u4e66\u7b7e\u76f4\u63a5\u5bfc\u5165 Notion \u6570\u636e\u5e93</div></div>
     </button>
-    <button class="action-btn" id="import-github">
-        <span class="icon">\ud83d\udc19</span>
-        <div><div class="label">GitHub \u6d3b\u52a8\u5bfc\u5165</div><div class="desc">\u5bfc\u5165 Stars\u3001Repos\u3001Forks\u3001Gists</div></div>
-    </button>
     <button class="action-btn" id="open-bookmark-panel">
         <span class="icon">\ud83e\udde9</span>
-        <div><div class="label">收藏来源页面</div><div class="desc">打开扩展页设置 Linux.do / GitHub 收藏分区</div></div>
+        <div><div class="label">收藏来源页面</div><div class="desc">打开扩展页设置 Linux.do 收藏分区</div></div>
     </button>
 </div>
 <div class="status" id="status-section">
@@ -700,19 +689,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         });
     });
 
-    // GitHub 导入按钮
-    document.getElementById("import-github").addEventListener("click", () => {
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            const tab = tabs[0];
-            if (tab && tab.url && tab.url.includes("linux.do")) {
-                chrome.tabs.sendMessage(tab.id, { type: "LD_NOTION_IMPORT_GITHUB" });
-                window.close();
-            } else {
-                chrome.tabs.create({ url: "https://linux.do" });
-                window.close();
-            }
-        });
-    });
+    // v3.17: GitHub 收藏源已移除,收藏导入按钮与来源切换消息仅保留 Linux.do/书签路径。
 
     // 收藏来源面板按钮
     document.getElementById("open-bookmark-panel").addEventListener("click", () => {
@@ -721,7 +698,7 @@ document.addEventListener("DOMContentLoaded", async () => {
             const openAndSetSource = (tabId) => {
                 chrome.tabs.sendMessage(tabId, {
                     type: "LD_NOTION_SET_BOOKMARK_SOURCE",
-                    source: "github"
+                    source: "linuxdo"
                 }, () => {
                     window.close();
                 });
@@ -1028,13 +1005,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const event = new CustomEvent("ld-notion-popup-action", { detail: { action: "import-bookmarks" } });
         window.dispatchEvent(event);
         sendResponse({ ok: true });
-    } else if (message.type === "LD_NOTION_IMPORT_GITHUB") {
-        const event = new CustomEvent("ld-notion-popup-action", { detail: { action: "import-github" } });
-        window.dispatchEvent(event);
-        sendResponse({ ok: true });
     } else if (message.type === "LD_NOTION_SET_BOOKMARK_SOURCE") {
         const event = new CustomEvent("ld-notion-popup-action", {
-            detail: { action: "set-bookmark-source", source: message.source || "github" }
+            detail: { action: "set-bookmark-source", source: message.source || "linuxdo" }
         });
         window.dispatchEvent(event);
         sendResponse({ ok: true });

@@ -7,7 +7,6 @@ const {
     describeExchangeError,
     describeRedirectUriMismatch,
 } = require("./target-discovery");
-const { GitHubOAuth } = require("./github-oauth");
 const { CredentialVault } = require("./credential-vault"); // M3: 提取自本文件(auth/credential-vault.js),反向 require 再导出
 
 // 隐形字符(零宽空格/连接符/BOM/词连接符/bidi 标记/软连字符)——复制粘贴时易混入,Notion 端无法解析
@@ -285,7 +284,7 @@ const NotionOAuth = {
         const raw = String(apiKey ?? "").trim().replace(INVISIBLE_CHARS_RE, "").replace(/[\r\n\t]/g, "");
         if (!raw) return { valid: false, code: "EMPTY", value: "", message: "请先填写 Notion API Key" };
         if (!/^(secret_|ntn_)/i.test(raw)) {
-            return { valid: false, code: "FORMAT_SUSPECT", value: raw, message: "Notion API Key 应以 secret_ 或 ntn_ 开头；当前值疑似复制不完整或误贴其他凭证（如 OAuth Client Secret / AI Key / GitHub token）" };
+            return { valid: false, code: "FORMAT_SUSPECT", value: raw, message: "Notion API Key 应以 secret_ 或 ntn_ 开头；当前值疑似复制不完整或误贴其他凭证（如 OAuth Client Secret / AI Key / 其他凭证）" };
         }
         if (raw.length < 20) {
             return { valid: false, code: "TOO_SHORT", value: raw, message: "Notion API Key 长度异常（过短），疑似复制不完整，请从 Notion 集成页面用 Copy 按钮完整复制" };
@@ -1152,4 +1151,4 @@ const NotionOAuth = {
     },
 };
 
-module.exports = { CredentialVault, TargetState, NotionOAuth, GitHubOAuth };
+module.exports = { CredentialVault, TargetState, NotionOAuth };

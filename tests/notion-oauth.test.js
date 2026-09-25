@@ -356,15 +356,15 @@ function assertStructuredToolResult(output, options = {}) {
     });
 }
 
-const STABLE_WELCOME_SUBTITLE = '稳定支持：数据库 / 页面检索、跨源搜索、批量分类、GitHub / 书签导入、页面摘要；更多能力看「帮助」';
-const STABLE_WELCOME_PLACEHOLDER = '输入指令，如「列出所有数据库」或「导入GitHub收藏」...';
+// v3.17: GitHub 收藏源已移除, 欢迎语与生产(src/ui/ai-chat-ui.js)同口径去 GitHub。
+const STABLE_WELCOME_SUBTITLE = '稳定支持：数据库 / 页面检索、跨源搜索、批量分类、书签导入、页面摘要；更多能力看「帮助」';
+const STABLE_WELCOME_PLACEHOLDER = '输入指令，如「列出所有数据库」或「导入浏览器书签」...';
 const STABLE_WELCOME_CHIPS = [
     { command: '帮助', label: '💡 帮助' },
     { command: '列出所有数据库', label: '🗂️ 数据库' },
     { command: '在工作区搜索所有页面', label: '📄 页面' },
     { command: '跨源搜索最近收藏的帖子', label: '🔍 跨源搜索' },
     { command: '自动分类所有未分类的帖子', label: '🏷️ 分类' },
-    { command: '导入GitHub收藏', label: '🐙 GitHub' },
     { command: '导入浏览器书签', label: '📖 书签' }
 ];
 
@@ -2285,7 +2285,9 @@ function createWorkspaceVisualizationFixture(harness) {
         });
     });
 
-    await runTest('AIAssistant.AGENT_TOOLS.cross_source_search: filters GitHub source inside the active database', async () => {
+    await runTest('AIAssistant.AGENT_TOOLS.cross_source_search: filters linux.do source inside the active database', async () => {
+        // v3.17: GitHub 收藏源已移除, sourceMap 仅保留 linux.do/书签；未知来源原样透传。
+        // 本用例改用 linux.do 来源验证过滤语义。
         const harness = createHarness();
         let capturedBody = null;
 
@@ -2298,29 +2300,29 @@ function createWorkspaceVisualizationFixture(harness) {
                     object: 'page',
                     id: 'page-cross-1',
                     properties: {
-                        Name: { type: 'title', title: [{ plain_text: 'Repo Alpha' }] },
-                        来源: { rich_text: [{ text: { content: 'GitHub' } }] },
-                        来源类型: { rich_text: [{ text: { content: 'Repos' } }] },
-                        描述: { rich_text: [{ text: { content: 'Alpha repo toolkit' } }] },
-                        链接: { url: 'https://github.com/smith/repo-alpha' }
-                    }
-                }, {
-                    object: 'page',
-                    id: 'page-cross-2',
-                    properties: {
                         Name: { type: 'title', title: [{ plain_text: 'Linux Thread' }] },
                         来源: { rich_text: [{ text: { content: 'Linux.do' } }] },
                         来源类型: { rich_text: [{ text: { content: 'Topics' } }] },
                         描述: { rich_text: [{ text: { content: 'Forum notes' } }] },
                         链接: { url: 'https://linux.do/t/123' }
                     }
+                }, {
+                    object: 'page',
+                    id: 'page-cross-2',
+                    properties: {
+                        Name: { type: 'title', title: [{ plain_text: 'Bookmark Note' }] },
+                        来源: { rich_text: [{ text: { content: '浏览器书签' } }] },
+                        来源类型: { rich_text: [{ text: { content: '' } }] },
+                        描述: { rich_text: [{ text: { content: 'Saved page' } }] },
+                        链接: { url: 'https://example.com/a' }
+                    }
                 }]
             };
         };
 
         const result = await harness.AIAssistant.AGENT_TOOLS.cross_source_search.execute({
-            query: 'repo',
-            source: 'github',
+            query: 'thread',
+            source: 'linux.do',
             limit: 5
         }, {
             notionApiKey: 'manual_api_key',
@@ -2333,7 +2335,7 @@ function createWorkspaceVisualizationFixture(harness) {
             page_size: 100,
             filter: {
                 property: '来源',
-                rich_text: { contains: 'GitHub' }
+                rich_text: { contains: 'Linux.do' }
             }
         });
         assertStructuredToolResult(result, {
@@ -2341,11 +2343,11 @@ function createWorkspaceVisualizationFixture(harness) {
             title: '跨源搜索结果',
             fields: [
                 { label: '总数', value: 1 },
-                { label: '来源', value: 'github' },
-                { label: '关键词', value: 'repo' }
+                { label: '来源', value: 'linux.do' },
+                { label: '关键词', value: 'thread' }
             ],
             bullets: [
-                '[GitHub/Repos] Repo Alpha (https://github.com/smith/repo-alpha)'
+                '[Linux.do/Topics] Linux Thread (https://linux.do/t/123)'
             ]
         });
     });
@@ -2831,17 +2833,14 @@ function createWorkspaceVisualizationFixture(harness) {
     });
 
     await runTest('UICommandService.execute: save_command_boundary_settings persists notion-site command payloads through one boundary', async () => {
+        // v3.17: GitHub 收藏源已移除, GitHubAPI/setImportTypes 与 github* payload 字段已删除。
         const harness = createHarness();
         let selectedValue = null;
-        let importTypes = null;
         await unlockCredentialVault(harness);
 
         harness.TargetState.setAITarget = (value) => {
             selectedValue = value;
             return { value };
-        };
-        harness.GitHubAPI.setImportTypes = (types) => {
-            importTypes = types;
         };
 
         await harness.UICommandService.execute('save_command_boundary_settings', {
@@ -2858,10 +2857,7 @@ function createWorkspaceVisualizationFixture(harness) {
             personaName: 'Niko',
             personaTone: 'professional',
             personaExpertise: 'notion',
-            personaInstructions: 'be concise',
-            githubUsername: 'smith',
-            githubToken: 'ghp_xxx',
-            githubImportTypes: ['stars', 'repos']
+            personaInstructions: 'be concise'
         });
 
         assert.strictEqual(selectedValue, 'page:cccc');
@@ -2869,7 +2865,6 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.strictEqual(harness.store[harness.CONFIG.STORAGE_KEYS.AI_MODEL], 'gpt-4.1-mini');
         assert.strictEqual(harness.store[harness.CONFIG.STORAGE_KEYS.WORKSPACE_MAX_PAGES], 50);
         assert.strictEqual(harness.store[harness.CONFIG.STORAGE_KEYS.AGENT_PERSONA_NAME], 'Niko');
-        assert.deepStrictEqual(importTypes, ['stars', 'repos']);
     });
 
     await runTest('UICommandService.execute: refresh_workspace_targets delegates to WorkspaceService.refreshWorkspaceSnapshot with forwarded hooks', async () => {
@@ -3791,19 +3786,19 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.deepStrictEqual(harness.notifications.at(-1), { message: '成功获取 2 个模型', type: 'success' });
     });
 
-    await runTest('UI.buildVisualizationModel: aggregates Linux.do and GitHub snapshots into source, status and timeline summaries', async () => {
+    await runTest('UI.buildVisualizationModel: aggregates Linux.do snapshots into source, status and timeline summaries', async () => {
+        // v3.17: GitHub 收藏源已移除, updateVisualSnapshot 恒写 linuxdo 键, 历史 gh: 键
+        // 恒判未导出(isBookmarkKeyExportedLocal 只读兼容)。本用例改用纯 Linux.do 快照。
         const harness = createHarness();
 
         harness.store[harness.CONFIG.STORAGE_KEYS.EXPORTED_TOPICS] = JSON.stringify({
             101: Date.now()
         });
         harness.store[harness.CONFIG.STORAGE_KEYS.LINUXDO_IMPORT_DEDUP_MODE] = 'strict';
-        harness.GitHubAPI.isExported = (itemKey) => itemKey === 'smith/repo-b';
-        harness.GitHubAPI.isGistExported = (itemKey) => itemKey === 'gist-1';
 
         harness.UI.selectedBookmarks = new Set([
             '101',
-            'gh:repos:smith/repo-a'
+            '102'
         ]);
 
         harness.UI.updateVisualSnapshot('linuxdo', [
@@ -3811,45 +3806,30 @@ function createWorkspaceVisualizationFixture(harness) {
                 topic_id: 101,
                 title: 'Post A',
                 created_at: '2026-06-01T10:00:00Z'
-            }
-        ]);
-        harness.UI.updateVisualSnapshot('github', [
-            {
-                source: 'github',
-                sourceType: 'repos',
-                itemKey: 'smith/repo-a',
-                title: 'Repo A',
-                raw: {
-                    updated_at: '2026-06-02T12:00:00Z'
-                }
             },
             {
-                source: 'github',
-                sourceType: 'gists',
-                itemKey: 'gist-1',
-                title: 'Gist A',
-                raw: {
-                    created_at: '2026-06-03T08:00:00Z'
-                }
+                topic_id: 102,
+                title: 'Post B',
+                created_at: '2026-06-02T12:00:00Z'
+            },
+            {
+                topic_id: 103,
+                title: 'Post C',
+                created_at: '2026-06-03T08:00:00Z'
             }
         ]);
 
         const model = harness.UI.buildVisualizationModel();
         const sourceBreakdownMap = Object.fromEntries(model.sourceBreakdown.map((item) => [item.label, item]));
-        const typeBreakdownMap = Object.fromEntries(model.typeBreakdown.map((item) => [item.label, item]));
 
         assert.strictEqual(model.total, 3);
-        assert.strictEqual(model.exported, 2);
-        assert.strictEqual(model.pending, 1);
+        assert.strictEqual(model.exported, 1);
+        assert.strictEqual(model.pending, 2);
         assert.strictEqual(model.selected, 2);
-        assert.deepStrictEqual(model.loadedSources, ['Linux.do', 'GitHub']);
-        assert.deepStrictEqual(sourceBreakdownMap['GitHub'], { label: 'GitHub', count: 2, pct: 67 });
-        assert.deepStrictEqual(sourceBreakdownMap['Linux.do'], { label: 'Linux.do', count: 1, pct: 33 });
-        assert.strictEqual(typeBreakdownMap.Repos.count, 1);
-        assert.strictEqual(typeBreakdownMap.Gists.count, 1);
-        assert.strictEqual(model.typeBreakdown.length, 3);
+        assert.deepStrictEqual(model.loadedSources, ['Linux.do']);
+        assert.deepStrictEqual(sourceBreakdownMap['Linux.do'], { label: 'Linux.do', count: 3, pct: 100 });
         assert.deepStrictEqual(model.timeline, [
-            { key: '2026-06-03', label: '06/03', count: 1, exported: 1 },
+            { key: '2026-06-03', label: '06/03', count: 1, exported: 0 },
             { key: '2026-06-02', label: '06/02', count: 1, exported: 0 },
             { key: '2026-06-01', label: '06/01', count: 1, exported: 1 }
         ]);
@@ -3924,17 +3904,20 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.strictEqual(renderCalls, 1);
     });
 
-    await runTest('UI.buildBookmarkItemHtml: shows re-export action for exported Linux.do and GitHub bookmarks', async () => {
+    await runTest('UI.buildBookmarkItemHtml: shows re-export action for exported Linux.do bookmarks', async () => {
+        // v3.17: GitHub 收藏源已移除, 历史 gh: 键恒判未导出, 不再提供重新导出入口。
         const harness = createHarness();
 
         harness.store[harness.CONFIG.STORAGE_KEYS.EXPORTED_TOPICS] = JSON.stringify({
             101: 1710000000000
         });
         harness.store[harness.CONFIG.STORAGE_KEYS.LINUXDO_IMPORT_DEDUP_MODE] = 'strict';
-        harness.GitHubAPI.isExported = () => true;
 
         const linuxdoHtml = harness.UI.buildBookmarkItemHtml({ topic_id: 101, title: 'Post A' }, false);
-        // v3.14.4: GitHub 项已导出同样提供重新导出入口(对账误标恢复路径, F-5)
+
+        assert.ok(linuxdoHtml.includes('data-bookmark-action="reexport"'));
+        assert.ok(linuxdoHtml.includes('重新导出'));
+        // 历史 GitHub 项恒判未导出 → 不显示重新导出按钮
         const githubHtml = harness.UI.buildBookmarkItemHtml({
             source: 'github',
             sourceType: 'repos',
@@ -3942,11 +3925,7 @@ function createWorkspaceVisualizationFixture(harness) {
             title: 'Repo A',
             raw: { full_name: 'smith/repo-a' }
         }, true);
-
-        assert.ok(linuxdoHtml.includes('data-bookmark-action="reexport"'));
-        assert.ok(linuxdoHtml.includes('重新导出'));
-        assert.ok(githubHtml.includes('data-bookmark-action="reexport"'));
-        assert.ok(githubHtml.includes('重新导出'));
+        assert.ok(!githubHtml.includes('data-bookmark-action="reexport"'));
         // 未导出项不显示重新导出按钮
         const unexportedHtml = harness.UI.buildBookmarkItemHtml({ topic_id: 202, title: 'Post B' }, false);
         assert.ok(!unexportedHtml.includes('data-bookmark-action="reexport"'));
@@ -3972,90 +3951,8 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.deepStrictEqual(selected, [linuxdoItem, githubItem]);
     });
 
-    await runTest('UI.buildGitHubObsidianMarkdown: renders gist metadata and file list for Obsidian export', async () => {
-        const harness = createHarness();
-
-        const note = await harness.UI.buildGitHubObsidianMarkdown({
-            source: 'github',
-            sourceType: 'gists',
-            itemKey: 'gist-1',
-            title: 'Useful Snippet',
-            raw: {
-                id: 'gist-1',
-                html_url: 'https://gist.github.com/smith/gist-1',
-                description: 'Useful Snippet',
-                updated_at: '2026-06-03T08:00:00Z',
-                owner: { login: 'smith' },
-                files: {
-                    'demo.js': { language: 'JavaScript', size: 128 },
-                    'notes.md': { language: 'Markdown', size: 64 }
-                }
-            }
-        });
-
-        assert.strictEqual(note.title, 'Useful Snippet');
-        assert.strictEqual(note.fileName, 'Useful Snippet');
-        assert.strictEqual(note.url, 'https://gist.github.com/smith/gist-1');
-        assert.ok(note.markdown.includes('source: "GitHub"'), note.markdown);
-        assert.ok(note.markdown.includes('source_type: "Gists"'), note.markdown);
-        assert.ok(note.markdown.includes('gist_id: "gist-1"'), note.markdown);
-        assert.ok(note.markdown.includes('## 文件列表'), note.markdown);
-        assert.ok(note.markdown.includes('`demo.js`'), note.markdown);
-        assert.ok(note.markdown.includes('GitHub Gist'), note.markdown);
-    });
-
-    await runTest('UI.exportGitHubSelectedToObsidian: writes selected GitHub gist note and returns report-friendly success payload', async () => {
-        const harness = createHarness();
-        const writes = [];
-
-        harness.setRequestHandler((options) => {
-            if (options.method === 'PUT' && options.url.includes('/vault/')) {
-                writes.push({
-                    url: options.url,
-                    body: options.data,
-                    auth: options.headers?.Authorization
-                });
-                return respondJson(options, 201, {});
-            }
-            throw new Error(`Unexpected request: ${options.method} ${options.url}`);
-        });
-
-        const results = await harness.UI.exportGitHubSelectedToObsidian([{
-            source: 'github',
-            sourceType: 'gists',
-            itemKey: 'gist-1',
-            title: 'Useful Snippet',
-            raw: {
-                id: 'gist-1',
-                html_url: 'https://gist.github.com/smith/gist-1',
-                description: 'Useful Snippet',
-                updated_at: '2026-06-03T08:00:00Z',
-                owner: { login: 'smith' },
-                files: {
-                    'demo.js': { language: 'JavaScript', size: 128 }
-                }
-            }
-        }], {
-            obsUrl: 'https://127.0.0.1:27124',
-            obsKey: 'obs-key',
-            obsDir: 'GitHub Vault'
-        });
-
-        assert.strictEqual(writes.length, 1);
-        // P4 收敛(3/3 共识): 路径逐段编码——子目录分隔符为真实 "/", 段内空格编码为 %20;
-        // 旧断言锁定的是整路径 encodeURIComponent(子目录变 %2F 且 ".." 可越权写入)的缺陷行为
-        assert.ok(writes[0].url.includes('/vault/GitHub%20Vault/Useful%20Snippet.md'), writes[0].url);
-        assert.strictEqual(writes[0].auth, 'Bearer obs-key');
-        assert.ok(String(writes[0].body).includes('GitHub Gist'), String(writes[0].body));
-        assert.deepStrictEqual(results, {
-            success: [{
-                title: 'Useful Snippet',
-                url: 'https://gist.github.com/smith/gist-1'
-            }],
-            failed: [],
-            skipped: []
-        });
-    });
+    // v3.17: GitHub 收藏源已移除, UI.buildGitHubObsidianMarkdown /
+    // UI.exportGitHubSelectedToObsidian 已随 github-obsidian-service 删除, 相关用例删除。
 
     await runTest('UI.buildWorkspaceVisualizationModel: aggregates workspace records into timeline, relationships and funnel summaries', async () => {
         const harness = createHarness();
@@ -4353,37 +4250,15 @@ function createWorkspaceVisualizationFixture(harness) {
 
         harness.store[harness.CONFIG.STORAGE_KEYS.AUTO_IMPORT_ENABLED] = true;
         harness.store[harness.CONFIG.STORAGE_KEYS.AUTO_IMPORT_INTERVAL] = 5;
-        harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED] = true;
-        harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL] = 10;
+        // v3.17: GitHub 收藏源已移除, GITHUB_* 状态键/API 已删除。
         harness.store[harness.CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED] = true;
         harness.store[harness.CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_INTERVAL] = 30;
-        harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_IMPORT_TYPES] = JSON.stringify(['stars', 'gists']);
 
         harness.SyncState.updateLinuxDoState({
             lastSuccessAt: 100,
             lastAttemptAt: 90,
             lastOutcome: 'success',
             lastStats: { scanned: 4, pending: 1, success: 1, failed: 0 }
-        });
-        harness.SyncState.updateGitHubMeta({
-            lastSuccessAt: 200,
-            lastAttemptAt: 190,
-            lastOutcome: 'partial',
-            lastStats: { enabledTypes: 2, exported: 1, failed: 1, syncErrors: 0 }
-        });
-        harness.SyncState.updateGitHubState('stars', {
-            watermark: { time: '2026-06-02T09:00:00Z', ids: ['smith/repo-a'] },
-            lastSuccessAt: 200,
-            lastAttemptAt: 190,
-            lastOutcome: 'partial',
-            lastStats: { scanned: 2, pending: 2, exported: 1, failed: 1 }
-        });
-        harness.SyncState.updateGitHubState('gists', {
-            watermark: { time: '2026-06-01T09:00:00Z', ids: ['gist-1'] },
-            lastSuccessAt: 180,
-            lastAttemptAt: 170,
-            lastOutcome: 'success',
-            lastStats: { scanned: 0, pending: 0, exported: 0, failed: 0 }
         });
         harness.SyncState.updateBookmarkState({
             lastSuccessAt: 300,
@@ -4415,8 +4290,9 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.strictEqual(collabPackage.workspace.duplicateCandidates[0].label, 'Repo A');
         assert.ok(collabPackage.insight.summary.includes('Repo A'), collabPackage.insight.summary);
         assert.ok(collabPackage.insight.markdown.includes('# 工作区洞察报告'), collabPackage.insight.markdown);
-        assert.strictEqual(collabPackage.syncCenter.enabledCount, 3);
-        assert.strictEqual(collabPackage.syncCenter.issueCount, 2);
+        // v3.17: GitHub 收藏源已移除, 同步中心仅 linuxdo + bookmarks 两源(启用 2, 问题 1)。
+        assert.strictEqual(collabPackage.syncCenter.enabledCount, 2);
+        assert.strictEqual(collabPackage.syncCenter.issueCount, 1);
         assert.ok(!collabPackage.syncCenter.sourceRows.some((row) => row.key === 'rss'));
     });
 
@@ -5661,7 +5537,8 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.ok(popupHtml.includes('id="import-bookmarks"'));
         assert.ok(popupHtml.includes('<script src="popup.js"></script>'));
         assert.ok(popupScript.includes('LD_NOTION_IMPORT_BOOKMARKS'));
-        assert.ok(popupScript.includes('LD_NOTION_IMPORT_GITHUB'));
+        // v3.17: GitHub 收藏源已移除, LD_NOTION_IMPORT_GITHUB 消息已删除
+        assert.ok(!popupScript.includes('LD_NOTION_IMPORT_GITHUB'));
         assert.ok(popupScript.includes('LD_NOTION_SET_BOOKMARK_SOURCE'));
         assert.strictEqual(manifest.version, '9.9.9');
         assert.strictEqual(manifest.background?.service_worker, 'background.js');
@@ -5682,7 +5559,8 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.ok(!manifest.host_permissions.includes('http://*/*'));
         assert.ok(!boundedManifest.host_permissions.includes('https://*/*'));
         assert.ok(!boundedManifest.host_permissions.includes('http://*/*'));
-        assert.ok(manifest.content_scripts[0].matches.includes('https://github.com/*'));
+        // v3.17: GitHub 收藏源已移除, github.com content-script 匹配已删除
+        assert.ok(!manifest.content_scripts[0].matches.includes('https://github.com/*'));
         assert.ok(manifest.content_scripts[0].matches.includes('https://www.zhihu.com/*'));
         assert.ok(manifest.content_scripts[0].matches.includes('https://*/*'));
         assert.ok(manifest.content_scripts[0].exclude_matches.includes('*://127.0.0.1/*'));
@@ -5825,7 +5703,8 @@ function createWorkspaceVisualizationFixture(harness) {
             assert.ok(popupHtml.includes('id="import-bookmarks"'));
             assert.ok(popupHtml.includes('<script src="popup.js"></script>'));
             assert.ok(popupScript.includes('LD_NOTION_IMPORT_BOOKMARKS'));
-            assert.ok(popupScript.includes('LD_NOTION_IMPORT_GITHUB'));
+            // v3.17: GitHub 收藏源已移除, LD_NOTION_IMPORT_GITHUB 消息与 github content-script 匹配已删除
+            assert.ok(!popupScript.includes('LD_NOTION_IMPORT_GITHUB'));
             assert.ok(popupScript.includes('LD_NOTION_SET_BOOKMARK_SOURCE'));
             assert.deepStrictEqual(manifest.content_scripts[0].matches, [
                 'https://linux.do/*',
@@ -5834,9 +5713,6 @@ function createWorkspaceVisualizationFixture(harness) {
                 'https://notion.so/*',
                 'https://*.notion.so/*',
                 'https://smith-106.github.io/LD-Notion/*',
-                'https://github.com/*',
-                'https://www.github.com/*',
-                'https://gist.github.com/*',
                 'https://www.zhihu.com/*',
                 'https://zhuanlan.zhihu.com/*',
                 'http://*/*',
@@ -6160,93 +6036,21 @@ function createWorkspaceVisualizationFixture(harness) {
         assert.strictEqual(harness.AutoImporter.isRunning, false);
     });
 
-    await runTest('GitHubAutoImporter.run: writes per-type state and github meta', async () => {
-        const harness = createHarness();
-        const notionPostBodies = [];
-
-        harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_API_KEY] = 'manual_api_key';
-        harness.store[harness.CONFIG.STORAGE_KEYS.NOTION_DATABASE_ID] = 'db-github';
-        harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_USERNAME] = 'smith';
-        harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_IMPORT_TYPES] = JSON.stringify(['stars', 'gists']);
-        harness.store[harness.CONFIG.STORAGE_KEYS.REQUEST_DELAY] = 0;
-        harness.GitHubAutoImporter.minimumRunGapMs = 0;
-        harness.GitHubAutoImporter.lastRunAt = 0;
-        harness.GitHubAutoImporter.isRunning = false;
-        harness.GitHubAutoImporter.fetchTypeItems = async (type) => {
-            if (type === 'stars') {
-                return [
-                    { full_name: 'smith/repo-a', updated_at: '2026-06-04T10:00:00Z' },
-                    { full_name: 'smith/repo-b', updated_at: '2026-06-03T10:00:00Z' }
-                ];
-            }
-            if (type === 'gists') return [];
-            return [];
-        };
-        // 事件总线解耦后，导出走 _exportViaGitHubExporter → NotionAPI.request → GM_xmlhttpRequest
-        harness.setRequestHandler((options) => {
-            if (options.url.includes('api.github.com') && options.url.includes('/readme')) {
-                respondJson(options, 404, { message: 'Not Found' });
-            } else if (options.method === 'POST' && options.url.includes('/databases/') && options.url.includes('/query')) {
-                // 20260914 对账: collectDatabaseUrls 远端索引查询(空库→全量导出), 不计入建页计数
-                respondJson(options, 200, { results: [], has_more: false });
-            } else if (options.method === 'POST' && options.url.includes('api.notion.com')) {
-                const body = JSON.parse(options.data || '{}');
-                notionPostBodies.push(body);
-                const title = body.properties?.['\u6807\u9898']?.title?.[0]?.text?.content || '';
-                if (title.includes('repo-a')) {
-                    respondJson(options, 200, { id: 'page-001' });
-                } else {
-                    respondJson(options, 500, { message: 'Internal Server Error' });
-                }
-            } else {
-                respondJson(options, 404, { message: 'Not Found' });
-            }
-        });
-
-        await harness.GitHubAutoImporter.run();
-
-        const githubMeta = harness.SyncState.getGitHubMeta();
-        const starsState = harness.SyncState.getGitHubState('stars');
-        const gistsState = harness.SyncState.getGitHubState('gists');
-
-        assert.strictEqual(notionPostBodies.length, 2, 'should attempt 2 Notion page creations');
-        assert.ok(githubMeta.lastAttemptAt > 0);
-        assert.ok(githubMeta.lastSuccessAt > 0);
-        assert.strictEqual(githubMeta.lastOutcome, 'partial');
-        assert.strictEqual(githubMeta.lastStats.enabledTypes, 2);
-        assert.strictEqual(githubMeta.lastStats.exported, 1);
-        assert.strictEqual(githubMeta.lastStats.failed, 1);
-        assert.strictEqual(githubMeta.lastStats.syncErrors, 0);
-        assert.ok(starsState.lastAttemptAt > 0);
-        assert.ok(starsState.lastSuccessAt > 0);
-        assert.strictEqual(starsState.lastOutcome, 'partial');
-        assert.strictEqual(starsState.lastStats.scanned, 2);
-        assert.strictEqual(starsState.lastStats.pending, 2);
-        assert.strictEqual(starsState.lastStats.exported, 1);
-        assert.strictEqual(starsState.lastStats.failed, 1);
-        assert.ok(gistsState.lastAttemptAt > 0);
-        assert.ok(gistsState.lastSuccessAt > 0);
-        assert.strictEqual(gistsState.lastOutcome, 'success');
-        assert.strictEqual(gistsState.lastStats.scanned, 0);
-        assert.strictEqual(gistsState.lastStats.pending, 0);
-        assert.strictEqual(gistsState.lastStats.exported, 0);
-        assert.strictEqual(gistsState.lastStats.failed, 0);
-    });
+    // v3.17: GitHub 收藏源已移除, GitHubAutoImporter 已删除, 相关用例删除。
+    // 自动导入覆盖由 AutoImporter(Linux.do)/BookmarkAutoImporter 用例承载。
 
 
 
 
 
-    await runTest('UI.buildUnifiedSyncModel: aggregates linuxdo, github and bookmark sync states', async () => {
+    await runTest('UI.buildUnifiedSyncModel: aggregates linuxdo and bookmark sync states', async () => {
+        // v3.17: GitHub 收藏源已移除, GITHUB_* 状态键/API 已删除, 同步中心仅两源。
         const harness = createHarness();
 
         harness.store[harness.CONFIG.STORAGE_KEYS.AUTO_IMPORT_ENABLED] = true;
         harness.store[harness.CONFIG.STORAGE_KEYS.AUTO_IMPORT_INTERVAL] = 5;
-        harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED] = true;
-        harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL] = 10;
         harness.store[harness.CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED] = true;
         harness.store[harness.CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_INTERVAL] = 30;
-        harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_IMPORT_TYPES] = JSON.stringify(['stars', 'gists']);
 
         harness.SyncState.updateLinuxDoState({
             watermark: { time: '2026-06-03T09:00:00Z', ids: ['101'] },
@@ -6254,26 +6058,6 @@ function createWorkspaceVisualizationFixture(harness) {
             lastAttemptAt: 90,
             lastOutcome: 'success',
             lastStats: { scanned: 4, pending: 1, success: 1, failed: 0 }
-        });
-        harness.SyncState.updateGitHubMeta({
-            lastSuccessAt: 200,
-            lastAttemptAt: 190,
-            lastOutcome: 'partial',
-            lastStats: { enabledTypes: 2, exported: 1, failed: 1, syncErrors: 0 }
-        });
-        harness.SyncState.updateGitHubState('stars', {
-            watermark: { time: '2026-06-02T09:00:00Z', ids: ['smith/repo-a'] },
-            lastSuccessAt: 200,
-            lastAttemptAt: 190,
-            lastOutcome: 'partial',
-            lastStats: { scanned: 2, pending: 2, exported: 1, failed: 1 }
-        });
-        harness.SyncState.updateGitHubState('gists', {
-            watermark: { time: '2026-06-01T09:00:00Z', ids: ['gist-1'] },
-            lastSuccessAt: 180,
-            lastAttemptAt: 170,
-            lastOutcome: 'success',
-            lastStats: { scanned: 0, pending: 0, exported: 0, failed: 0 }
         });
         harness.SyncState.updateBookmarkState({
             watermark: { time: '2026-06-04T09:00:00Z', ids: ['bm-1'] },
@@ -6288,17 +6072,15 @@ function createWorkspaceVisualizationFixture(harness) {
         const model = harness.UI.buildUnifiedSyncModel();
         const rowsByKey = Object.fromEntries(model.sourceRows.map((row) => [row.key, row]));
 
-        assert.strictEqual(model.sourceRows.length, 3);
-        assert.strictEqual(model.enabledCount, 3);
+        assert.strictEqual(model.sourceRows.length, 2);
+        assert.strictEqual(model.enabledCount, 2);
         assert.strictEqual(model.runningCount, 0);
-        assert.strictEqual(model.issueCount, 2);
+        assert.strictEqual(model.issueCount, 1);
         assert.strictEqual(model.latestSuccessSource, rowsByKey.bookmarks.label);
         assert.strictEqual(rowsByKey.linuxdo.outcome, 'success');
-        assert.strictEqual(rowsByKey.github.outcome, 'partial');
         assert.strictEqual(rowsByKey.bookmarks.outcome, 'error');
         assert.ok(!('rss' in rowsByKey));
-        assert.ok(rowsByKey.github.watermarkLabel.includes('Stars'), rowsByKey.github.watermarkLabel);
-        assert.ok(rowsByKey.github.watermarkLabel.includes('Gists'), rowsByKey.github.watermarkLabel);
+        assert.ok(!('github' in rowsByKey));
         assert.strictEqual(rowsByKey.bookmarks.lastError, 'bridge lost');
         assert.strictEqual(rowsByKey.bookmarks.enabled, true);
     });
@@ -6312,37 +6094,15 @@ function createWorkspaceVisualizationFixture(harness) {
         };
         harness.store[harness.CONFIG.STORAGE_KEYS.AUTO_IMPORT_ENABLED] = true;
         harness.store[harness.CONFIG.STORAGE_KEYS.AUTO_IMPORT_INTERVAL] = 5;
-        harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED] = true;
-        harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL] = 10;
+        // v3.17: GitHub 收藏源已移除, GITHUB_* 状态键/API 已删除。
         harness.store[harness.CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED] = true;
         harness.store[harness.CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_INTERVAL] = 30;
-        harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_IMPORT_TYPES] = JSON.stringify(['stars', 'gists']);
 
         harness.SyncState.updateLinuxDoState({
             lastSuccessAt: 100,
             lastAttemptAt: 90,
             lastOutcome: 'success',
             lastStats: { scanned: 4, pending: 1, success: 1, failed: 0 }
-        });
-        harness.SyncState.updateGitHubMeta({
-            lastSuccessAt: 200,
-            lastAttemptAt: 190,
-            lastOutcome: 'partial',
-            lastStats: { enabledTypes: 2, exported: 1, failed: 1, syncErrors: 0 }
-        });
-        harness.SyncState.updateGitHubState('stars', {
-            watermark: { time: '2026-06-02T09:00:00Z', ids: ['smith/repo-a'] },
-            lastSuccessAt: 200,
-            lastAttemptAt: 190,
-            lastOutcome: 'partial',
-            lastStats: { scanned: 2, pending: 2, exported: 1, failed: 1 }
-        });
-        harness.SyncState.updateGitHubState('gists', {
-            watermark: { time: '2026-06-01T09:00:00Z', ids: ['gist-1'] },
-            lastSuccessAt: 180,
-            lastAttemptAt: 170,
-            lastOutcome: 'success',
-            lastStats: { scanned: 0, pending: 0, exported: 0, failed: 0 }
         });
         harness.SyncState.updateBookmarkState({
             lastSuccessAt: 300,
@@ -6356,9 +6116,8 @@ function createWorkspaceVisualizationFixture(harness) {
         harness.UI.renderSyncCenterSummary();
 
         assert.ok(summaryContainer.innerHTML.includes('Linux.do'), summaryContainer.innerHTML);
-        assert.ok(summaryContainer.innerHTML.includes('GitHub'), summaryContainer.innerHTML);
+        assert.ok(!summaryContainer.innerHTML.includes('GitHub'), summaryContainer.innerHTML);
         assert.ok(!summaryContainer.innerHTML.includes('RSS'), summaryContainer.innerHTML);
-        assert.ok(summaryContainer.innerHTML.includes('Stars'), summaryContainer.innerHTML);
         assert.ok(summaryContainer.innerHTML.includes('bridge lost'), summaryContainer.innerHTML);
         assert.ok(!summaryContainer.innerHTML.includes('[object Object]'), summaryContainer.innerHTML);
     });
@@ -6377,13 +6136,11 @@ function createWorkspaceVisualizationFixture(harness) {
         harness.UI.showStatus = (message, type) => {
             statusMessages.push({ message, type });
         };
+        // v3.17: GitHub 收藏源已移除, GitHubAutoImporter 已删除, 统一同步仅两源。
         harness.store[harness.CONFIG.STORAGE_KEYS.AUTO_IMPORT_ENABLED] = true;
         harness.store[harness.CONFIG.STORAGE_KEYS.AUTO_IMPORT_INTERVAL] = 5;
-        harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_ENABLED] = true;
-        harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_AUTO_IMPORT_INTERVAL] = 10;
         harness.store[harness.CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_ENABLED] = true;
         harness.store[harness.CONFIG.STORAGE_KEYS.BOOKMARK_AUTO_IMPORT_INTERVAL] = 30;
-        harness.store[harness.CONFIG.STORAGE_KEYS.GITHUB_IMPORT_TYPES] = JSON.stringify(['stars']);
 
         harness.AutoImporter.run = async () => {
             calls.push('linuxdo');
@@ -6392,21 +6149,6 @@ function createWorkspaceVisualizationFixture(harness) {
                 lastSuccessAt: 11,
                 lastOutcome: 'success',
                 lastStats: { scanned: 1, pending: 1, success: 1, failed: 0 }
-            });
-        };
-        harness.GitHubAutoImporter.run = async () => {
-            calls.push('github');
-            harness.SyncState.updateGitHubMeta({
-                lastAttemptAt: 20,
-                lastSuccessAt: 21,
-                lastOutcome: 'partial',
-                lastStats: { enabledTypes: 1, exported: 1, failed: 0, syncErrors: 1 }
-            });
-            harness.SyncState.updateGitHubState('stars', {
-                lastAttemptAt: 20,
-                lastSuccessAt: 21,
-                lastOutcome: 'success',
-                lastStats: { scanned: 1, pending: 1, exported: 1, failed: 0 }
             });
         };
         harness.BookmarkAutoImporter.run = async () => {
@@ -6422,18 +6164,18 @@ function createWorkspaceVisualizationFixture(harness) {
 
         const model = await harness.UI.runUnifiedSyncNow();
 
-        assert.deepStrictEqual(calls, ['linuxdo', 'github', 'bookmarks']);
+        assert.deepStrictEqual(calls, ['linuxdo', 'bookmarks']);
         assert.strictEqual(syncNowBtn.disabled, false);
         assert.strictEqual(syncNowBtn.textContent, '立即同步全部');
-        assert.strictEqual(model.enabledCount, 3);
-        assert.strictEqual(model.issueCount, 1);
-        assert.ok(summaryContainer.innerHTML.includes('GitHub'), summaryContainer.innerHTML);
-        assert.strictEqual(statusMessages.at(-1).type, 'error');
+        assert.strictEqual(model.enabledCount, 2);
+        assert.strictEqual(model.issueCount, 0);
+        assert.ok(!summaryContainer.innerHTML.includes('GitHub'), summaryContainer.innerHTML);
+        assert.strictEqual(statusMessages.at(-1).type, 'success');
         assert.ok(statusMessages.at(-1).message.includes('Linux.do'), statusMessages.at(-1).message);
-        assert.ok(statusMessages.at(-1).message.includes('GitHub'), statusMessages.at(-1).message);
     });
 
-    await runTest('main: initializes the expected surface on Linux.do, Notion, GitHub, Zhihu and generic pages', async () => {
+    await runTest('main: initializes the expected surface on Linux.do, Notion, Zhihu and generic pages', async () => {
+        // v3.17: GitHub 收藏源已移除, GitHubAutoImporter 已删除, SITES.GITHUB 已删除。
         const cases = [
             {
                 site: 'linuxdo',
@@ -6446,12 +6188,6 @@ function createWorkspaceVisualizationFixture(harness) {
                 url: 'https://www.notion.so/workspace/page',
                 detect: (harness) => harness.SiteDetector.SITES.NOTION,
                 expected: ['notion-ui', 'bookmark-auto']
-            },
-            {
-                site: 'github',
-                url: 'https://github.com/smith-106',
-                detect: (harness) => harness.SiteDetector.SITES.GITHUB,
-                expected: ['ui', 'update', 'github-auto', 'bookmark-auto']
             },
             {
                 site: 'zhihu',
@@ -6487,9 +6223,6 @@ function createWorkspaceVisualizationFixture(harness) {
             };
             harness.AutoImporter.init = () => {
                 events.push('auto');
-            };
-            harness.GitHubAutoImporter.init = () => {
-                events.push('github-auto');
             };
             harness.BookmarkAutoImporter.init = () => {
                 events.push('bookmark-auto');

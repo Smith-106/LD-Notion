@@ -36,8 +36,6 @@ const REQUIRED_CONSTS = [
     "LinuxDoAPI",
     "Exporter",
     "AutoImporter",
-    "GitHubAPI",
-    "GitHubAutoImporter",
     "BookmarkBridge",
     "BookmarkAutoImporter",
     "AIClassifier",

@@ -12,7 +12,7 @@ const CredentialVault = {
     VERSION: 1,
     // 敏感键集已全部清空(v3.14.2):
     // vault 解锁态(_unlocked/_sessionCache)为模块内存态,每次页面加载(含 Tampermonkey
-    // 脚本更新强制重载)即重置为锁定;锁定态下读取返回空,导致 AI/GitHub/Obsidian
+    // 脚本更新强制重载)即重置为锁定;锁定态下读取返回空,导致 AI/Obsidian
     // 敏感键在每次更新后看似失效。与 v3.12.0 OAuth 三键同根(R1),按同一先例改走
     // GM 明文存储,审计日志仍由 REDACT_IN_LOGS 统一脱敏。
     SENSITIVE_KEYS: Object.freeze(new Set()),

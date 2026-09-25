@@ -30,7 +30,7 @@ stateDiagram-v2
 
 | State | Trigger | Guard | Failure path |
 | --- | --- | --- | --- |
-| captured | 用户选择 Linux.do、GitHub、Bookmarks、Zhihu 或 Generic Web 来源。 | 来源页面、列表项、URL 或扩展能力可读取。 | 来源不可访问时进入 failed，并保留用户可见错误。 |
+| captured | 用户选择 Linux.do、Bookmarks、Zhihu 或 Generic Web 来源。 | 来源页面、列表项、URL 或扩展能力可读取。 | 来源不可访问时进入 failed，并保留用户可见错误。 |
 | normalized | 来源适配器提取 title、body、metadata、sourceId 和 URL。 | identity 至少包含 source、sourceId 或 URL。 | 缺少可识别身份时进入 failed，避免不可追踪写入。 |
 | routed | Routing Rules 根据来源、目标、授权、AI 和权限信号选择路径。 | 存在明确 destination 或 preview-only fallback。 | 没有可解释路径时进入 failed。 |
 | guard_checked | OperationGuard 检查写入权限、危险级别、目标可用性和确认需求。 | 当前权限等级允许该操作，或操作停在预览。 | 权限不足、授权缺失或用户取消确认时进入 failed。 |

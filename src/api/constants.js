@@ -4,7 +4,7 @@ const SiteDetector = {
     SITES: {
         LINUX_DO: "linux_do",
         NOTION: "notion",
-        GITHUB: "github",
+        // v3.17: GitHub 收藏源已移除,不再识别 github 站点。
         ZHIHU: "zhihu",
         GENERIC: "generic",
     },
@@ -18,9 +18,7 @@ const SiteDetector = {
         if (hostname === "notion.so" || hostname === "www.notion.so" || hostname.endsWith(".notion.so")) {
             return SiteDetector.SITES.NOTION;
         }
-        if (hostname === "github.com" || hostname === "www.github.com" || hostname === "gist.github.com") {
-            return SiteDetector.SITES.GITHUB;
-        }
+        // v3.17: GitHub 收藏源已移除,不再识别 github.com/gist 站点。
         if (hostname === "www.zhihu.com" || hostname === "zhuanlan.zhihu.com") {
             return SiteDetector.SITES.ZHIHU;
         }
@@ -37,10 +35,7 @@ const SiteDetector = {
         return SiteDetector.detect() === SiteDetector.SITES.NOTION;
     },
 
-    // 判断是否在 GitHub 站点
-    isGitHub: () => {
-        return SiteDetector.detect() === SiteDetector.SITES.GITHUB;
-    },
+    // v3.17: GitHub 收藏源已移除,isGitHub() 删除(调用方改走恒 false 兼容壳)。
 
     // 判断是否在通用网页
     isGeneric: () => {

@@ -349,75 +349,26 @@ describe("P4 收敛(c10): 安全层失败路径", () => {
 // ===== P4 收敛(c05b/c08): 分片覆盖补齐轮(c05b qwen / c08a+c08b glm) =====
 
 describe("P4 收敛(c08): 导出账本容量作用于落盘结果", () => {
+    // v3.17: GitHub 收藏源已移除, GitHubAPI 已删除。容量淘汰语义由
+    // BookmarkExporter 承载(src/bridge/BookmarkExporter.js, BOOKMARK_EXPORTED 键)。
     it("存储账本超上限时, flush 后落盘规模收缩到上限", () => {
-        const { GitHubAPI } = require("../src/import/GitHubAPI");
-        const limit = GitHubAPI._EXPORT_CAPACITY_LIMIT;
-        const originalLimit = limit;
-        const seed = {};
-        for (let i = 0; i < originalLimit + 5; i++) {
-            seed[`owner/repo-${i}`] = Date.now() - (originalLimit - i);
-        }
-        Storage.set(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, JSON.stringify(seed));
-        GitHubAPI._exportedCache = null;
-        GitHubAPI.getExported();
-        GitHubAPI.flushExported();
-        const persisted = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_REPOS, "{}"));
-        expect(Object.keys(persisted).length).toBeLessThanOrEqual(originalLimit);
-        // 已淘汰的最旧键不复活
-        expect(persisted["owner/repo-0"]).toBeUndefined();
-        expect(persisted[`owner/repo-${originalLimit + 4}`]).toBeDefined();
-    });
-
-    it("gist 账本同样在落盘时收缩到上限", () => {
-        const { GitHubAPI } = require("../src/import/GitHubAPI");
-        const limit = GitHubAPI._EXPORT_CAPACITY_LIMIT;
+        const { BookmarkExporter } = require("../src/bridge/BookmarkExporter");
+        const limit = BookmarkExporter._EXPORT_CAPACITY_LIMIT;
         const seed = {};
         for (let i = 0; i < limit + 5; i++) {
-            seed[`gist-${i}`] = Date.now() - (limit - i);
+            seed[`https://example.com/${i}`] = Date.now() - (limit - i);
         }
-        Storage.set(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, JSON.stringify(seed));
-        GitHubAPI._exportedGistsCache = null;
-        GitHubAPI.getExportedGists();
-        GitHubAPI.flushGistsExported();
-        const persisted = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.GITHUB_EXPORTED_GISTS, "{}"));
+        Storage.set(CONFIG.STORAGE_KEYS.BOOKMARK_EXPORTED, JSON.stringify(seed));
+        BookmarkExporter._exportedCache = null;
+        BookmarkExporter.getExported();
+        BookmarkExporter.flushExported();
+        const persisted = JSON.parse(Storage.get(CONFIG.STORAGE_KEYS.BOOKMARK_EXPORTED, "{}"));
         expect(Object.keys(persisted).length).toBeLessThanOrEqual(limit);
-        expect(persisted["gist-0"]).toBeUndefined();
-    });
-});
-
-describe("P4 收敛(c08): GitHub 列表 partial 标记随派生数组传递", () => {
-    it("fetchStarredRepos 的 map 保留 partial", async () => {
-        const { GitHubAPI } = require("../src/import/GitHubAPI");
-        const original = GitHubAPI._fetchPaginated;
-        GitHubAPI._fetchPaginated = async () => {
-            const arr = [{ repo: { full_name: "a/b" }, starred_at: "2026-01-01T00:00:00Z" }];
-            arr.partial = true;
-            return arr;
-        };
-        try {
-            const items = await GitHubAPI.fetchStarredRepos("u", "t");
-            expect(items[0].full_name).toBe("a/b");
-            expect(items.partial).toBe(true);
-        } finally {
-            GitHubAPI._fetchPaginated = original;
-        }
-    });
-
-    it("fetchForkedRepos 的 filter 保留 partial", async () => {
-        const { GitHubAPI } = require("../src/import/GitHubAPI");
-        const original = GitHubAPI.fetchUserRepos;
-        GitHubAPI.fetchUserRepos = async () => {
-            const arr = [{ full_name: "a/b", fork: true }, { full_name: "c/d", fork: false }];
-            arr.partial = true;
-            return arr;
-        };
-        try {
-            const items = await GitHubAPI.fetchForkedRepos("u", "t");
-            expect(items.length).toBe(1);
-            expect(items.partial).toBe(true);
-        } finally {
-            GitHubAPI.fetchUserRepos = original;
-        }
+        // 已淘汰的最旧键不复活
+        expect(persisted["https://example.com/0"]).toBeUndefined();
+        expect(persisted[`https://example.com/${limit + 4}`]).toBeDefined();
+        BookmarkExporter._exportedCache = null;
+        Storage.remove(CONFIG.STORAGE_KEYS.BOOKMARK_EXPORTED);
     });
 });
 

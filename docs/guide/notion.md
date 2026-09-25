@@ -31,7 +31,7 @@ LD-Notion 需要 Notion 授权后才能读取工作区、创建数据库条目�
 6. 点击 `一键授权`，授权完成后跳转到回调页，脚本 / 扩展自动把 access token / refresh token 保存到浏览器本地 GM 存储。
 
 ::: warning 注意
-LD-Notion 是纯前端运行。自 v3.12.0 起，OAuth 三键（`Client Secret`、access token、refresh token）与手动 `secret_` Token 保存在浏览器本地 GM 存储中，以保证授权回调跨页面可读；AI API Key、GitHub Token 等其它敏感凭证仍走本地加密保险箱。审计日志对所有敏感键统一脱敏。该模式更适合个人自建公开集成，不适合把共享生产级 secret 放到前端。
+LD-Notion 是纯前端运行。自 v3.12.0 起，OAuth 三键（`Client Secret`、access token、refresh token）与手动 `secret_` Token 保存在浏览器本地 GM 存储中，以保证授权回调跨页面可读；AI API Key 等其它敏感凭证仍走本地加密保险箱。审计日志对所有敏感键统一脱敏。该模式更适合个人自建公开集成，不适合把共享生产级 secret 放到前端。
 :::
 
 ## 数据库属性

@@ -570,7 +570,7 @@ const BookmarkExporter = {
     },
 
     // 仅 mutate 内存缓存，不写存储（DISCOVER P3 同类修复）：循环内逐条调用避免写侧 O(N²)。
-    // 单次调用场景须紧跟 flushExported() 持久化，或用 markExportedAndFlush。与 GitHubAPI.markExported 同构。
+    // 单次调用场景须紧跟 flushExported() 持久化，或用 markExportedAndFlush。
     markExported: (bookmarkUrl) => {
         const exported = BookmarkExporter.getExported();
         exported[Utils.normalizeDedupUrl(bookmarkUrl)] = Date.now();
@@ -680,7 +680,7 @@ const BookmarkExporter = {
 
         // 过滤已导出的
         // 20260914 对账(odyssey-debug dedup-state): 远端「链接」索引是 ground truth —— 换库后
-        // 账本残留不得阻断手动导出(与 fetchTrackedPages/_exportViaGitHubExporter 同构);
+        // 账本残留不得阻断手动导出(远端「链接」索引是 ground truth, 换库场景);
         // 查询失败降级账本(旧语义, 防查询故障时重复轰炸)。
         const dedupStrict = Utils.isBookmarkDedupStrict();
         let remoteUrls = null;

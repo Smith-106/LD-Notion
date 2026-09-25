@@ -60,18 +60,20 @@ describe("P4 收敛(c16): NotionSiteUI 销毁后回调与坐标恢复", () => {
         expect(src).toMatch(/Number\.isFinite\(panelRight\)/);
     });
 
-    it("源码: 保存 finally 复位三处 touched 标记", () => {
+    // v3.17: GitHub 收藏源已移除, github-token 输入框及第三处 touched 已删除, 仅两处复位。
+    it("源码: 保存 finally 复位两处 touched 标记", () => {
         const src = fs.readFileSync("src/ui/notion-site-ui.js", "utf8");
 
-        // 三行必须连续出现(仅 finally 块内为连续序列; loadConfig 处另有 P4 注释隔开)
-        expect(src).toMatch(/#ldb-notion-api-key"\)\.dataset\.touched = "false";\s*\n\s*panel\.querySelector\("#ldb-notion-ai-api-key"\)\.dataset\.touched = "false";\s*\n\s*panel\.querySelector\("#ldb-notion-github-token"\)\.dataset\.touched = "false";/);
+        // 两行必须连续出现(仅 finally 块内为连续序列; loadConfig 处另有 P4 注释隔开)
+        expect(src).toMatch(/#ldb-notion-api-key"\)\.dataset\.touched = "false";\s*\n\s*panel\.querySelector\("#ldb-notion-ai-api-key"\)\.dataset\.touched = "false";/);
+        expect(src).not.toContain("ldb-notion-github-token");
     });
 
-    it("源码: 加载配置时两密钥输入框 touched 初始为 false", () => {
+    it("源码: 加载配置时 AI 密钥输入框 touched 初始为 false", () => {
         const src = fs.readFileSync("src/ui/notion-site-ui.js", "utf8");
 
         expect(src).toMatch(/#ldb-notion-ai-api-key"\)\.value = "";\s*\n\s*\/\/ P4 收敛[^\n]*\n\s*panel\.querySelector\("#ldb-notion-ai-api-key"\)\.dataset\.touched = "false";/);
-        expect(src).toMatch(/#ldb-notion-github-token"\)\.value = "";\s*\n\s*panel\.querySelector\("#ldb-notion-github-token"\)\.dataset\.touched = "false";/);
+        expect(src).not.toContain("ldb-notion-github-token");
     });
 });
 
@@ -115,11 +117,11 @@ describe("P4 收敛(c15): MainUI 长任务与防抖定时器", () => {
         expect(wi).not.toMatch(/if \(UI\(\)\._abortController\?\.signal\?\.aborted\) break;/);
     });
 
-    it("源码: GitHub 凭证判定经 String() 守卫(脏存储值不再抛 TypeError)", () => {
+    // v3.17: GitHub 收藏源已移除, main-ui.js 不再含 GitHub 凭证判定。
+    it("源码: main-ui 不再含 GitHub 凭证判定", () => {
         const src = fs.readFileSync("src/ui/main-ui.js", "utf8");
-        const matches = src.match(/String\(Storage\.get\(CONFIG\.STORAGE_KEYS\.GITHUB_(USERNAME|TOKEN), ""\) \?\? ""\)\.trim\(\)/g) || [];
-
-        expect(matches.length).toBe(4);
+        expect(src).not.toContain("GITHUB_USERNAME");
+        expect(src).not.toContain("GITHUB_TOKEN");
     });
 
     it("源码: destroy 复位列表绑定标记与选中状态", () => {

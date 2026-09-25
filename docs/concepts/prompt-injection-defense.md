@@ -1,14 +1,13 @@
 # AI Prompt Injection 多层防御
 
-LD-Notion 的 AI 助手接收用户输入和外部内容（Linux.do 帖子、GitHub README、网页摘要等），这些内容可能包含恶意 prompt injection 攻击。v3.7.0 引入了多层防御体系来隔离和净化不可信输入，v3.7.8 追加了 AI 输出 schema 校验层。
+LD-Notion 的 AI 助手接收用户输入和外部内容（Linux.do 帖子、网页摘要等），这些内容可能包含恶意 prompt injection 攻击。v3.7.0 引入了多层防御体系来隔离和净化不可信输入，v3.7.8 追加了 AI 输出 schema 校验层。
 
 ## 威胁模型
 
 攻击者可以通过以下路径注入恶意指令：
 
 1. **Linux.do 帖子内容**：帖子标题或正文中嵌入 `忽略以上指令` 类文本。
-2. **GitHub README**：仓库描述或 README 中嵌入 prompt injection payload。
-3. **浏览器书签元数据**：书签标题或 URL 中包含恶意文本。
+2. **浏览器书签元数据**：书签标题或 URL 中包含恶意文本。
 4. **用户对话输入**：用户自身输入中包含试图覆盖系统指令的文本。
 
 ## 防御层

@@ -13,8 +13,8 @@ const path = require("path");
 const USERSCRIPT_HEADER = `// ==UserScript==
 // @name         LD-Notion Hub — AI 多源知识中枢
 // @namespace    https://linux.do/
-// @version      3.16.6
-// @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，GitHub 全类型导入，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
+// @version      3.17.0
+// @description  将 Linux.do 与 Notion 深度连接：AI 对话式助手管理 Notion 工作区，批量导出帖子到 Notion / Obsidian，知乎内容导出，浏览器书签导入，精细筛选，AI 自动分类与批量打标签
 // @author       基于 flobby 和 JackLiii 的作品改编
 // @license      MIT
 // @updateURL    https://raw.githubusercontent.com/Smith-106/LD-Notion/main/LinuxDo-Bookmarks-to-Notion.user.js
@@ -25,13 +25,10 @@ const USERSCRIPT_HEADER = `// ==UserScript==
 // @match        https://notion.so/*
 // @match        https://*.notion.so/*
 // @match        https://smith-106.github.io/LD-Notion/*
-// @match        https://github.com/*
-// @match        https://www.github.com/*
-// @match        https://gist.github.com/*
 // @match        https://www.zhihu.com/*
 // @match        https://zhuanlan.zhihu.com/*
 // (audit) broad include catch-all removed; supported sites use explicit @match above.
-// Subdomain matches aligned with SiteDetector (*.linux.do / *.notion.so / gist.github.com).
+// Subdomain matches aligned with SiteDetector (*.linux.do / *.notion.so).
 // Generic sites: add Tampermonkey user @match as needed; extension still has http(s)://*/* ; @exclude retained as defense-in-depth.
 // @exclude      https://www.google.com/*
 // @exclude      https://www.google.com.hk/*
@@ -50,7 +47,6 @@ const USERSCRIPT_HEADER = `// ==UserScript==
 // @grant        GM_xmlhttpRequest
 // @grant        GM_notification
 // @grant        GM_addValueChangeListener
-// @grant        GM_setClipboard
 // @connect      api.notion.com
 // @connect      linux.do
 // @connect      *.amazonaws.com
@@ -59,10 +55,8 @@ const USERSCRIPT_HEADER = `// ==UserScript==
 // @connect      api.anthropic.com
 // @connect      generativelanguage.googleapis.com
 // @connect      api.github.com
-// @connect      github.com
-// v3.16.4: GitHub OAuth Device Flow 需直连 github.com/login/device/code 与
-// /login/oauth/access_token —— GM_xmlhttpRequest 受 @connect 白名单约束,
-// 缺此行时授权报 "not part of @connect list"(api.github.com 仅覆盖数据接口)。
+// v3.17: GitHub 收藏源已移除,github.com @connect 删除(Device Flow 下线);
+// api.github.com 保留, 仅供 UpdateChecker 自身更新检查(releases/latest)。
 // @connect      zhihu.com
 // @connect      zhuanlan.zhihu.com
 // v3.14.6 (AUD-ARCH-13): Obsidian 本地导出需 127.0.0.1/localhost —— 缺白名单时
