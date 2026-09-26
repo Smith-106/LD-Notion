@@ -32,7 +32,7 @@ describe("AT-011: Exporter.exportTopic 手动导出核心链路(Guard→API→�
             topic: { id: "77", title: "测试帖", created_at: "2026-01-01T00:00:00.000Z" },
             posts: [{ cooked: "<p>正文</p>", username: "u1", created_at: "2026-01-01T00:01:00.000Z", post_number: 1 }],
         });
-        Exporter.buildContentBlocks = async () => [{ object: "block", type: "paragraph", paragraph: { rich_text: [{ text: { content: "正文" } }] } }];
+        Exporter.buildContentBlocks = () => [{ object: "block", type: "paragraph", paragraph: { rich_text: [{ text: { content: "正文" } }] } }];
         NotionAPI.request = async (method, endpoint, data) => {
             pageCalls.push({ method, endpoint, data });
             return { id: "p-export-1" };
@@ -55,6 +55,16 @@ describe("AT-011: Exporter.exportTopic 手动导出核心链路(Guard→API→�
         expect(pageCalls.length).toBe(1);
         expect(pageCalls[0].endpoint).toBe("/pages");
         expect(Storage.isTopicExported("77")).toBe(true);
+    });
+
+    it("批量导出带正文: /pages 请求须透传 children blocks(防 null-children 丢正文)", async () => {
+        const settings = { apiKey: "k", databaseId: "db-1", exportTargetType: "database", imgMode: "link" };
+        await Exporter.exportTopic({ topic_id: "77", title: "测试帖" }, settings);
+        expect(pageCalls.length).toBe(1);
+        const children = pageCalls[0].data?.children;
+        expect(Array.isArray(children)).toBe(true);
+        expect(children.length).toBeGreaterThan(0);
+        expect(children[0]?.paragraph?.rich_text?.[0]?.text?.content).toBe("正文");
     });
 
     it("Guard 只读级: 拒绝抛权限错误, 不落账不发请求", async () => {
